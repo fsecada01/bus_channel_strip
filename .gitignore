@@ -1,0 +1,15 @@
+# Ignore Rust build artifacts
+/target/
+/xtask/target/
+
+# Ignore backups and temporary files
+**/*.rs.bk
+
+# Cargo.lock is not required for libraries, but track it if desired
+# Cargo.lock
+
+# Ignore dynamic libraries
+*.dll
+*.dylib
+*.so
+*.exe
