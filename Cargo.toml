@@ -14,9 +14,14 @@ members = ["xtask"]
 crate-type = ["cdylib"]
 
 [dependencies]
+augmented-dsp-filters = "2.5.0"
+biquad = "0.5.0"
+fundsp = "0.20.0"
+idsp = "0.18.0"
 # Remove the `assert_process_allocs` feature to allow allocations on the audio
 # thread in debug builds.
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+realfft = "3.5.0"
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 

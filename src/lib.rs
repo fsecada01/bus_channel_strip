@@ -1,5 +1,7 @@
 use nih_plug::prelude::*;
 use std::sync::Arc;
+mod api5500;
+use api5500::Api5500;
 
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
@@ -7,6 +9,8 @@ use std::sync::Arc;
 
 struct BusChannelStrip {
     params: Arc<BusChannelStripParams>,
+    /// API 5500–style input EQ module
+    eq_api5500: Api5500,
 }
 
 #[derive(Params)]
@@ -23,6 +27,7 @@ impl Default for BusChannelStrip {
     fn default() -> Self {
         Self {
             params: Arc::new(BusChannelStripParams::default()),
+            eq_api5500: Api5500::new(44100.0), // default sample rate; will be overwritten in initialize()
         }
     }
 }
@@ -104,9 +109,11 @@ impl Plugin for BusChannelStrip {
         _buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        // Resize buffers and perform other potentially expensive initialization operations here.
-        // The `reset()` function is always called right after this function. You can remove this
-        // function if you do not need it.
+        // Reinitialize the API5500 EQ with real sample rate once context is available.
+        // TODO: query actual sample rate from _context or BufferConfig
+        // Reinitialize the API5500 EQ with the actual sample rate
+        let sr = _buffer_config.sample_rate;
+        self.eq_api5500 = Api5500::new(sr);
         true
     }
 
@@ -121,10 +128,12 @@ impl Plugin for BusChannelStrip {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            // Smoothing is optionally built into the parameters themselves
-            let gain = self.params.gain.smoothed.next();
+        // 1) Input-stage EQ
+        self.eq_api5500.process(buffer);
 
+        // 2) Gain (placeholder)
+        for channel_samples in buffer.iter_samples() {
+            let gain = self.params.gain.smoothed.next();
             for sample in channel_samples {
                 *sample *= gain;
             }
