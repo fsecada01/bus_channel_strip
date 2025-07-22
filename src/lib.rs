@@ -80,7 +80,6 @@ impl Plugin for BusChannelStrip {
         names: PortNames::const_default(),
     }];
 
-
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
