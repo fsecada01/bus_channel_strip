@@ -10,7 +10,7 @@ This document tracks the agents and their roles in the development of the bus ch
 
 ## AI-Enhanced Agents
 
-- **Claude / Gemini / LLM Agents**: 
+- **Claude / Gemini / LLM Agents**:  
   - Generate, refactor, or optimize DSP logic in Rust or C++
   - Follow the signal flow: `[EQ] → [Compressor] → [Pultec] → [Dynamic EQ] → [Console/Tape]`
   - Use or suggest shaping functions:
@@ -31,4 +31,27 @@ This document tracks the agents and their roles in the development of the bus ch
 - Math shaping functions can be implemented in `src/shaping.rs` and reused across modules.
 - Git submodules or dependency scripts may be used to pull external DSP libraries.
 
-_TODO: Add agent-specific script hooks or CI triggers (e.g. for updating Airwindows modules or verifying FFI integrity)._
+---
+
+## 🖼️ GUI Design Guidance (for AI/Agents)
+
+NIH-Plug supports custom GUIs via `egui`. For photorealistic hardware emulation:
+
+- Use `egui::Image` or custom widgets to render bitmap knobs, panels, and meters.
+- Group modules visually with consistent color-coding:
+  - **EQ**: blue-gray background, cyan accents  
+  - **Compressor**: slate or black, orange knobs  
+  - **Pultec**: brass tones, gold highlights  
+  - **Dynamic EQ**: steel blue, green accents  
+  - **Console/Tape**: charcoal or oxide red tones
+
+Agents may implement:
+- Sprite-based knobs (rotary or stepped)
+- Layered GUI with static panel backgrounds and interactive zones
+- External GUI systems (e.g., `iced`, `wgpu`, `skia`) for full custom UIs
+
+Ensure GUI interactions remain performant and audio-thread safe.
+
+---
+
+_TODO: Add agent-specific script hooks or CI triggers (e.g. for updating Airwindows modules or verifying FFI integrity)._ 
