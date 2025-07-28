@@ -79,23 +79,22 @@ jobs:
           echo "=== All files in target (recursive) ==="
           find target -type f | head -30 || echo "No files in target"
 
-      # Temporarily disabled until we identify correct paths
-      # - name: Upload VST3 Asset
-      #   uses: actions/upload-release-asset@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
-      #     asset_path: target/bundled/bus_channel_strip.vst3
-      #     asset_name: bus_channel_strip.vst3
-      #     asset_content_type: application/octet-stream
+      - name: Upload VST3 Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/bundled/Bus-Channel-Strip.vst3
+          asset_name: Bus-Channel-Strip.vst3
+          asset_content_type: application/octet-stream
 
-      # - name: Upload CLAP Asset
-      #   uses: actions/upload-release-asset@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
-      #     asset_path: target/bundled/bus_channel_strip.clap
-      #     asset_name: bus_channel_strip.clap
-      #     asset_content_type: application/octet-stream
+      - name: Upload CLAP Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/bundled/Bus-Channel-Strip.clap
+          asset_name: Bus-Channel-Strip.clap
+          asset_content_type: application/octet-stream
