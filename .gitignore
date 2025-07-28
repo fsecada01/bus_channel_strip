@@ -14,3 +14,4 @@
 *.so
 *.exe
 memo.txt
+*.env
