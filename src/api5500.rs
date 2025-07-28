@@ -37,9 +37,9 @@ impl Api5500 {
     pub fn new(sample_rate: f32) -> Self {
         // Start with all-pass (flat) filters at 1 kHz
         let coeff = Coefficients::<f32>::from_params(
-            Type::AllPass,
+            Type::LowPass,
             sample_rate.hz(),
-            1000.0_f32.hz(),
+            20000.0_f32.hz(),
             Q_BUTTERWORTH_F32,
         )
         .expect("AllPass filter parameters should be valid");
@@ -65,6 +65,130 @@ impl Api5500 {
             fft_input,
             fft_spectrum,
             fft_output,
+        }
+    }
+
+    /// Update EQ parameters and recalculate filter coefficients
+    pub fn update_parameters(
+        &mut self,
+        lf_freq: f32,
+        lf_gain: f32,
+        lmf_freq: f32,
+        lmf_gain: f32,
+        lmf_q: f32,
+        mf_freq: f32,
+        mf_gain: f32,
+        mf_q: f32,
+        hmf_freq: f32,
+        hmf_gain: f32,
+        hmf_q: f32,
+        hf_freq: f32,
+        hf_gain: f32,
+    ) {
+        // Low Frequency - High Shelf
+        if lf_gain.abs() > 0.01 {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::HighShelf,
+                self.sample_rate.hz(),
+                lf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("LF filter parameters should be valid");
+            self.lf = DirectForm1::<f32>::new(coeff.set_gain(lf_gain));
+        } else {
+            // Flat response when gain is near zero
+            let coeff = Coefficients::<f32>::from_params(
+                Type::LowPass,
+                self.sample_rate.hz(),
+                lf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("LF allpass parameters should be valid");
+            self.lf = DirectForm1::<f32>::new(coeff);
+        }
+
+        // Low Mid Frequency - Bell/Peaking
+        if lmf_gain.abs() > 0.01 {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::PeakingEQ,
+                self.sample_rate.hz(),
+                lmf_freq.hz(),
+                lmf_q,
+            )
+            .expect("LMF filter parameters should be valid");
+            self.lmf = DirectForm1::<f32>::new(coeff.set_gain(lmf_gain));
+        } else {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::LowPass,
+                self.sample_rate.hz(),
+                lmf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("LMF allpass parameters should be valid");
+            self.lmf = DirectForm1::<f32>::new(coeff);
+        }
+
+        // Mid Frequency - Bell/Peaking
+        if mf_gain.abs() > 0.01 {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::PeakingEQ,
+                self.sample_rate.hz(),
+                mf_freq.hz(),
+                mf_q,
+            )
+            .expect("MF filter parameters should be valid");
+            self.mf = DirectForm1::<f32>::new(coeff.set_gain(mf_gain));
+        } else {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::LowPass,
+                self.sample_rate.hz(),
+                mf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("MF allpass parameters should be valid");
+            self.mf = DirectForm1::<f32>::new(coeff);
+        }
+
+        // High Mid Frequency - Bell/Peaking
+        if hmf_gain.abs() > 0.01 {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::PeakingEQ,
+                self.sample_rate.hz(),
+                hmf_freq.hz(),
+                hmf_q,
+            )
+            .expect("HMF filter parameters should be valid");
+            self.hmf = DirectForm1::<f32>::new(coeff.set_gain(hmf_gain));
+        } else {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::LowPass,
+                self.sample_rate.hz(),
+                hmf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("HMF allpass parameters should be valid");
+            self.hmf = DirectForm1::<f32>::new(coeff);
+        }
+
+        // High Frequency - Low Shelf
+        if hf_gain.abs() > 0.01 {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::LowShelf,
+                self.sample_rate.hz(),
+                hf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("HF filter parameters should be valid");
+            self.hf = DirectForm1::<f32>::new(coeff.set_gain(hf_gain));
+        } else {
+            let coeff = Coefficients::<f32>::from_params(
+                Type::LowPass,
+                self.sample_rate.hz(),
+                hf_freq.hz(),
+                Q_BUTTERWORTH_F32,
+            )
+            .expect("HF allpass parameters should be valid");
+            self.hf = DirectForm1::<f32>::new(coeff);
         }
     }
 

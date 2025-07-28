@@ -1,7 +1,38 @@
 use nih_plug::prelude::*;
+// use nih_plug_egui::EguiState;  // Temporarily disabled for core build test
 use std::sync::Arc;
 mod api5500;
 use api5500::Api5500;
+mod buttercomp2;
+use buttercomp2::ButterComp2;
+mod pultec;
+use pultec::PultecEQ;
+mod dynamic_eq;
+use dynamic_eq::DynamicEQ;
+mod transformer;
+use transformer::{TransformerModule, TransformerModel};
+// mod editor;  // Temporarily disabled for core build test
+
+/// Module identifiers for reordering
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Enum)]
+pub enum ModuleType {
+    #[name = "API5500 EQ"]
+    Api5500EQ,
+    #[name = "ButterComp2"]
+    ButterComp2,
+    #[name = "Pultec EQ"]
+    PultecEQ,
+    #[name = "Dynamic EQ"]
+    DynamicEQ,
+    #[name = "Transformer"]
+    Transformer,
+}
+
+impl Default for ModuleType {
+    fn default() -> Self {
+        Self::Api5500EQ
+    }
+}
 
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
@@ -11,6 +42,21 @@ struct BusChannelStrip {
     params: Arc<BusChannelStripParams>,
     /// API 5500–style input EQ module
     eq_api5500: Api5500,
+    /// ButterComp2 compressor module
+    compressor: ButterComp2,
+    /// Pultec-style EQ module
+    pultec: PultecEQ,
+    /// Dynamic EQ module
+    dynamic_eq: DynamicEQ,
+    /// Transformer coloration module
+    transformer: TransformerModule,
+    
+    /// Buffers for module reordering
+    temp_buffer_1: Vec<Vec<f32>>,
+    temp_buffer_2: Vec<Vec<f32>>,
+    
+    // /// GUI state
+    // editor_state: Arc<EguiState>,  // Temporarily disabled for core build test
 }
 
 #[derive(Params)]
@@ -21,6 +67,186 @@ struct BusChannelStripParams {
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
     #[id = "gain"]
     pub gain: FloatParam,
+
+    // API5500 EQ Parameters
+    #[id = "eq_bypass"]
+    pub eq_bypass: BoolParam,
+    
+    // Low Frequency (LF) - Shelving
+    #[id = "lf_freq"]
+    pub lf_freq: FloatParam,
+    #[id = "lf_gain"]
+    pub lf_gain: FloatParam,
+    
+    // Low Mid Frequency (LMF) - Parametric
+    #[id = "lmf_freq"]
+    pub lmf_freq: FloatParam,
+    #[id = "lmf_gain"]
+    pub lmf_gain: FloatParam,
+    #[id = "lmf_q"]
+    pub lmf_q: FloatParam,
+    
+    // Mid Frequency (MF) - Parametric
+    #[id = "mf_freq"]
+    pub mf_freq: FloatParam,
+    #[id = "mf_gain"]
+    pub mf_gain: FloatParam,
+    #[id = "mf_q"]
+    pub mf_q: FloatParam,
+    
+    // High Mid Frequency (HMF) - Parametric
+    #[id = "hmf_freq"]
+    pub hmf_freq: FloatParam,
+    #[id = "hmf_gain"]
+    pub hmf_gain: FloatParam,
+    #[id = "hmf_q"]
+    pub hmf_q: FloatParam,
+    
+    // High Frequency (HF) - Shelving
+    #[id = "hf_freq"]
+    pub hf_freq: FloatParam,
+    #[id = "hf_gain"]
+    pub hf_gain: FloatParam,
+
+    // ButterComp2 Compressor Parameters
+    #[id = "comp_bypass"]
+    pub comp_bypass: BoolParam,
+    #[id = "comp_compress"]
+    pub comp_compress: FloatParam,
+    #[id = "comp_output"]
+    pub comp_output: FloatParam,
+    #[id = "comp_dry_wet"]
+    pub comp_dry_wet: FloatParam,
+
+    // Pultec EQ Parameters
+    #[id = "pultec_bypass"]
+    pub pultec_bypass: BoolParam,
+    #[id = "pultec_lf_boost_freq"]
+    pub pultec_lf_boost_freq: FloatParam,
+    #[id = "pultec_lf_boost_gain"]
+    pub pultec_lf_boost_gain: FloatParam,
+    #[id = "pultec_lf_cut_gain"]
+    pub pultec_lf_cut_gain: FloatParam,
+    #[id = "pultec_hf_boost_freq"]
+    pub pultec_hf_boost_freq: FloatParam,
+    #[id = "pultec_hf_boost_gain"]
+    pub pultec_hf_boost_gain: FloatParam,
+    #[id = "pultec_hf_boost_bandwidth"]
+    pub pultec_hf_boost_bandwidth: FloatParam,
+    #[id = "pultec_hf_cut_freq"]
+    pub pultec_hf_cut_freq: FloatParam,
+    #[id = "pultec_hf_cut_gain"]
+    pub pultec_hf_cut_gain: FloatParam,
+    #[id = "pultec_tube_drive"]
+    pub pultec_tube_drive: FloatParam,
+
+    // Dynamic EQ Parameters
+    #[id = "dyneq_bypass"]
+    pub dyneq_bypass: BoolParam,
+
+    // Band 1 (Low) - 200Hz default
+    #[id = "dyneq_band1_freq"]
+    pub dyneq_band1_freq: FloatParam,
+    #[id = "dyneq_band1_threshold"]
+    pub dyneq_band1_threshold: FloatParam,
+    #[id = "dyneq_band1_ratio"]
+    pub dyneq_band1_ratio: FloatParam,
+    #[id = "dyneq_band1_attack"]
+    pub dyneq_band1_attack: FloatParam,
+    #[id = "dyneq_band1_release"]
+    pub dyneq_band1_release: FloatParam,
+    #[id = "dyneq_band1_gain"]
+    pub dyneq_band1_gain: FloatParam,
+    #[id = "dyneq_band1_q"]
+    pub dyneq_band1_q: FloatParam,
+    #[id = "dyneq_band1_enabled"]
+    pub dyneq_band1_enabled: BoolParam,
+
+    // Band 2 (Low-Mid) - 800Hz default
+    #[id = "dyneq_band2_freq"]
+    pub dyneq_band2_freq: FloatParam,
+    #[id = "dyneq_band2_threshold"]
+    pub dyneq_band2_threshold: FloatParam,
+    #[id = "dyneq_band2_ratio"]
+    pub dyneq_band2_ratio: FloatParam,
+    #[id = "dyneq_band2_attack"]
+    pub dyneq_band2_attack: FloatParam,
+    #[id = "dyneq_band2_release"]
+    pub dyneq_band2_release: FloatParam,
+    #[id = "dyneq_band2_gain"]
+    pub dyneq_band2_gain: FloatParam,
+    #[id = "dyneq_band2_q"]
+    pub dyneq_band2_q: FloatParam,
+    #[id = "dyneq_band2_enabled"]
+    pub dyneq_band2_enabled: BoolParam,
+
+    // Band 3 (High-Mid) - 3kHz default
+    #[id = "dyneq_band3_freq"]
+    pub dyneq_band3_freq: FloatParam,
+    #[id = "dyneq_band3_threshold"]
+    pub dyneq_band3_threshold: FloatParam,
+    #[id = "dyneq_band3_ratio"]
+    pub dyneq_band3_ratio: FloatParam,
+    #[id = "dyneq_band3_attack"]
+    pub dyneq_band3_attack: FloatParam,
+    #[id = "dyneq_band3_release"]
+    pub dyneq_band3_release: FloatParam,
+    #[id = "dyneq_band3_gain"]
+    pub dyneq_band3_gain: FloatParam,
+    #[id = "dyneq_band3_q"]
+    pub dyneq_band3_q: FloatParam,
+    #[id = "dyneq_band3_enabled"]
+    pub dyneq_band3_enabled: BoolParam,
+
+    // Band 4 (High) - 8kHz default
+    #[id = "dyneq_band4_freq"]
+    pub dyneq_band4_freq: FloatParam,
+    #[id = "dyneq_band4_threshold"]
+    pub dyneq_band4_threshold: FloatParam,
+    #[id = "dyneq_band4_ratio"]
+    pub dyneq_band4_ratio: FloatParam,
+    #[id = "dyneq_band4_attack"]
+    pub dyneq_band4_attack: FloatParam,
+    #[id = "dyneq_band4_release"]
+    pub dyneq_band4_release: FloatParam,
+    #[id = "dyneq_band4_gain"]
+    pub dyneq_band4_gain: FloatParam,
+    #[id = "dyneq_band4_q"]
+    pub dyneq_band4_q: FloatParam,
+    #[id = "dyneq_band4_enabled"]
+    pub dyneq_band4_enabled: BoolParam,
+
+    // Transformer Module Parameters
+    #[id = "transformer_bypass"]
+    pub transformer_bypass: BoolParam,
+    #[id = "transformer_model"]
+    pub transformer_model: EnumParam<TransformerModel>,
+    #[id = "transformer_input_drive"]
+    pub transformer_input_drive: FloatParam,
+    #[id = "transformer_input_saturation"]
+    pub transformer_input_saturation: FloatParam,
+    #[id = "transformer_output_drive"]
+    pub transformer_output_drive: FloatParam,
+    #[id = "transformer_output_saturation"]
+    pub transformer_output_saturation: FloatParam,
+    #[id = "transformer_low_response"]
+    pub transformer_low_response: FloatParam,
+    #[id = "transformer_high_response"]
+    pub transformer_high_response: FloatParam,
+    #[id = "transformer_compression"]
+    pub transformer_compression: FloatParam,
+
+    // Module Ordering Parameters
+    #[id = "module_order_1"]
+    pub module_order_1: EnumParam<ModuleType>,
+    #[id = "module_order_2"]
+    pub module_order_2: EnumParam<ModuleType>,
+    #[id = "module_order_3"]
+    pub module_order_3: EnumParam<ModuleType>,
+    #[id = "module_order_4"]
+    pub module_order_4: EnumParam<ModuleType>,
+    #[id = "module_order_5"]
+    pub module_order_5: EnumParam<ModuleType>,
 }
 
 impl Default for BusChannelStrip {
@@ -28,6 +254,13 @@ impl Default for BusChannelStrip {
         Self {
             params: Arc::new(BusChannelStripParams::default()),
             eq_api5500: Api5500::new(44100.0), // default sample rate; will be overwritten in initialize()
+            compressor: ButterComp2::new(44100.0), // default sample rate; will be overwritten in initialize()
+            pultec: PultecEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
+            dynamic_eq: DynamicEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
+            transformer: TransformerModule::new(44100.0), // default sample rate; will be overwritten in initialize()
+            temp_buffer_1: Vec::new(),
+            temp_buffer_2: Vec::new(),
+            // editor_state: EguiState::from_size(1000, 600),  // Temporarily disabled for core build test
         }
     }
 }
@@ -58,6 +291,466 @@ impl Default for BusChannelStripParams {
             // `.with_step_size(0.1)` function to get internal rounding.
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+
+            // API5500 EQ Parameters
+            eq_bypass: BoolParam::new("EQ Bypass", false),
+
+            // Low Frequency (LF) - Shelving at 100Hz
+            lf_freq: FloatParam::new(
+                "LF Freq",
+                100.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 400.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            lf_gain: FloatParam::new(
+                "LF Gain",
+                0.0,
+                FloatRange::Linear { min: -15.0, max: 15.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            // Low Mid Frequency (LMF) - Parametric at 200Hz
+            lmf_freq: FloatParam::new(
+                "LMF Freq",
+                200.0,
+                FloatRange::Skewed {
+                    min: 50.0,
+                    max: 2000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            lmf_gain: FloatParam::new(
+                "LMF Gain",
+                0.0,
+                FloatRange::Linear { min: -15.0, max: 15.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+            
+            lmf_q: FloatParam::new(
+                "LMF Q",
+                0.7,
+                FloatRange::Skewed {
+                    min: 0.1,
+                    max: 10.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_step_size(0.01),
+
+            // Mid Frequency (MF) - Parametric at 1kHz
+            mf_freq: FloatParam::new(
+                "MF Freq",
+                1000.0,
+                FloatRange::Skewed {
+                    min: 200.0,
+                    max: 8000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            mf_gain: FloatParam::new(
+                "MF Gain",
+                0.0,
+                FloatRange::Linear { min: -15.0, max: 15.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+            
+            mf_q: FloatParam::new(
+                "MF Q",
+                0.7,
+                FloatRange::Skewed {
+                    min: 0.1,
+                    max: 10.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_step_size(0.01),
+
+            // High Mid Frequency (HMF) - Parametric at 3kHz
+            hmf_freq: FloatParam::new(
+                "HMF Freq",
+                3000.0,
+                FloatRange::Skewed {
+                    min: 1000.0,
+                    max: 15000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            hmf_gain: FloatParam::new(
+                "HMF Gain",
+                0.0,
+                FloatRange::Linear { min: -15.0, max: 15.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+            
+            hmf_q: FloatParam::new(
+                "HMF Q",
+                0.7,
+                FloatRange::Skewed {
+                    min: 0.1,
+                    max: 10.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_step_size(0.01),
+
+            // High Frequency (HF) - Shelving at 10kHz
+            hf_freq: FloatParam::new(
+                "HF Freq",
+                10000.0,
+                FloatRange::Skewed {
+                    min: 3000.0,
+                    max: 20000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            hf_gain: FloatParam::new(
+                "HF Gain",
+                0.0,
+                FloatRange::Linear { min: -15.0, max: 15.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            // ButterComp2 Compressor Parameters
+            comp_bypass: BoolParam::new("Comp Bypass", false),
+            
+            comp_compress: FloatParam::new(
+                "Compress",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            comp_output: FloatParam::new(
+                "Comp Output",
+                0.5, // 0.5 = unity gain
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            comp_dry_wet: FloatParam::new(
+                "Comp Mix",
+                1.0, // 1.0 = fully wet
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            // Pultec EQ Parameters
+            pultec_bypass: BoolParam::new("Pultec Bypass", false),
+            
+            pultec_lf_boost_freq: FloatParam::new(
+                "LF Boost Freq",
+                60.0,
+                FloatRange::Linear { min: 20.0, max: 100.0 },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            pultec_lf_boost_gain: FloatParam::new(
+                "LF Boost",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            pultec_lf_cut_gain: FloatParam::new(
+                "LF Atten", // "Attenuation" like the original
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            pultec_hf_boost_freq: FloatParam::new(
+                "HF Boost Freq",
+                10000.0,
+                FloatRange::Skewed {
+                    min: 5000.0,
+                    max: 20000.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            pultec_hf_boost_gain: FloatParam::new(
+                "HF Boost",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            pultec_hf_boost_bandwidth: FloatParam::new(
+                "HF Bandwidth",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            pultec_hf_cut_freq: FloatParam::new(
+                "HF Atten Freq",
+                10000.0,
+                FloatRange::Skewed {
+                    min: 5000.0,
+                    max: 20000.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            
+            pultec_hf_cut_gain: FloatParam::new(
+                "HF Atten",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            pultec_tube_drive: FloatParam::new(
+                "Tube Drive",
+                0.2, // Subtle tube character by default
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            // Dynamic EQ Parameters
+            dyneq_bypass: BoolParam::new("DynEQ Bypass", false),
+
+            // Band 1 (Low) - 200Hz
+            dyneq_band1_freq: FloatParam::new(
+                "DynEQ 1 Freq",
+                200.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 2000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+
+            dyneq_band1_threshold: FloatParam::new(
+                "DynEQ 1 Thresh",
+                0.7, // -3dB
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            dyneq_band1_ratio: FloatParam::new(
+                "DynEQ 1 Ratio",
+                0.5, // 3:1 ratio
+                FloatRange::Skewed {
+                    min: 0.0,
+                    max: 1.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            dyneq_band1_attack: FloatParam::new(
+                "DynEQ 1 Attack",
+                0.3, // ~10ms
+                FloatRange::Skewed {
+                    min: 0.0,
+                    max: 1.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            dyneq_band1_release: FloatParam::new(
+                "DynEQ 1 Release",
+                0.4, // ~100ms
+                FloatRange::Skewed {
+                    min: 0.0,
+                    max: 1.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            dyneq_band1_gain: FloatParam::new(
+                "DynEQ 1 Gain",
+                0.0,
+                FloatRange::Linear { min: -1.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            dyneq_band1_q: FloatParam::new(
+                "DynEQ 1 Q",
+                0.5, // Q = 1.0
+                FloatRange::Linear { min: 0.1, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            dyneq_band1_enabled: BoolParam::new("DynEQ 1 On", false),
+
+            // Band 2 (Low-Mid) - 800Hz (similar pattern, different defaults)
+            dyneq_band2_freq: FloatParam::new(
+                "DynEQ 2 Freq",
+                800.0,
+                FloatRange::Skewed {
+                    min: 200.0,
+                    max: 5000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+
+            dyneq_band2_threshold: FloatParam::new("DynEQ 2 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band2_ratio: FloatParam::new("DynEQ 2 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band2_attack: FloatParam::new("DynEQ 2 Attack", 0.3, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01),
+            dyneq_band2_release: FloatParam::new("DynEQ 2 Release", 0.4, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band2_gain: FloatParam::new("DynEQ 2 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band2_q: FloatParam::new("DynEQ 2 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            dyneq_band2_enabled: BoolParam::new("DynEQ 2 On", false),
+
+            // Band 3 (High-Mid) - 3kHz
+            dyneq_band3_freq: FloatParam::new(
+                "DynEQ 3 Freq",
+                3000.0,
+                FloatRange::Skewed {
+                    min: 1000.0,
+                    max: 15000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+
+            dyneq_band3_threshold: FloatParam::new("DynEQ 3 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band3_ratio: FloatParam::new("DynEQ 3 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band3_attack: FloatParam::new("DynEQ 3 Attack", 0.2, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01), // Faster for highs
+            dyneq_band3_release: FloatParam::new("DynEQ 3 Release", 0.3, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01), // Faster for highs
+            dyneq_band3_gain: FloatParam::new("DynEQ 3 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band3_q: FloatParam::new("DynEQ 3 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            dyneq_band3_enabled: BoolParam::new("DynEQ 3 On", false),
+
+            // Band 4 (High) - 8kHz
+            dyneq_band4_freq: FloatParam::new(
+                "DynEQ 4 Freq",
+                8000.0,
+                FloatRange::Skewed {
+                    min: 3000.0,
+                    max: 20000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+
+            dyneq_band4_threshold: FloatParam::new("DynEQ 4 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band4_ratio: FloatParam::new("DynEQ 4 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band4_attack: FloatParam::new("DynEQ 4 Attack", 0.1, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01), // Very fast for highs
+            dyneq_band4_release: FloatParam::new("DynEQ 4 Release", 0.2, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01), // Fast for highs
+            dyneq_band4_gain: FloatParam::new("DynEQ 4 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band4_q: FloatParam::new("DynEQ 4 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            dyneq_band4_enabled: BoolParam::new("DynEQ 4 On", false),
+
+            // Transformer Module Parameters
+            transformer_bypass: BoolParam::new("Transformer Bypass", false),
+            
+            transformer_model: EnumParam::new("Transformer Model", TransformerModel::Vintage),
+            
+            transformer_input_drive: FloatParam::new(
+                "Input Drive",
+                0.2, // Subtle drive by default
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            transformer_input_saturation: FloatParam::new(
+                "Input Saturation",
+                0.3, // Gentle saturation
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            transformer_output_drive: FloatParam::new(
+                "Output Drive", 
+                0.1, // Very subtle by default
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            transformer_output_saturation: FloatParam::new(
+                "Output Saturation",
+                0.4, // Moderate output coloration
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            transformer_low_response: FloatParam::new(
+                "Low Response",
+                0.0, // Flat by default
+                FloatRange::Linear { min: -1.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            transformer_high_response: FloatParam::new(
+                "High Response",
+                0.0, // Flat by default
+                FloatRange::Linear { min: -1.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+            
+            transformer_compression: FloatParam::new(
+                "Transformer Compression",
+                0.3, // Gentle transformer loading
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            // Module Ordering Parameters (default signal chain)
+            module_order_1: EnumParam::new("Module Order 1", ModuleType::Api5500EQ),
+            module_order_2: EnumParam::new("Module Order 2", ModuleType::ButterComp2),
+            module_order_3: EnumParam::new("Module Order 3", ModuleType::PultecEQ),
+            module_order_4: EnumParam::new("Module Order 4", ModuleType::DynamicEQ),
+            module_order_5: EnumParam::new("Module Order 5", ModuleType::Transformer),
         }
     }
 }
@@ -103,6 +796,10 @@ impl Plugin for BusChannelStrip {
         self.params.clone()
     }
 
+    // fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+    //     editor::create_editor(self.params.clone(), self.editor_state.clone())
+    // }  // Temporarily disabled for core build test
+
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
@@ -111,15 +808,30 @@ impl Plugin for BusChannelStrip {
     ) -> bool {
         // Reinitialize the API5500 EQ with real sample rate once context is available.
         // TODO: query actual sample rate from _context or BufferConfig
-        // Reinitialize the API5500 EQ with the actual sample rate
+        // Reinitialize modules with the actual sample rate
         let sr = _buffer_config.sample_rate;
         self.eq_api5500 = Api5500::new(sr);
+        self.compressor = ButterComp2::new(sr);
+        self.pultec = PultecEQ::new(sr);
+        self.dynamic_eq = DynamicEQ::new(sr);
+        self.transformer = TransformerModule::new(sr);
+        
+        // Initialize temporary buffers for module reordering
+        let max_buffer_size = _buffer_config.max_buffer_size as usize;
+        let num_channels = _audio_io_layout.main_output_channels.unwrap().get() as usize;
+        
+        self.temp_buffer_1 = vec![vec![0.0; max_buffer_size]; num_channels];
+        self.temp_buffer_2 = vec![vec![0.0; max_buffer_size]; num_channels];
+        
         true
     }
 
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
+        self.compressor.reset();
+        self.dynamic_eq.reset();
+        self.transformer.reset();
     }
 
     fn process(
@@ -128,10 +840,120 @@ impl Plugin for BusChannelStrip {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // 1) Input-stage EQ
-        self.eq_api5500.process(buffer);
+        // 1) Update EQ parameters if needed
+        self.eq_api5500.update_parameters(
+            self.params.lf_freq.value(),
+            self.params.lf_gain.value(),
+            self.params.lmf_freq.value(),
+            self.params.lmf_gain.value(),
+            self.params.lmf_q.value(),
+            self.params.mf_freq.value(),
+            self.params.mf_gain.value(),
+            self.params.mf_q.value(),
+            self.params.hmf_freq.value(),
+            self.params.hmf_gain.value(),
+            self.params.hmf_q.value(),
+            self.params.hf_freq.value(),
+            self.params.hf_gain.value(),
+        );
 
-        // 2) Gain (placeholder)
+        // 2) Process EQ (with bypass check)
+        if !self.params.eq_bypass.value() {
+            self.eq_api5500.process(buffer);
+        }
+
+        // 3) Update and process ButterComp2 compressor
+        self.compressor.update_parameters(
+            self.params.comp_compress.value(),
+            self.params.comp_output.value(),
+            self.params.comp_dry_wet.value(),
+        );
+        
+        if !self.params.comp_bypass.value() {
+            self.compressor.process(buffer);
+        }
+
+        // 4) Update and process Pultec EQ
+        self.pultec.update_parameters(
+            self.params.pultec_lf_boost_freq.value(),
+            self.params.pultec_lf_boost_gain.value(),
+            self.params.pultec_lf_cut_gain.value(),
+            self.params.pultec_hf_boost_freq.value(),
+            self.params.pultec_hf_boost_gain.value(),
+            self.params.pultec_hf_boost_bandwidth.value(),
+            self.params.pultec_hf_cut_freq.value(),
+            self.params.pultec_hf_cut_gain.value(),
+            self.params.pultec_tube_drive.value(),
+        );
+        
+        if !self.params.pultec_bypass.value() {
+            self.pultec.process(buffer);
+        }
+
+        // 5) Update and process Dynamic EQ
+        self.dynamic_eq.update_parameters(
+            // Band 1
+            self.params.dyneq_band1_freq.value(),
+            self.params.dyneq_band1_threshold.value(),
+            map_ratio_param(self.params.dyneq_band1_ratio.value()),
+            map_time_param(self.params.dyneq_band1_attack.value(), 1.0, 100.0),
+            map_time_param(self.params.dyneq_band1_release.value(), 10.0, 1000.0),
+            self.params.dyneq_band1_gain.value() * 12.0, // ±12dB
+            map_q_param(self.params.dyneq_band1_q.value()),
+            self.params.dyneq_band1_enabled.value(),
+            
+            // Band 2
+            self.params.dyneq_band2_freq.value(),
+            self.params.dyneq_band2_threshold.value(),
+            map_ratio_param(self.params.dyneq_band2_ratio.value()),
+            map_time_param(self.params.dyneq_band2_attack.value(), 1.0, 100.0),
+            map_time_param(self.params.dyneq_band2_release.value(), 10.0, 1000.0),
+            self.params.dyneq_band2_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band2_q.value()),
+            self.params.dyneq_band2_enabled.value(),
+            
+            // Band 3
+            self.params.dyneq_band3_freq.value(),
+            self.params.dyneq_band3_threshold.value(),
+            map_ratio_param(self.params.dyneq_band3_ratio.value()),
+            map_time_param(self.params.dyneq_band3_attack.value(), 0.5, 50.0),
+            map_time_param(self.params.dyneq_band3_release.value(), 5.0, 500.0),
+            self.params.dyneq_band3_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band3_q.value()),
+            self.params.dyneq_band3_enabled.value(),
+            
+            // Band 4
+            self.params.dyneq_band4_freq.value(),
+            self.params.dyneq_band4_threshold.value(),
+            map_ratio_param(self.params.dyneq_band4_ratio.value()),
+            map_time_param(self.params.dyneq_band4_attack.value(), 0.1, 20.0),
+            map_time_param(self.params.dyneq_band4_release.value(), 1.0, 200.0),
+            self.params.dyneq_band4_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band4_q.value()),
+            self.params.dyneq_band4_enabled.value(),
+        );
+        
+        if !self.params.dyneq_bypass.value() {
+            self.dynamic_eq.process(buffer);
+        }
+
+        // 6) Update and process Transformer module
+        self.transformer.update_parameters(
+            self.params.transformer_model.value(),
+            self.params.transformer_input_drive.value(),
+            self.params.transformer_input_saturation.value(),
+            self.params.transformer_output_drive.value(),
+            self.params.transformer_output_saturation.value(),
+            self.params.transformer_low_response.value(),
+            self.params.transformer_high_response.value(),
+            self.params.transformer_compression.value(),
+        );
+        
+        if !self.params.transformer_bypass.value() {
+            self.transformer.process(buffer);
+        }
+
+        // 7) Gain (placeholder)
         for channel_samples in buffer.iter_samples() {
             let gain = self.params.gain.smoothed.next();
             for sample in channel_samples {
@@ -140,6 +962,132 @@ impl Plugin for BusChannelStrip {
         }
 
         ProcessStatus::Normal
+    }
+    
+    /// Update all module parameters
+    fn update_all_module_parameters(&mut self) {
+        // API5500 EQ parameters
+        self.eq_api5500.update_parameters(
+            self.params.lf_freq.value(),
+            self.params.lf_gain.value(),
+            self.params.lmf_freq.value(),
+            self.params.lmf_gain.value(),
+            self.params.lmf_q.value(),
+            self.params.mf_freq.value(),
+            self.params.mf_gain.value(),
+            self.params.mf_q.value(),
+            self.params.hmf_freq.value(),
+            self.params.hmf_gain.value(),
+            self.params.hmf_q.value(),
+            self.params.hf_freq.value(),
+            self.params.hf_gain.value(),
+        );
+
+        // ButterComp2 parameters
+        self.compressor.update_parameters(
+            self.params.comp_compress.value(),
+            self.params.comp_output.value(),
+            self.params.comp_dry_wet.value(),
+        );
+
+        // Pultec EQ parameters
+        self.pultec.update_parameters(
+            self.params.pultec_lf_boost_freq.value(),
+            self.params.pultec_lf_boost_gain.value(),
+            self.params.pultec_lf_cut_gain.value(),
+            self.params.pultec_hf_boost_freq.value(),
+            self.params.pultec_hf_boost_gain.value(),
+            self.params.pultec_hf_boost_bandwidth.value(),
+            self.params.pultec_hf_cut_freq.value(),
+            self.params.pultec_hf_cut_gain.value(),
+            self.params.pultec_tube_drive.value(),
+        );
+
+        // Dynamic EQ parameters
+        self.dynamic_eq.update_parameters(
+            // Band 1
+            self.params.dyneq_band1_freq.value(),
+            self.params.dyneq_band1_threshold.value(),
+            map_ratio_param(self.params.dyneq_band1_ratio.value()),
+            map_time_param(self.params.dyneq_band1_attack.value(), 1.0, 100.0),
+            map_time_param(self.params.dyneq_band1_release.value(), 10.0, 1000.0),
+            self.params.dyneq_band1_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band1_q.value()),
+            self.params.dyneq_band1_enabled.value(),
+            
+            // Band 2
+            self.params.dyneq_band2_freq.value(),
+            self.params.dyneq_band2_threshold.value(),
+            map_ratio_param(self.params.dyneq_band2_ratio.value()),
+            map_time_param(self.params.dyneq_band2_attack.value(), 1.0, 100.0),
+            map_time_param(self.params.dyneq_band2_release.value(), 10.0, 1000.0),
+            self.params.dyneq_band2_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band2_q.value()),
+            self.params.dyneq_band2_enabled.value(),
+            
+            // Band 3
+            self.params.dyneq_band3_freq.value(),
+            self.params.dyneq_band3_threshold.value(),
+            map_ratio_param(self.params.dyneq_band3_ratio.value()),
+            map_time_param(self.params.dyneq_band3_attack.value(), 0.5, 50.0),
+            map_time_param(self.params.dyneq_band3_release.value(), 5.0, 500.0),
+            self.params.dyneq_band3_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band3_q.value()),
+            self.params.dyneq_band3_enabled.value(),
+            
+            // Band 4
+            self.params.dyneq_band4_freq.value(),
+            self.params.dyneq_band4_threshold.value(),
+            map_ratio_param(self.params.dyneq_band4_ratio.value()),
+            map_time_param(self.params.dyneq_band4_attack.value(), 0.1, 20.0),
+            map_time_param(self.params.dyneq_band4_release.value(), 1.0, 200.0),
+            self.params.dyneq_band4_gain.value() * 12.0,
+            map_q_param(self.params.dyneq_band4_q.value()),
+            self.params.dyneq_band4_enabled.value(),
+        );
+
+        // Transformer parameters
+        self.transformer.update_parameters(
+            self.params.transformer_model.value(),
+            self.params.transformer_input_drive.value(),
+            self.params.transformer_input_saturation.value(),
+            self.params.transformer_output_drive.value(),
+            self.params.transformer_output_saturation.value(),
+            self.params.transformer_low_response.value(),
+            self.params.transformer_high_response.value(),
+            self.params.transformer_compression.value(),
+        );
+    }
+    
+    /// Process a single module with bypass check
+    fn process_single_module(&mut self, buffer: &mut Buffer, module_type: ModuleType) {
+        match module_type {
+            ModuleType::Api5500EQ => {
+                if !self.params.eq_bypass.value() {
+                    self.eq_api5500.process(buffer);
+                }
+            },
+            ModuleType::ButterComp2 => {
+                if !self.params.comp_bypass.value() {
+                    self.compressor.process(buffer);
+                }
+            },
+            ModuleType::PultecEQ => {
+                if !self.params.pultec_bypass.value() {
+                    self.pultec.process(buffer);
+                }
+            },
+            ModuleType::DynamicEQ => {
+                if !self.params.dyneq_bypass.value() {
+                    self.dynamic_eq.process(buffer);
+                }
+            },
+            ModuleType::Transformer => {
+                if !self.params.transformer_bypass.value() {
+                    self.transformer.process(buffer);
+                }
+            },
+        }
     }
 }
 
@@ -163,3 +1111,20 @@ impl Vst3Plugin for BusChannelStrip {
 
 nih_export_clap!(BusChannelStrip);
 nih_export_vst3!(BusChannelStrip);
+
+// Helper functions for parameter mapping
+
+/// Map 0-1 ratio parameter to 1:1 to 10:1 compression ratio
+fn map_ratio_param(param: f32) -> f32 {
+    1.0 + param * 9.0  // 1.0 to 10.0
+}
+
+/// Map 0-1 time parameter to milliseconds with min/max range
+fn map_time_param(param: f32, min_ms: f32, max_ms: f32) -> f32 {
+    min_ms + param * (max_ms - min_ms)
+}
+
+/// Map 0-1 Q parameter to 0.5 to 4.0 Q range
+fn map_q_param(param: f32) -> f32 {
+    0.5 + param * 3.5  // 0.5 to 4.0
+}

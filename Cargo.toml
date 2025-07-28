@@ -21,6 +21,7 @@ idsp = "0.18.0"
 # Remove the `assert_process_allocs` feature to allow allocations on the audio
 # thread in debug builds.
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+# nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }  # Temporarily disabled for core build test
 realfft = "3.5.0"
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
@@ -35,3 +36,6 @@ strip = "symbols"
 inherits = "release"
 debug = true
 strip = "none"
+
+[build-dependencies]
+cc = "1.0"
