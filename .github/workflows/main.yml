@@ -17,8 +17,14 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Build
-        run: cargo build --release
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libxss-dev libglu1-mesa-dev freeglut3-dev mesa-common-dev build-essential gcc g++ libx11-xcb-dev libxcb1-dev
+
+      - name: Build and bundle plugins
+        run: |
+          cargo xtask bundle bus_channel_strip --release
 
   create-release:
     needs: build
@@ -41,13 +47,32 @@ jobs:
           draft: ${{ github.ref != 'refs/heads/main' }}
           prerelease: ${{ github.ref != 'refs/heads/main' }}
 
+      - name: Install Rust (for bundling)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install system dependencies (for bundling)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libxss-dev libglu1-mesa-dev freeglut3-dev mesa-common-dev build-essential gcc g++ libx11-xcb-dev libxcb1-dev
+
+      - name: Build and bundle plugins (for release)
+        run: |
+          cargo xtask bundle bus_channel_strip --release
+
+      - name: List bundled files (debug)
+        run: |
+          echo "Contents of target directory:"
+          find target -name "*.vst3" -o -name "*.clap" -o -name "*bus_channel_strip*" | head -20
+
       - name: Upload VST3 Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/bus_channel_strip.vst3
+          asset_path: target/bundled/bus_channel_strip.vst3
           asset_name: bus_channel_strip.vst3
           asset_content_type: application/octet-stream
 
@@ -57,6 +82,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/release/bus_channel_strip.clap
+          asset_path: target/bundled/bus_channel_strip.clap
           asset_name: bus_channel_strip.clap
           asset_content_type: application/octet-stream
