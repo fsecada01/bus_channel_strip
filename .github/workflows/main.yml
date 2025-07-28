@@ -59,29 +59,43 @@ jobs:
 
       - name: Build and bundle plugins (for release)
         run: |
-          cargo xtask bundle bus_channel_strip --release
+          echo "=== Attempting to bundle with cargo xtask ==="
+          cargo xtask bundle bus_channel_strip --release || echo "Bundle command failed"
+          echo ""
+          echo "=== Trying alternative bundle command ==="
+          cargo xtask bundle --release || echo "Alternative bundle command failed"
+          echo ""
+          echo "=== Building library first ==="
+          cargo build --release
 
-      - name: List bundled files (debug)
+      - name: List all target contents (debug)
         run: |
-          echo "Contents of target directory:"
-          find target -name "*.vst3" -o -name "*.clap" -o -name "*bus_channel_strip*" | head -20
+          echo "=== Full target directory structure ==="
+          ls -la target/ || echo "No target directory"
+          echo ""
+          echo "=== Searching for plugin files ==="
+          find . -name "*.vst3" -o -name "*.clap" -o -name "*bus_channel_strip*" | head -30
+          echo ""
+          echo "=== All files in target (recursive) ==="
+          find target -type f | head -30 || echo "No files in target"
 
-      - name: Upload VST3 Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/bundled/bus_channel_strip.vst3
-          asset_name: bus_channel_strip.vst3
-          asset_content_type: application/octet-stream
+      # Temporarily disabled until we identify correct paths
+      # - name: Upload VST3 Asset
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: target/bundled/bus_channel_strip.vst3
+      #     asset_name: bus_channel_strip.vst3
+      #     asset_content_type: application/octet-stream
 
-      - name: Upload CLAP Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/bundled/bus_channel_strip.clap
-          asset_name: bus_channel_strip.clap
-          asset_content_type: application/octet-stream
+      # - name: Upload CLAP Asset
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ steps.create_release.outputs.upload_url }}
+      #     asset_path: target/bundled/bus_channel_strip.clap
+      #     asset_name: bus_channel_strip.clap
+      #     asset_content_type: application/octet-stream
