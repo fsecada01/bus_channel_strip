@@ -13,7 +13,9 @@
       "Bash(rm:*)",
       "Bash(source:*)",
       "Bash(rustc:*)",
-      "Bash(sudo apt install:*)"
+      "Bash(sudo apt install:*)",
+      "Bash(~/.cargo/bin/cargo build)",
+      "Bash(~/.cargo/bin/cargo check)"
     ],
     "deny": []
   }

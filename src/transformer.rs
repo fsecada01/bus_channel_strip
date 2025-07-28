@@ -187,7 +187,7 @@ impl TransformerModule {
         let low_gain = low_response * 3.0; // ±3dB
         if low_gain.abs() > 0.1 {
             let low_coeff = Coefficients::<f32>::from_params(
-                Type::LowShelf,
+                Type::LowShelf(low_gain),
                 self.sample_rate.hz(),
                 low_freq.hz(),
                 0.707,
@@ -206,7 +206,7 @@ impl TransformerModule {
         let high_gain = high_response * 2.0; // ±2dB
         if high_gain.abs() > 0.1 {
             let high_coeff = Coefficients::<f32>::from_params(
-                Type::HighShelf,
+                Type::HighShelf(high_gain),
                 self.sample_rate.hz(),
                 high_freq.hz(),
                 0.707,

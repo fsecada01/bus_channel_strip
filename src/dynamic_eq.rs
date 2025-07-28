@@ -1,255 +1,258 @@
+
 use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
 use nih_plug::buffer::Buffer;
+use nih_plug::prelude::Enum;
 
-/// Professional 4-band Dynamic EQ
-/// 
-/// Frequency-dependent compression that only applies EQ when signal exceeds threshold
-/// Each band has independent frequency, threshold, ratio, attack, release, and gain
-pub struct DynamicEQ {
-    sample_rate: f32,
-    bands: [DynamicBand; 4],
+// NOTE: This implementation recalculates filter coefficients for every sample,
+// which is inefficient and can cause audio artifacts. For a production-ready
+// plugin, the filter math should be implemented directly to allow for
+// efficient gain modulation.
+
+/// The mode of operation for a dynamic band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum DynamicMode {
+    /// Reduces gain when the signal is above the threshold.
+    #[name = "Compress Down"]
+    CompressDownward,
+    /// Increases gain when the signal is above the threshold.
+    #[name = "Expand Up"]
+    ExpandUpward,
+    /// Reduces gain when the signal is below the threshold.
+    #[name = "Gate"]
+    Gate,
 }
 
-/// Individual dynamic EQ band
+impl Default for DynamicMode {
+    fn default() -> Self {
+        DynamicMode::CompressDownward
+    }
+}
+
+/// A single band of dynamic equalization.
 struct DynamicBand {
-    // Filter components
-    sidechain_filter: DirectForm1<f32>,  // For detection
-    eq_filter: DirectForm1<f32>,         // For processing
-    
-    // Dynamic processing state
+    // Filters
+    sidechain_filter: DirectForm1<f32>,
+    eq_filter: DirectForm1<f32>,
+
+    // State
     envelope: f32,
-    gain_reduction: f32,
-    
-    // Parameters (stored internally for efficiency)
+    pub gain_reduction_db: f32,
+
+    // Parameters
+    sample_rate: f32,
+    mode: DynamicMode,
+    detector_freq: f32,
     frequency: f32,
-    threshold: f32,
+    q: f32,
+    threshold: f32, // Linear threshold from dB
     ratio: f32,
     attack_coeff: f32,
     release_coeff: f32,
-    make_up_gain: f32,
+    make_up_gain: f32, // Linear gain from dB
     enabled: bool,
 }
 
 impl DynamicBand {
     fn new(sample_rate: f32) -> Self {
         let flat_coeff = Coefficients::<f32>::from_params(
-            Type::LowPass,
+            Type::PeakingEQ(0.0), // Start flat
             sample_rate.hz(),
-            20000.0_f32.hz(),
+            1000.0f32.hz(),
             0.707,
-        ).expect("AllPass filter should be valid");
-        
+        )
+        .unwrap();
+
         Self {
             sidechain_filter: DirectForm1::<f32>::new(flat_coeff),
             eq_filter: DirectForm1::<f32>::new(flat_coeff),
             envelope: 0.0,
-            gain_reduction: 0.0,
+            gain_reduction_db: 0.0,
+            sample_rate,
+            mode: DynamicMode::default(),
+            detector_freq: 1000.0,
             frequency: 1000.0,
-            threshold: 0.5, // -6dB
-            ratio: 3.0,
-            attack_coeff: 0.001,
-            release_coeff: 0.0001,
-            make_up_gain: 0.0,
+            q: 0.707,
+            threshold: 1.0, // 0 dB
+            ratio: 1.0,
+            attack_coeff: 0.0,
+            release_coeff: 0.0,
+            make_up_gain: 1.0,
             enabled: false,
         }
     }
-    
-    /// Update band parameters
+
     fn update_parameters(
         &mut self,
-        sample_rate: f32,
+        mode: DynamicMode,
+        detector_freq: f32,
         frequency: f32,
-        threshold: f32,
+        q: f32,
+        threshold_db: f32,
         ratio: f32,
         attack_ms: f32,
         release_ms: f32,
-        make_up_gain: f32,
-        q: f32,
+        make_up_gain_db: f32,
         enabled: bool,
     ) {
+        self.mode = mode;
+        self.detector_freq = detector_freq;
         self.frequency = frequency;
-        self.threshold = threshold;
+        self.q = q;
+        self.threshold = 10.0f32.powf(threshold_db / 20.0);
         self.ratio = ratio;
-        self.make_up_gain = make_up_gain;
+        self.attack_coeff = (-1.0 / (attack_ms * 0.001 * self.sample_rate)).exp();
+        self.release_coeff = (-1.0 / (release_ms * 0.001 * self.sample_rate)).exp();
+        self.make_up_gain = 10.0f32.powf(make_up_gain_db / 20.0);
         self.enabled = enabled;
-        
-        // Calculate attack/release coefficients
-        self.attack_coeff = (-1.0 / (attack_ms * 0.001 * sample_rate)).exp();
-        self.release_coeff = (-1.0 / (release_ms * 0.001 * sample_rate)).exp();
-        
+
         // Update sidechain filter (for detection)
         let sidechain_coeff = Coefficients::<f32>::from_params(
-            Type::PeakingEQ(6.0),
-            sample_rate.hz(),
-            frequency.hz(),
-            q,
-        ).expect("Sidechain filter should be valid");
+            Type::PeakingEQ(6.0), // Detection boost
+            self.sample_rate.hz(),
+            self.detector_freq.hz(),
+            self.q,
+        )
+        .unwrap();
         self.sidechain_filter = DirectForm1::<f32>::new(sidechain_coeff);
-        
-        // Update EQ filter (for processing) - this will be dynamically modulated
-        let eq_coeff = Coefficients::<f32>::from_params(
-            Type::PeakingEQ,
-            sample_rate.hz(),
-            frequency.hz(),
-            q,
-        ).expect("EQ filter should be valid");
-        self.eq_filter = DirectForm1::<f32>::new(eq_coeff);
     }
-    
-    /// Process a single sample through the dynamic band
+
     fn process_sample(&mut self, input: f32) -> f32 {
         if !self.enabled {
             return input;
         }
-        
-        // 1. Sidechain detection
+
+        // 1. Sidechain detection and envelope following
         let sidechain_signal = self.sidechain_filter.run(input);
         let detection_level = sidechain_signal.abs();
-        
-        // 2. Envelope following
-        let target_envelope = detection_level;
-        if target_envelope > self.envelope {
-            // Attack
-            self.envelope = target_envelope + (self.envelope - target_envelope) * self.attack_coeff;
+
+        if detection_level > self.envelope {
+            self.envelope = detection_level + (self.envelope - detection_level) * self.attack_coeff;
         } else {
-            // Release
-            self.envelope = target_envelope + (self.envelope - target_envelope) * self.release_coeff;
+            self.envelope = detection_level + (self.envelope - detection_level) * self.release_coeff;
         }
-        
-        // 3. Calculate gain reduction
-        if self.envelope > self.threshold {
-            let over_threshold = self.envelope - self.threshold;
-            let compressed = over_threshold / self.ratio;
-            self.gain_reduction = over_threshold - compressed;
-        } else {
-            self.gain_reduction = 0.0;
+
+        // 2. Calculate gain adjustment in dB
+        let threshold_db = 20.0 * self.threshold.log10();
+        let envelope_db = 20.0 * self.envelope.log10();
+        let over_db = envelope_db - threshold_db;
+
+        let mut gain_change_db = 0.0;
+        match self.mode {
+            DynamicMode::CompressDownward => {
+                if over_db > 0.0 {
+                    gain_change_db = -over_db * (1.0 - 1.0 / self.ratio);
+                }
+            }
+            DynamicMode::ExpandUpward => {
+                if over_db > 0.0 {
+                    gain_change_db = over_db * (self.ratio - 1.0);
+                }
+            }
+            DynamicMode::Gate => {
+                if over_db < 0.0 {
+                    gain_change_db = over_db * (1.0 - 1.0 / self.ratio);
+                }
+            }
         }
-        
-        // 4. Apply dynamic gain to EQ filter
-        let dynamic_gain = -self.gain_reduction * 12.0 + self.make_up_gain; // Convert to dB
+        self.gain_reduction_db = -gain_change_db;
+
+        // 3. Apply dynamic gain to EQ filter
         let eq_coeff = Coefficients::<f32>::from_params(
-            Type::PeakingEQ,
-            44100.0_f32.hz(), // Use stored sample rate
+            Type::PeakingEQ(gain_change_db),
+            self.sample_rate.hz(),
             self.frequency.hz(),
-            0.707, // Q stored separately
-        ).expect("Dynamic EQ filter should be valid");
-        self.eq_filter = DirectForm1::<f32>::new(eq_coeff.set_gain(dynamic_gain));
-        
-        // 5. Process signal through EQ
-        self.eq_filter.run(input)
+            self.q,
+        )
+        .unwrap();
+
+        self.eq_filter = DirectForm1::<f32>::new(eq_coeff);
+
+        // 4. Process signal and apply makeup gain
+        self.eq_filter.run(input) * self.make_up_gain
+    }
+    
+    fn reset(&mut self) {
+        self.envelope = 0.0;
+        self.gain_reduction_db = 0.0;
     }
 }
 
+
+/// Professional 4-band Dynamic EQ
+pub struct DynamicEQ {
+    sample_rate: f32,
+    bands: [DynamicBand; 4],
+}
+
+// To avoid a huge parameter list, we'll create a struct for band parameters
+#[derive(Clone, Copy)]
+pub struct DynamicBandParams {
+    pub mode: DynamicMode,
+    pub detector_freq: f32,
+    pub freq: f32,
+    pub q: f32,
+    pub threshold_db: f32,
+    pub ratio: f32,
+    pub attack_ms: f32,
+    pub release_ms: f32,
+    pub gain_db: f32,
+    pub enabled: bool,
+}
+
 impl DynamicEQ {
-    /// Create new 4-band Dynamic EQ
     pub fn new(sample_rate: f32) -> Self {
         Self {
             sample_rate,
             bands: [
-                DynamicBand::new(sample_rate), // Band 1: Low
-                DynamicBand::new(sample_rate), // Band 2: Low-Mid
-                DynamicBand::new(sample_rate), // Band 3: High-Mid
-                DynamicBand::new(sample_rate), // Band 4: High
+                DynamicBand::new(sample_rate),
+                DynamicBand::new(sample_rate),
+                DynamicBand::new(sample_rate),
+                DynamicBand::new(sample_rate),
             ],
         }
     }
-    
-    /// Update parameters for all bands
-    pub fn update_parameters(
-        &mut self,
-        // Band 1 parameters
-        band1_freq: f32,
-        band1_threshold: f32,
-        band1_ratio: f32,
-        band1_attack: f32,
-        band1_release: f32,
-        band1_gain: f32,
-        band1_q: f32,
-        band1_enabled: bool,
-        
-        // Band 2 parameters
-        band2_freq: f32,
-        band2_threshold: f32,
-        band2_ratio: f32,
-        band2_attack: f32,
-        band2_release: f32,
-        band2_gain: f32,
-        band2_q: f32,
-        band2_enabled: bool,
-        
-        // Band 3 parameters
-        band3_freq: f32,
-        band3_threshold: f32,
-        band3_ratio: f32,
-        band3_attack: f32,
-        band3_release: f32,
-        band3_gain: f32,
-        band3_q: f32,
-        band3_enabled: bool,
-        
-        // Band 4 parameters
-        band4_freq: f32,
-        band4_threshold: f32,
-        band4_ratio: f32,
-        band4_attack: f32,
-        band4_release: f32,
-        band4_gain: f32,
-        band4_q: f32,
-        band4_enabled: bool,
-    ) {
-        let params = [
-            (band1_freq, band1_threshold, band1_ratio, band1_attack, band1_release, band1_gain, band1_q, band1_enabled),
-            (band2_freq, band2_threshold, band2_ratio, band2_attack, band2_release, band2_gain, band2_q, band2_enabled),
-            (band3_freq, band3_threshold, band3_ratio, band3_attack, band3_release, band3_gain, band3_q, band3_enabled),
-            (band4_freq, band4_threshold, band4_ratio, band4_attack, band4_release, band4_gain, band4_q, band4_enabled),
-        ];
-        
-        for (i, &(freq, thresh, ratio, attack, release, gain, q, enabled)) in params.iter().enumerate() {
+
+    pub fn update_parameters(&mut self, band_params: &[DynamicBandParams; 4]) {
+        for (i, params) in band_params.iter().enumerate() {
             self.bands[i].update_parameters(
-                self.sample_rate,
-                freq,
-                thresh,
-                ratio,
-                attack,
-                release,
-                gain,
-                q,
-                enabled,
+                params.mode,
+                params.detector_freq,
+                params.freq,
+                params.q,
+                params.threshold_db,
+                params.ratio,
+                params.attack_ms,
+                params.release_ms,
+                params.gain_db,
+                params.enabled,
             );
         }
     }
-    
-    /// Process audio buffer through dynamic EQ
+
     pub fn process(&mut self, buffer: &mut Buffer) {
         for samples in buffer.iter_samples() {
             for sample in samples {
                 let mut s = *sample;
-                
-                // Process through each band in series
                 for band in &mut self.bands {
                     s = band.process_sample(s);
                 }
-                
                 *sample = s;
             }
         }
     }
-    
-    /// Get gain reduction for visualization (returns [band1_gr, band2_gr, band3_gr, band4_gr])
-    pub fn get_gain_reduction(&self) -> [f32; 4] {
+
+    pub fn get_gain_reduction_db(&self) -> [f32; 4] {
         [
-            self.bands[0].gain_reduction,
-            self.bands[1].gain_reduction,
-            self.bands[2].gain_reduction,
-            self.bands[3].gain_reduction,
+            self.bands[0].gain_reduction_db,
+            self.bands[1].gain_reduction_db,
+            self.bands[2].gain_reduction_db,
+            self.bands[3].gain_reduction_db,
         ]
     }
-    
-    /// Reset all band states
+
     pub fn reset(&mut self) {
         for band in &mut self.bands {
-            band.envelope = 0.0;
-            band.gain_reduction = 0.0;
+            band.reset();
         }
     }
 }

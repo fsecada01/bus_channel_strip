@@ -1,5 +1,5 @@
 use nih_plug::buffer::Buffer;
-use std::ffi::c_void;
+
 
 // ButterComp2 FFI bindings
 #[repr(C)]
@@ -65,9 +65,10 @@ impl ButterComp2 {
     pub fn process(&mut self, buffer: &mut Buffer) {
         // Process buffer sample by sample for stereo
         for samples in buffer.iter_samples() {
-            if samples.len() >= 2 {
-                let mut left = samples[0];
-                let mut right = samples[1];
+            let mut channels: Vec<&mut f32> = samples.into_iter().collect();
+            if channels.len() >= 2 {
+                let mut left = *channels[0];
+                let mut right = *channels[1];
                 
                 unsafe {
                     buttercomp2_process_stereo(
@@ -78,8 +79,8 @@ impl ButterComp2 {
                     );
                 }
                 
-                samples[0] = left;
-                samples[1] = right;
+                *channels[0] = left;
+                *channels[1] = right;
             }
         }
     }

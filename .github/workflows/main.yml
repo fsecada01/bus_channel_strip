@@ -1,0 +1,62 @@
+name: Create VST3/CLAP Release
+
+on:
+  push:
+    branches:
+      - main
+      - 'v[0-9]+*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build
+        run: cargo build --release
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get version
+        id: get_version
+        run: echo "::set-output name=VERSION::$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)"
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          release_name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: ${{ github.ref != 'refs/heads/main' }}
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Upload VST3 Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/release/bus_channel_strip.vst3
+          asset_name: bus_channel_strip.vst3
+          asset_content_type: application/octet-stream
+
+      - name: Upload CLAP Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/release/bus_channel_strip.clap
+          asset_name: bus_channel_strip.clap
+          asset_content_type: application/octet-stream

@@ -76,12 +76,12 @@ impl PultecEQ {
         if lf_boost_gain > 0.01 {
             let boost_db = lf_boost_gain * 15.0; // 0-15dB range
             let coeff = Coefficients::<f32>::from_params(
-                Type::LowShelf,
+                Type::LowShelf(boost_db),
                 self.sample_rate.hz(),
                 lf_boost_freq.hz(),
                 0.707, // Classic Pultec Q
             ).expect("LF boost filter parameters should be valid");
-            self.lf_boost_filter = DirectForm1::<f32>::new(coeff.set_gain(boost_db));
+            self.lf_boost_filter = DirectForm1::<f32>::new(coeff);
         } else {
             // Flat response when no boost
             let coeff = Coefficients::<f32>::from_params(
@@ -98,12 +98,12 @@ impl PultecEQ {
             let cut_db = -(lf_cut_gain * 12.0); // 0 to -12dB cut
             let cut_freq = lf_boost_freq * 0.5; // Cut below boost frequency
             let coeff = Coefficients::<f32>::from_params(
-                Type::LowShelf,
+                Type::LowShelf(cut_db),
                 self.sample_rate.hz(),
                 cut_freq.hz(),
                 1.4, // Wider Q for cut
             ).expect("LF cut filter parameters should be valid");
-            self.lf_cut_filter = DirectForm1::<f32>::new(coeff.set_gain(cut_db));
+            self.lf_cut_filter = DirectForm1::<f32>::new(coeff);
         } else {
             let coeff = Coefficients::<f32>::from_params(
                 Type::LowPass,
@@ -119,12 +119,12 @@ impl PultecEQ {
             let boost_db = hf_boost_gain * 18.0; // 0-18dB range (Pultec can be generous)
             let q = 0.5 + (hf_boost_bandwidth * 2.0); // 0.5 to 2.5 Q range
             let coeff = Coefficients::<f32>::from_params(
-                Type::PeakingEQ,
+                Type::PeakingEQ(boost_db),
                 self.sample_rate.hz(),
                 hf_boost_freq.hz(),
                 q,
             ).expect("HF boost filter parameters should be valid");
-            self.hf_boost_filter = DirectForm1::<f32>::new(coeff.set_gain(boost_db));
+            self.hf_boost_filter = DirectForm1::<f32>::new(coeff);
         } else {
             let coeff = Coefficients::<f32>::from_params(
                 Type::LowPass,
@@ -139,12 +139,12 @@ impl PultecEQ {
         if hf_cut_gain > 0.01 {
             let cut_db = -(hf_cut_gain * 15.0); // 0 to -15dB cut
             let coeff = Coefficients::<f32>::from_params(
-                Type::HighShelf,
+                Type::HighShelf(cut_db),
                 self.sample_rate.hz(),
                 hf_cut_freq.hz(),
                 0.707,
             ).expect("HF cut filter parameters should be valid");
-            self.hf_cut_filter = DirectForm1::<f32>::new(coeff.set_gain(cut_db));
+            self.hf_cut_filter = DirectForm1::<f32>::new(coeff);
         } else {
             let coeff = Coefficients::<f32>::from_params(
                 Type::LowPass,
