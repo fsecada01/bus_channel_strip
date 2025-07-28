@@ -46,7 +46,7 @@ jobs:
 
       - name: Build and bundle plugins
         run: |
-          cargo xtask bundle --release --target ${{ matrix.target }}
+          cargo xtask bundle bus_channel_strip --release --target ${{ matrix.target }}
 
       - name: Create archive name
         id: archive
