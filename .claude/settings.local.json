@@ -16,7 +16,8 @@
       "Bash(sudo apt install:*)",
       "Bash(~/.cargo/bin/cargo build)",
       "Bash(~/.cargo/bin/cargo check)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebFetch(domain:github.blog)"
     ],
     "deny": []
   }

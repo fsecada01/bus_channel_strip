@@ -26,13 +26,12 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
@@ -71,7 +70,7 @@ jobs:
           ls -la
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.archive.outputs.name }}
           path: target/bundled/${{ steps.archive.outputs.name }}
@@ -81,14 +80,14 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v')
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Get version
         id: get_version
         run: echo "VERSION=$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
@@ -115,7 +114,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-linux.tar.gz/Bus-Channel-Strip-linux.tar.gz
+          asset_path: artifacts/Bus-Channel-Strip-linux.tar.gz
           asset_name: Bus-Channel-Strip-linux.tar.gz
           asset_content_type: application/gzip
 
@@ -125,7 +124,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-windows.zip/Bus-Channel-Strip-windows.zip
+          asset_path: artifacts/Bus-Channel-Strip-windows.zip
           asset_name: Bus-Channel-Strip-windows.zip
           asset_content_type: application/zip
 
@@ -135,7 +134,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-macos-intel.tar.gz/Bus-Channel-Strip-macos-intel.tar.gz
+          asset_path: artifacts/Bus-Channel-Strip-macos-intel.tar.gz
           asset_name: Bus-Channel-Strip-macos-intel.tar.gz
           asset_content_type: application/gzip
 
@@ -145,6 +144,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-macos-arm64.tar.gz/Bus-Channel-Strip-macos-arm64.tar.gz
+          asset_path: artifacts/Bus-Channel-Strip-macos-arm64.tar.gz
           asset_name: Bus-Channel-Strip-macos-arm64.tar.gz
           asset_content_type: application/gzip
