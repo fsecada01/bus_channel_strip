@@ -37,7 +37,12 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libasound2-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libxss-dev libglu1-mesa-dev freeglut3-dev mesa-common-dev build-essential gcc g++ libx11-xcb-dev libxcb1-dev
+          sudo apt-get install -y \
+            pkg-config libasound2-dev libgl1-mesa-dev libx11-dev libxcursor-dev \
+            libxrandr-dev libxi-dev libxinerama-dev libxss-dev libglu1-mesa-dev \
+            freeglut3-dev mesa-common-dev build-essential gcc g++ libx11-xcb-dev \
+            libxcb1-dev \   # existing dependencies
+            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-icccm4-dev libxcb-dri2-0-dev
 
       - name: Install MinGW for Windows cross-compilation
         if: matrix.target == 'x86_64-pc-windows-gnu'
