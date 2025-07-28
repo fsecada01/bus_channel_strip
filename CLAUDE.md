@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 This document provides context and guidelines for AI assistance with the bus channel strip plugin development.
 
 ## Project Overview
@@ -9,11 +11,13 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 **Signal Flow**: `[API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer]`
 
 **Current Status**: 
-- ✅ ALL 5 CORE MODULES IMPLEMENTED
+- ✅ ALL 5 CORE MODULES IMPLEMENTED AND FUNCTIONAL
 - ✅ MODULE REORDERING SYSTEM COMPLETE
-- ✅ GUI DESIGN DOCUMENTATION COMPLETE  
 - ✅ PROFESSIONAL PARAMETER SET (~75 parameters)
-- 🔧 **IN PROGRESS**: Fixing compilation errors and biquad API compatibility
+- ✅ ALL COMPILATION ERRORS FIXED
+- ✅ LOCAL BUILD AND BUNDLE WORKING
+- 🔧 GUI temporarily disabled (egui API compatibility issues)
+- 🔧 CI/CD pipeline needs bundle command fixes
 
 ## Development Guidelines
 
@@ -46,9 +50,12 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 
 ## Build Commands
 
-- Build: `cargo build`
-- Run tests: `cargo test`
-- Bundle plugin: `cargo xtask bundle <plugin_name>`
+- **Development build**: `cargo build`
+- **Release build**: `cargo build --release`
+- **Run tests**: `cargo test`
+- **Bundle plugin**: `cargo xtask bundle --release` (creates VST3 and CLAP in `target/bundled/`)
+- **Format code**: `cargo fmt` or `pre-commit run fmt --all-files`  
+- **Lint**: `cargo clippy --all-targets --all-features` (manual run recommended due to upstream issues)
 
 ## File Structure
 
@@ -83,6 +90,36 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - The `.set_gain()` method has been removed
 
 **Current Build Status:**
-- Core plugin functionality is complete
-- GUI temporarily disabled due to system dependencies  
-- Need to fix remaining biquad API calls in all modules
+- ✅ Core plugin functionality is complete
+- 🔧 GUI temporarily disabled due to egui API compatibility issues  
+- ✅ All biquad API compatibility issues resolved
+
+## Architecture Notes
+
+**Plugin Architecture:**
+- Built on NIH-Plug framework with ~75 automation parameters
+- 5 DSP modules with configurable processing order
+- Lock-free, allocation-free audio processing thread
+- FFI wrapper for C++ Airwindows modules via `build.rs`
+
+**Key Dependencies:**
+- `nih_plug` - Plugin framework
+- `biquad` v0.5.0 - Filter implementations (updated API)
+- `fundsp` - DSP utilities
+- `realfft` - FFT processing
+- Custom C++ FFI wrappers in `cpp/`
+
+## Known Issues & Fixes
+
+**CI/CD Pipeline:**
+- Bundle command in workflow needs update: use `cargo xtask bundle --release` 
+- Asset paths may point to directories instead of files
+- Test locally: `cargo xtask bundle --release && ls -la target/bundled/`
+
+**Biquad API Changes (RESOLVED):**
+- Filter constructors now require gain parameter: `Type::PeakingEQ(gain_db)`
+- No longer use `.set_gain()` method
+
+**GUI Status:**
+- Temporarily disabled due to egui API compatibility
+- All GUI code remains in `src/editor.rs` for future re-enabling

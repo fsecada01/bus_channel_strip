@@ -54,4 +54,32 @@ Ensure GUI interactions remain performant and audio-thread safe.
 
 ---
 
+## CI/CD Pipeline Troubleshooting
+
+**RESOLVED ISSUES:**
+
+1. **Bundle Command (FIXED):**
+   - ✅ Correct command: `cargo xtask bundle bus_channel_strip --release`
+   - The workflow was attempting `cargo xtask bundle --release` which requires package specification
+
+2. **Asset Upload Structure (FIXED):**
+   - ✅ **CLAP**: `Bus-Channel-Strip.clap` is a file - can upload directly
+   - ✅ **VST3**: `Bus-Channel-Strip.vst3` is a directory (standard VST3 bundle structure)
+   - ✅ **Solution**: Create zip archive of VST3 directory for distribution
+
+**Updated Workflow:**
+- Bundle command now uses correct syntax
+- VST3 gets zipped into `Bus-Channel-Strip-vst3.zip` before upload
+- CLAP uploads directly as file
+- Improved debugging output shows bundled structure
+
+**Local Testing Commands:**
+```bash
+cargo xtask bundle bus_channel_strip --release
+ls -la target/bundled/
+file target/bundled/Bus-Channel-Strip.clap  # Shows: ELF shared object
+file target/bundled/Bus-Channel-Strip.vst3  # Shows: directory
+find target/bundled/Bus-Channel-Strip.vst3 -type f  # Shows actual .so file
+```
+
 _TODO: Add agent-specific script hooks or CI triggers (e.g. for updating Airwindows modules or verifying FFI integrity)._ 

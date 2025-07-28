@@ -59,25 +59,24 @@ jobs:
 
       - name: Build and bundle plugins (for release)
         run: |
-          echo "=== Attempting to bundle with cargo xtask ==="
-          cargo xtask bundle bus_channel_strip --release || echo "Bundle command failed"
-          echo ""
-          echo "=== Trying alternative bundle command ==="
-          cargo xtask bundle --release || echo "Alternative bundle command failed"
-          echo ""
-          echo "=== Building library first ==="
-          cargo build --release
+          echo "=== Building and bundling plugins ==="
+          cargo xtask bundle bus_channel_strip --release
 
       - name: List all target contents (debug)
         run: |
           echo "=== Full target directory structure ==="
           ls -la target/ || echo "No target directory"
           echo ""
-          echo "=== Searching for plugin files ==="
-          find . -name "*.vst3" -o -name "*.clap" -o -name "*bus_channel_strip*" | head -30
+          echo "=== Bundled plugins ==="
+          ls -la target/bundled/ || echo "No bundled directory"
           echo ""
-          echo "=== All files in target (recursive) ==="
-          find target -type f | head -30 || echo "No files in target"
+          echo "=== VST3 bundle structure ==="
+          find target/bundled/Bus-Channel-Strip.vst3 -type f || echo "No VST3 bundle"
+
+      - name: Create VST3 zip archive
+        run: |
+          cd target/bundled
+          zip -r Bus-Channel-Strip-vst3.zip Bus-Channel-Strip.vst3
 
       - name: Upload VST3 Asset
         uses: actions/upload-release-asset@v1
@@ -85,9 +84,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: target/bundled/Bus-Channel-Strip.vst3
-          asset_name: Bus-Channel-Strip.vst3
-          asset_content_type: application/octet-stream
+          asset_path: target/bundled/Bus-Channel-Strip-vst3.zip
+          asset_name: Bus-Channel-Strip-vst3.zip
+          asset_content_type: application/zip
 
       - name: Upload CLAP Asset
         uses: actions/upload-release-asset@v1
