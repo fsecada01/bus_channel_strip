@@ -1,85 +1,34 @@
-# AGENTS
+# AI Agent Collaboration Notes
 
-This document tracks the agents and their roles in the development of the bus channel strip plugin using NIH-Plug and Airwindows-based DSP modules.
+This document provides context for AI agents collaborating on this project, outlining the current issues and a plan for resolution.
 
-## Core Agents
+## Current Task: Fix `iced` GUI Compilation Errors
 
-- **User**: Provides plugin vision, DSP design ideas, and selects target behaviors (e.g., analog modeling, soft knee compression).
-- **Developer**: Implements DSP logic in Rust using NIH-Plug. Integrates Airwindows modules via C++ FFI. Manages GUI, parameter mapping, and audio-safe architecture.
-- **CI**: Automates builds, tests, and bundling of the plugin (VST3, AU, etc.) using `cargo`, `build.rs`, and cross-platform validation.
+The project fails to build when the `gui` feature is enabled due to a number of breaking changes in the `nih-plug-iced` dependency. The errors are located in `src/editor.rs` and `src/lib.rs`.
 
-## AI-Enhanced Agents
+### Key Issues & Analysis
 
-- **Claude / Gemini / LLM Agents**:  
-  - Generate, refactor, or optimize DSP logic in Rust or C++
-  - Follow the signal flow: `[EQ] → [Compressor] → [Pultec] → [Dynamic EQ] → [Console/Tape]`
-  - Use or suggest shaping functions:
-    - `sigmoid(x)` / `tanh(x)` for soft knees and saturation
-    - `poly(x) + log(x)` for filter or tone control curves
-    - `log2(x)`, `exp(x)` for perceptual/gain scaling
-  - Can assist in creating or modifying:
-    - `build.rs` for FFI compilation
-    - FFI wrappers (`cpp/*.cpp`) for Airwindows modules
-    - GUI layout using `egui`
-    - Parameter bindings with `#[derive(Params)]`
+1.  **`IcedEditor` Trait Mismatch**: The implementation of the `IcedEditor` trait in `src/editor.rs` is outdated. The signatures for the `new`, `update`, and `style` methods do not match the versions in the current `nih-plug-iced` API.
 
-## Development Standards
+2.  **Deprecated Styling System**: The custom styling logic in the `style` module at the bottom of `src/editor.rs` uses a deprecated `StyleSheet` trait. The new API appears to use a `Theme` enum returned from a `style` method on the `IcedEditor` trait itself.
 
-- All real-time audio processing must be **lock-free** and **allocation-free**.
-- Parameters must be automation-safe and uniquely identified.
-- Airwindows modules must be wrapped in FFI-safe C++ using `extern "C"` interface.
-- Math shaping functions can be implemented in `src/shaping.rs` and reused across modules.
-- Git submodules or dependency scripts may be used to pull external DSP libraries.
+3.  **Broken Parameter Update Logic**: The `update` function attempts to handle a `ParamMessage` by accessing fields (`param_id`, `normalized_value`) that no longer exist on the struct. The logic to find the parameter pointer and send the update to the `GuiContext` is also incorrect.
 
----
+4.  **Rust Borrow-Checker Violations**: The `view` method in `src/editor.rs` creates multiple mutable borrows of `self` by calling helper methods (e.g., `self.api5500_module()`) inside the UI construction, which also mutably borrows `self.scrollable_state`. This is a fundamental ownership issue that needs to be refactored.
 
-## 🖼️ GUI Design Guidance (for AI/Agents)
+5.  **Incorrect `GuiContext` Creation**: In `src/lib.rs`, the `editor` function is passing the wrong type to `editor::create`. It needs to call `async_executor.create_gui_context()` to get the required `Arc<dyn GuiContext>`.
 
-NIH-Plug supports custom GUIs via `egui`. For photorealistic hardware emulation:
+### Recommended Plan of Action
 
-- Use `egui::Image` or custom widgets to render bitmap knobs, panels, and meters.
-- Group modules visually with consistent color-coding:
-  - **EQ**: blue-gray background, cyan accents  
-  - **Compressor**: slate or black, orange knobs  
-  - **Pultec**: brass tones, gold highlights  
-  - **Dynamic EQ**: steel blue, green accents  
-  - **Console/Tape**: charcoal or oxide red tones
+1.  **Fix `lib.rs`**: Correct the `editor` function to properly create the `GuiContext` by calling `async_executor.create_gui_context()`.
 
-Agents may implement:
-- Sprite-based knobs (rotary or stepped)
-- Layered GUI with static panel backgrounds and interactive zones
-- External GUI systems (e.g., `iced`, `wgpu`, `skia`) for full custom UIs
+2.  **Refactor `editor.rs`**:
+    *   **Correct `IcedEditor` Implementation**:
+        *   Update the `new` function signature to match the trait.
+        *   Update the `update` function signature and rewrite the parameter update logic to use the correct fields from `ParamMessage` and the correct `GuiContext` methods.
+        *   Implement the `style` method on `IcedEditor` to return a `Theme`, and remove the old `style` module.
+    *   **Resolve Borrow-Checker Errors**:
+        *   Refactor the `view` method. The helper methods for building UI modules (`api5500_module`, etc.) should not take `&mut self`.
+        *   Instead, the `view` method should call these helpers once to get the UI elements, and then construct the final view with them. This will prevent the multiple mutable borrow errors.
 
-Ensure GUI interactions remain performant and audio-thread safe.
-
----
-
-## CI/CD Pipeline Troubleshooting
-
-**RESOLVED ISSUES:**
-
-1. **Bundle Command (FIXED):**
-   - ✅ Correct command: `cargo xtask bundle bus_channel_strip --release`
-   - The workflow was attempting `cargo xtask bundle --release` which requires package specification
-
-2. **Asset Upload Structure (FIXED):**
-   - ✅ **CLAP**: `Bus-Channel-Strip.clap` is a file - can upload directly
-   - ✅ **VST3**: `Bus-Channel-Strip.vst3` is a directory (standard VST3 bundle structure)
-   - ✅ **Solution**: Create zip archive of VST3 directory for distribution
-
-**Updated Workflow:**
-- Bundle command now uses correct syntax
-- VST3 gets zipped into `Bus-Channel-Strip-vst3.zip` before upload
-- CLAP uploads directly as file
-- Improved debugging output shows bundled structure
-
-**Local Testing Commands:**
-```bash
-cargo xtask bundle bus_channel_strip --release
-ls -la target/bundled/
-file target/bundled/Bus-Channel-Strip.clap  # Shows: ELF shared object
-file target/bundled/Bus-Channel-Strip.vst3  # Shows: directory
-find target/bundled/Bus-Channel-Strip.vst3 -type f  # Shows actual .so file
-```
-
-_TODO: Add agent-specific script hooks or CI triggers (e.g. for updating Airwindows modules or verifying FFI integrity)._ 
+This comprehensive approach should resolve all the compilation errors and get the GUI working again.

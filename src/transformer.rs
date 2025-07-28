@@ -160,15 +160,15 @@ impl TransformerModule {
     ) {
         self.model = model;
         
-        // Input transformer settings
-        self.input_transformer.drive_gain = 1.0 + input_drive * 2.0; // 1x to 3x gain
-        self.input_transformer.saturation_amount = input_saturation;
-        self.input_transformer.compression_amount = transformer_compression * 0.5; // Less compression on input
+        // Input transformer settings - much gentler
+        self.input_transformer.drive_gain = 1.0 + input_drive * 0.8; // 1x to 1.8x gain
+        self.input_transformer.saturation_amount = input_saturation * 0.6; // Reduce saturation
+        self.input_transformer.compression_amount = transformer_compression * 0.3; // Less compression on input
         
-        // Output transformer settings
-        self.output_transformer.drive_gain = 1.0 + output_drive * 1.5; // 1x to 2.5x gain
-        self.output_transformer.saturation_amount = output_saturation;
-        self.output_transformer.compression_amount = transformer_compression;
+        // Output transformer settings - also gentler
+        self.output_transformer.drive_gain = 1.0 + output_drive * 0.6; // 1x to 1.6x gain
+        self.output_transformer.saturation_amount = output_saturation * 0.5; // Reduce saturation
+        self.output_transformer.compression_amount = transformer_compression * 0.7;
         
         // Update frequency response based on transformer model
         self.update_frequency_response(low_frequency_response, high_frequency_response);

@@ -1,19 +1,37 @@
 use nih_plug::prelude::*;
-// use nih_plug_egui::EguiState;  // Temporarily disabled due to egui API compatibility
+#[cfg(feature = "gui")]
+use nih_plug_iced::IcedState;
 use std::sync::Arc;
 mod shaping;
 mod spectral;
+
+#[cfg(feature = "api5500")]
 mod api5500;
+#[cfg(feature = "api5500")]
 use api5500::Api5500;
+
+#[cfg(feature = "buttercomp2")]
 mod buttercomp2;
+#[cfg(feature = "buttercomp2")]
 use buttercomp2::ButterComp2;
+
+#[cfg(feature = "pultec")]
 mod pultec;
+#[cfg(feature = "pultec")]
 use pultec::PultecEQ;
+
+#[cfg(feature = "dynamic_eq")]
 mod dynamic_eq;
+#[cfg(feature = "dynamic_eq")]
 use dynamic_eq::{DynamicEQ, DynamicBandParams, DynamicMode};
+
+#[cfg(feature = "transformer")]
 mod transformer;
+#[cfg(feature = "transformer")]
 use transformer::{TransformerModule, TransformerModel};
-// mod editor;  // Temporarily disabled due to egui API compatibility issues
+
+#[cfg(feature = "gui")]
+mod editor;
 
 /// Module identifiers for reordering
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Enum)]
@@ -43,22 +61,28 @@ impl Default for ModuleType {
 struct BusChannelStrip {
     params: Arc<BusChannelStripParams>,
     /// API 5500–style input EQ module
+    #[cfg(feature = "api5500")]
     eq_api5500: Api5500,
     /// ButterComp2 compressor module
+    #[cfg(feature = "buttercomp2")]
     compressor: ButterComp2,
     /// Pultec-style EQ module
+    #[cfg(feature = "pultec")]
     pultec: PultecEQ,
     /// Dynamic EQ module
+    #[cfg(feature = "dynamic_eq")]
     dynamic_eq: DynamicEQ,
     /// Transformer coloration module
+    #[cfg(feature = "transformer")]
     transformer: TransformerModule,
     
     /// Buffers for module reordering
     temp_buffer_1: Vec<Vec<f32>>,
     temp_buffer_2: Vec<Vec<f32>>,
     
-    // /// GUI state  
-    // editor_state: Arc<EguiState>,  // Temporarily disabled due to egui API compatibility
+    /// GUI state  
+    #[cfg(feature = "gui")]
+    editor_state: Arc<IcedState>,
 }
 
 #[derive(Params)]
@@ -142,95 +166,136 @@ struct BusChannelStripParams {
     #[id = "pultec_tube_drive"]
     pub pultec_tube_drive: FloatParam,
 
+    #[cfg(feature = "dynamic_eq")]
     // Dynamic EQ Parameters
     #[id = "dyneq_bypass"]
     pub dyneq_bypass: BoolParam,
 
+    #[cfg(feature = "dynamic_eq")]
     // Band 1 (Low) - 200Hz default
     #[id = "dyneq_band1_freq"]
     pub dyneq_band1_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_threshold"]
     pub dyneq_band1_threshold: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_ratio"]
     pub dyneq_band1_ratio: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_attack"]
     pub dyneq_band1_attack: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_release"]
     pub dyneq_band1_release: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_gain"]
     pub dyneq_band1_gain: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_q"]
     pub dyneq_band1_q: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_enabled"]
     pub dyneq_band1_enabled: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_detector_freq"]
     pub dyneq_band1_detector_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_mode"]
     pub dyneq_band1_mode: EnumParam<DynamicMode>,
 
+    #[cfg(feature = "dynamic_eq")]
     // Band 2 (Low-Mid) - 800Hz default
     #[id = "dyneq_band2_freq"]
     pub dyneq_band2_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_threshold"]
     pub dyneq_band2_threshold: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_ratio"]
     pub dyneq_band2_ratio: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_attack"]
     pub dyneq_band2_attack: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_release"]
     pub dyneq_band2_release: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_gain"]
     pub dyneq_band2_gain: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_q"]
     pub dyneq_band2_q: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_enabled"]
     pub dyneq_band2_enabled: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_detector_freq"]
     pub dyneq_band2_detector_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_mode"]
     pub dyneq_band2_mode: EnumParam<DynamicMode>,
 
+    #[cfg(feature = "dynamic_eq")]
     // Band 3 (High-Mid) - 3kHz default
     #[id = "dyneq_band3_freq"]
     pub dyneq_band3_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_threshold"]
     pub dyneq_band3_threshold: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_ratio"]
     pub dyneq_band3_ratio: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_attack"]
     pub dyneq_band3_attack: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_release"]
     pub dyneq_band3_release: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_gain"]
     pub dyneq_band3_gain: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_q"]
     pub dyneq_band3_q: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_enabled"]
     pub dyneq_band3_enabled: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_detector_freq"]
     pub dyneq_band3_detector_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_mode"]
     pub dyneq_band3_mode: EnumParam<DynamicMode>,
 
+    #[cfg(feature = "dynamic_eq")]
     // Band 4 (High) - 8kHz default
     #[id = "dyneq_band4_freq"]
     pub dyneq_band4_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_threshold"]
     pub dyneq_band4_threshold: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_ratio"]
     pub dyneq_band4_ratio: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_attack"]
     pub dyneq_band4_attack: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_release"]
     pub dyneq_band4_release: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_gain"]
     pub dyneq_band4_gain: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_q"]
     pub dyneq_band4_q: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_enabled"]
     pub dyneq_band4_enabled: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_detector_freq"]
     pub dyneq_band4_detector_freq: FloatParam,
+    #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_mode"]
     pub dyneq_band4_mode: EnumParam<DynamicMode>,
 
@@ -271,14 +336,20 @@ impl Default for BusChannelStrip {
     fn default() -> Self {
         Self {
             params: Arc::new(BusChannelStripParams::default()),
+            #[cfg(feature = "api5500")]
             eq_api5500: Api5500::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "buttercomp2")]
             compressor: ButterComp2::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "pultec")]
             pultec: PultecEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "dynamic_eq")]
             dynamic_eq: DynamicEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "transformer")]
             transformer: TransformerModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             temp_buffer_1: Vec::new(),
             temp_buffer_2: Vec::new(),
-            // editor_state: EguiState::from_size(1000, 600),  // Temporarily disabled due to egui API compatibility
+            #[cfg(feature = "gui")]
+            editor_state: editor::default_state(),
         }
     }
 }
@@ -561,9 +632,11 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             // Dynamic EQ Parameters
             dyneq_bypass: BoolParam::new("DynEQ Bypass", false),
 
+            #[cfg(feature = "dynamic_eq")]
             // Band 1 (Low) - 200Hz
             dyneq_band1_freq: FloatParam::new(
                 "DynEQ 1 Freq",
@@ -577,6 +650,7 @@ impl Default for BusChannelStripParams {
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_threshold: FloatParam::new(
                 "DynEQ 1 Thresh",
                 0.7, // -3dB
@@ -585,6 +659,7 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_ratio: FloatParam::new(
                 "DynEQ 1 Ratio",
                 0.5, // 3:1 ratio
@@ -597,6 +672,7 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_attack: FloatParam::new(
                 "DynEQ 1 Attack",
                 0.3, // ~10ms
@@ -609,6 +685,7 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_release: FloatParam::new(
                 "DynEQ 1 Release",
                 0.4, // ~100ms
@@ -621,6 +698,7 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_gain: FloatParam::new(
                 "DynEQ 1 Gain",
                 0.0,
@@ -629,6 +707,7 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_q: FloatParam::new(
                 "DynEQ 1 Q",
                 0.5, // Q = 1.0
@@ -637,8 +716,10 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_enabled: BoolParam::new("DynEQ 1 On", false),
             
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_detector_freq: FloatParam::new(
                 "DynEQ 1 Detector Freq",
                 200.0, // Same as main frequency by default
@@ -651,8 +732,10 @@ impl Default for BusChannelStripParams {
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band1_mode: EnumParam::new("DynEQ 1 Mode", DynamicMode::CompressDownward),
 
+            #[cfg(feature = "dynamic_eq")]
             // Band 2 (Low-Mid) - 800Hz (similar pattern, different defaults)
             dyneq_band2_freq: FloatParam::new(
                 "DynEQ 2 Freq",
@@ -666,14 +749,22 @@ impl Default for BusChannelStripParams {
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_threshold: FloatParam::new("DynEQ 2 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_ratio: FloatParam::new("DynEQ 2 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_attack: FloatParam::new("DynEQ 2 Attack", 0.3, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_release: FloatParam::new("DynEQ 2 Release", 0.4, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_gain: FloatParam::new("DynEQ 2 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_q: FloatParam::new("DynEQ 2 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_enabled: BoolParam::new("DynEQ 2 On", false),
             
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_detector_freq: FloatParam::new(
                 "DynEQ 2 Detector Freq",
                 800.0, // Same as main frequency by default
@@ -686,8 +777,10 @@ impl Default for BusChannelStripParams {
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band2_mode: EnumParam::new("DynEQ 2 Mode", DynamicMode::CompressDownward),
 
+            #[cfg(feature = "dynamic_eq")]
             // Band 3 (High-Mid) - 3kHz
             dyneq_band3_freq: FloatParam::new(
                 "DynEQ 3 Freq",
@@ -701,13 +794,21 @@ impl Default for BusChannelStripParams {
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_threshold: FloatParam::new("DynEQ 3 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_ratio: FloatParam::new("DynEQ 3 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_attack: FloatParam::new("DynEQ 3 Attack", 0.2, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01), // Faster for highs
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_release: FloatParam::new("DynEQ 3 Release", 0.3, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01), // Faster for highs
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_gain: FloatParam::new("DynEQ 3 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_q: FloatParam::new("DynEQ 3 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_enabled: BoolParam::new("DynEQ 3 On", false),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_detector_freq: FloatParam::new(
                 "DynEQ 3 Det Freq",
                 3000.0,
@@ -719,8 +820,10 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band3_mode: EnumParam::new("DynEQ 3 Mode", DynamicMode::CompressDownward),
 
+            #[cfg(feature = "dynamic_eq")]
             // Band 4 (High) - 8kHz
             dyneq_band4_freq: FloatParam::new(
                 "DynEQ 4 Freq",
@@ -734,13 +837,21 @@ impl Default for BusChannelStripParams {
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_threshold: FloatParam::new("DynEQ 4 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_ratio: FloatParam::new("DynEQ 4 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_attack: FloatParam::new("DynEQ 4 Attack", 0.1, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01), // Very fast for highs
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_release: FloatParam::new("DynEQ 4 Release", 0.2, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01), // Fast for highs
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_gain: FloatParam::new("DynEQ 4 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_q: FloatParam::new("DynEQ 4 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_enabled: BoolParam::new("DynEQ 4 On", false),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_detector_freq: FloatParam::new(
                 "DynEQ 4 Det Freq",
                 8000.0,
@@ -752,6 +863,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+            #[cfg(feature = "dynamic_eq")]
             dyneq_band4_mode: EnumParam::new("DynEQ 4 Mode", DynamicMode::CompressDownward),
             
             
@@ -868,9 +980,14 @@ impl Plugin for BusChannelStrip {
         self.params.clone()
     }
 
-    // fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-    //     editor::create_editor(self.params.clone(), self.editor_state.clone())
-    // }  // Temporarily disabled due to egui API compatibility issues
+    #[cfg(feature = "gui")]
+    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        // Create the iced GUI editor; context is handled by the wrapper
+        editor::create(
+            self.params.clone(),
+            self.editor_state.clone(),
+        )
+    }
 
     fn initialize(
         &mut self,
@@ -882,11 +999,16 @@ impl Plugin for BusChannelStrip {
         // TODO: query actual sample rate from _context or BufferConfig
         // Reinitialize modules with the actual sample rate
         let sr = _buffer_config.sample_rate;
-        self.eq_api5500 = Api5500::new(sr);
-        self.compressor = ButterComp2::new(sr);
-        self.pultec = PultecEQ::new(sr);
-        self.dynamic_eq = DynamicEQ::new(sr);
-        self.transformer = TransformerModule::new(sr);
+        #[cfg(feature = "api5500")]
+        { self.eq_api5500 = Api5500::new(sr); }
+        #[cfg(feature = "buttercomp2")]
+        { self.compressor = ButterComp2::new(sr); }
+        #[cfg(feature = "pultec")]
+        { self.pultec = PultecEQ::new(sr); }
+        #[cfg(feature = "dynamic_eq")]
+        { self.dynamic_eq = DynamicEQ::new(sr); }
+        #[cfg(feature = "transformer")]
+        { self.transformer = TransformerModule::new(sr); }
         
         // Initialize temporary buffers for module reordering
         let max_buffer_size = _buffer_config.max_buffer_size as usize;
@@ -901,9 +1023,12 @@ impl Plugin for BusChannelStrip {
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
-        self.compressor.reset();
-        self.dynamic_eq.reset();
-        self.transformer.reset();
+        #[cfg(feature = "buttercomp2")]
+        { self.compressor.reset(); }
+        #[cfg(feature = "dynamic_eq")]
+        { self.dynamic_eq.reset(); }
+        #[cfg(feature = "transformer")]
+        { self.transformer.reset(); }
     }
 
     fn process(
@@ -912,130 +1037,146 @@ impl Plugin for BusChannelStrip {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // 1) Update EQ parameters if needed
-        self.eq_api5500.update_parameters(
-            self.params.lf_freq.value(),
-            self.params.lf_gain.value(),
-            self.params.lmf_freq.value(),
-            self.params.lmf_gain.value(),
-            self.params.lmf_q.value(),
-            self.params.mf_freq.value(),
-            self.params.mf_gain.value(),
-            self.params.mf_q.value(),
-            self.params.hmf_freq.value(),
-            self.params.hmf_gain.value(),
-            self.params.hmf_q.value(),
-            self.params.hf_freq.value(),
-            self.params.hf_gain.value(),
-        );
-
-        // 2) Process EQ (with bypass check)
-        if !self.params.eq_bypass.value() {
-            self.eq_api5500.process(buffer);
-        }
-
-        // 3) Update and process ButterComp2 compressor
-        self.compressor.update_parameters(
-            self.params.comp_compress.value(),
-            self.params.comp_output.value(),
-            self.params.comp_dry_wet.value(),
-        );
+        // Process enabled modules based on feature flags
         
-        if !self.params.comp_bypass.value() {
-            self.compressor.process(buffer);
+        // 1) API5500 EQ Module
+        #[cfg(feature = "api5500")]
+        {
+            self.eq_api5500.update_parameters(
+                self.params.lf_freq.value(),
+                self.params.lf_gain.value(),
+                self.params.lmf_freq.value(),
+                self.params.lmf_gain.value(),
+                self.params.lmf_q.value(),
+                self.params.mf_freq.value(),
+                self.params.mf_gain.value(),
+                self.params.mf_q.value(),
+                self.params.hmf_freq.value(),
+                self.params.hmf_gain.value(),
+                self.params.hmf_q.value(),
+                self.params.hf_freq.value(),
+                self.params.hf_gain.value(),
+            );
+
+            if !self.params.eq_bypass.value() {
+                self.eq_api5500.process(buffer);
+            }
         }
 
-        // 4) Update and process Pultec EQ
-        self.pultec.update_parameters(
-            self.params.pultec_lf_boost_freq.value(),
-            self.params.pultec_lf_boost_gain.value(),
-            self.params.pultec_lf_cut_gain.value(),
-            self.params.pultec_hf_boost_freq.value(),
-            self.params.pultec_hf_boost_gain.value(),
-            self.params.pultec_hf_boost_bandwidth.value(),
-            self.params.pultec_hf_cut_freq.value(),
-            self.params.pultec_hf_cut_gain.value(),
-            self.params.pultec_tube_drive.value(),
-        );
-        
-        if !self.params.pultec_bypass.value() {
-            self.pultec.process(buffer);
+        // 2) ButterComp2 Compressor Module
+        #[cfg(feature = "buttercomp2")]
+        {
+            self.compressor.update_parameters(
+                self.params.comp_compress.value(),
+                self.params.comp_output.value(),
+                self.params.comp_dry_wet.value(),
+            );
+            
+            if !self.params.comp_bypass.value() {
+                self.compressor.process(buffer);
+            }
         }
 
-        // 5) Update and process Dynamic EQ
-        let dyneq_params = [
-            DynamicBandParams {
-                mode: self.params.dyneq_band1_mode.value(),
-                detector_freq: self.params.dyneq_band1_detector_freq.value(),
-                freq: self.params.dyneq_band1_freq.value(),
-                q: map_q_param(self.params.dyneq_band1_q.value()),
-                threshold_db: self.params.dyneq_band1_threshold.value() * 24.0 - 24.0, // Map 0-1 to -24 to 0 dB
-                ratio: map_ratio_param(self.params.dyneq_band1_ratio.value()),
-                attack_ms: map_time_param(self.params.dyneq_band1_attack.value(), 1.0, 100.0),
-                release_ms: map_time_param(self.params.dyneq_band1_release.value(), 10.0, 1000.0),
-                gain_db: self.params.dyneq_band1_gain.value() * 12.0, // ±12dB
-                enabled: self.params.dyneq_band1_enabled.value(),
-            },
-            DynamicBandParams {
-                mode: self.params.dyneq_band2_mode.value(),
-                detector_freq: self.params.dyneq_band2_detector_freq.value(),
-                freq: self.params.dyneq_band2_freq.value(),
-                q: map_q_param(self.params.dyneq_band2_q.value()),
-                threshold_db: self.params.dyneq_band2_threshold.value() * 24.0 - 24.0,
-                ratio: map_ratio_param(self.params.dyneq_band2_ratio.value()),
-                attack_ms: map_time_param(self.params.dyneq_band2_attack.value(), 1.0, 100.0),
-                release_ms: map_time_param(self.params.dyneq_band2_release.value(), 10.0, 1000.0),
-                gain_db: self.params.dyneq_band2_gain.value() * 12.0,
-                enabled: self.params.dyneq_band2_enabled.value(),
-            },
-            DynamicBandParams {
-                mode: self.params.dyneq_band3_mode.value(),
-                detector_freq: self.params.dyneq_band3_detector_freq.value(),
-                freq: self.params.dyneq_band3_freq.value(),
-                q: map_q_param(self.params.dyneq_band3_q.value()),
-                threshold_db: self.params.dyneq_band3_threshold.value() * 24.0 - 24.0,
-                ratio: map_ratio_param(self.params.dyneq_band3_ratio.value()),
-                attack_ms: map_time_param(self.params.dyneq_band3_attack.value(), 0.5, 50.0),
-                release_ms: map_time_param(self.params.dyneq_band3_release.value(), 5.0, 500.0),
-                gain_db: self.params.dyneq_band3_gain.value() * 12.0,
-                enabled: self.params.dyneq_band3_enabled.value(),
-            },
-            DynamicBandParams {
-                mode: self.params.dyneq_band4_mode.value(),
-                detector_freq: self.params.dyneq_band4_detector_freq.value(),
-                freq: self.params.dyneq_band4_freq.value(),
-                q: map_q_param(self.params.dyneq_band4_q.value()),
-                threshold_db: self.params.dyneq_band4_threshold.value() * 24.0 - 24.0,
-                ratio: map_ratio_param(self.params.dyneq_band4_ratio.value()),
-                attack_ms: map_time_param(self.params.dyneq_band4_attack.value(), 0.1, 20.0),
-                release_ms: map_time_param(self.params.dyneq_band4_release.value(), 1.0, 200.0),
-                gain_db: self.params.dyneq_band4_gain.value() * 12.0,
-                enabled: self.params.dyneq_band4_enabled.value(),
-            },
-        ];
-        self.dynamic_eq.update_parameters(&dyneq_params);
-        
-        if !self.params.dyneq_bypass.value() {
-            self.dynamic_eq.process(buffer);
+        // 3) Pultec EQ Module
+        #[cfg(feature = "pultec")]
+        {
+            self.pultec.update_parameters(
+                self.params.pultec_lf_boost_freq.value(),
+                self.params.pultec_lf_boost_gain.value(),
+                self.params.pultec_lf_cut_gain.value(),
+                self.params.pultec_hf_boost_freq.value(),
+                self.params.pultec_hf_boost_gain.value(),
+                self.params.pultec_hf_boost_bandwidth.value(),
+                self.params.pultec_hf_cut_freq.value(),
+                self.params.pultec_hf_cut_gain.value(),
+                self.params.pultec_tube_drive.value(),
+            );
+            
+            if !self.params.pultec_bypass.value() {
+                self.pultec.process(buffer);
+            }
         }
 
-        // 6) Update and process Transformer module
-        self.transformer.update_parameters(
-            self.params.transformer_model.value(),
-            self.params.transformer_input_drive.value(),
-            self.params.transformer_input_saturation.value(),
-            self.params.transformer_output_drive.value(),
-            self.params.transformer_output_saturation.value(),
-            self.params.transformer_low_response.value(),
-            self.params.transformer_high_response.value(),
-            self.params.transformer_compression.value(),
-        );
-        
-        if !self.params.transformer_bypass.value() {
-            self.transformer.process(buffer);
+        // 4) Transformer Module  
+        #[cfg(feature = "transformer")]
+        {
+            self.transformer.update_parameters(
+                self.params.transformer_model.value(),
+                self.params.transformer_input_drive.value(),
+                self.params.transformer_input_saturation.value(),
+                self.params.transformer_output_drive.value(),
+                self.params.transformer_output_saturation.value(),
+                self.params.transformer_low_response.value(),
+                self.params.transformer_high_response.value(),
+                self.params.transformer_compression.value(),
+            );
+            
+            if !self.params.transformer_bypass.value() {
+                self.transformer.process(buffer);
+            }
         }
 
-        // 7) Gain (placeholder)
+        // 5) Dynamic EQ Module (disabled for now)
+        #[cfg(feature = "dynamic_eq")]
+        {
+            let dyneq_params = [
+                DynamicBandParams {
+                    mode: self.params.dyneq_band1_mode.value(),
+                    detector_freq: self.params.dyneq_band1_detector_freq.value(),
+                    freq: self.params.dyneq_band1_freq.value(),
+                    q: map_q_param(self.params.dyneq_band1_q.value()),
+                    threshold_db: self.params.dyneq_band1_threshold.value() * 24.0 - 24.0, // Map 0-1 to -24 to 0 dB
+                    ratio: map_ratio_param(self.params.dyneq_band1_ratio.value()),
+                    attack_ms: map_time_param(self.params.dyneq_band1_attack.value(), 1.0, 100.0),
+                    release_ms: map_time_param(self.params.dyneq_band1_release.value(), 10.0, 1000.0),
+                    gain_db: self.params.dyneq_band1_gain.value() * 12.0, // ±12dB
+                    enabled: self.params.dyneq_band1_enabled.value(),
+                },
+                DynamicBandParams {
+                    mode: self.params.dyneq_band2_mode.value(),
+                    detector_freq: self.params.dyneq_band2_detector_freq.value(),
+                    freq: self.params.dyneq_band2_freq.value(),
+                    q: map_q_param(self.params.dyneq_band2_q.value()),
+                    threshold_db: self.params.dyneq_band2_threshold.value() * 24.0 - 24.0,
+                    ratio: map_ratio_param(self.params.dyneq_band2_ratio.value()),
+                    attack_ms: map_time_param(self.params.dyneq_band2_attack.value(), 1.0, 100.0),
+                    release_ms: map_time_param(self.params.dyneq_band2_release.value(), 10.0, 1000.0),
+                    gain_db: self.params.dyneq_band2_gain.value() * 12.0,
+                    enabled: self.params.dyneq_band2_enabled.value(),
+                },
+                DynamicBandParams {
+                    mode: self.params.dyneq_band3_mode.value(),
+                    detector_freq: self.params.dyneq_band3_detector_freq.value(),
+                    freq: self.params.dyneq_band3_freq.value(),
+                    q: map_q_param(self.params.dyneq_band3_q.value()),
+                    threshold_db: self.params.dyneq_band3_threshold.value() * 24.0 - 24.0,
+                    ratio: map_ratio_param(self.params.dyneq_band3_ratio.value()),
+                    attack_ms: map_time_param(self.params.dyneq_band3_attack.value(), 0.5, 50.0),
+                    release_ms: map_time_param(self.params.dyneq_band3_release.value(), 5.0, 500.0),
+                    gain_db: self.params.dyneq_band3_gain.value() * 12.0,
+                    enabled: self.params.dyneq_band3_enabled.value(),
+                },
+                DynamicBandParams {
+                    mode: self.params.dyneq_band4_mode.value(),
+                    detector_freq: self.params.dyneq_band4_detector_freq.value(),
+                    freq: self.params.dyneq_band4_freq.value(),
+                    q: map_q_param(self.params.dyneq_band4_q.value()),
+                    threshold_db: self.params.dyneq_band4_threshold.value() * 24.0 - 24.0,
+                    ratio: map_ratio_param(self.params.dyneq_band4_ratio.value()),
+                    attack_ms: map_time_param(self.params.dyneq_band4_attack.value(), 0.1, 20.0),
+                    release_ms: map_time_param(self.params.dyneq_band4_release.value(), 1.0, 200.0),
+                    gain_db: self.params.dyneq_band4_gain.value() * 12.0,
+                    enabled: self.params.dyneq_band4_enabled.value(),
+                },
+            ];
+            self.dynamic_eq.update_parameters(&dyneq_params);
+            
+            if !self.params.dyneq_bypass.value() {
+                self.dynamic_eq.process(buffer);
+            }
+        }
+
+        // 6) Output gain
         for channel_samples in buffer.iter_samples() {
             let gain = self.params.gain.smoothed.next();
             for sample in channel_samples {

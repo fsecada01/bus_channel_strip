@@ -1,5 +1,6 @@
 use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
 use nih_plug::buffer::Buffer;
+use crate::shaping::{tanh_saturation, exp_curve, poly_log_curve};
 
 /// Pultec EQP-1A style EQ module
 /// 
@@ -25,22 +26,27 @@ pub struct PultecEQ {
 impl PultecEQ {
     /// Create a new Pultec EQ with the given sample rate
     pub fn new(sample_rate: f32) -> Self {
-        // Initialize with flat response filters
-        let flat_coeff = Coefficients::<f32>::from_params(
-            Type::LowPass,
+        // Initialize with stable allpass filters for true bypass
+        let bypass_coeff = Coefficients::<f32>::from_params(
+            Type::PeakingEQ(0.0), // 0dB peaking EQ = flat response
             sample_rate.hz(),
-            20000.0_f32.hz(),
+            1000.0_f32.hz(), // Mid frequency for stability
             0.707,
-        ).expect("AllPass filter parameters should be valid");
+        ).expect("Bypass filter parameters should be valid");
         
-        let flat_filter = DirectForm1::<f32>::new(flat_coeff);
+        let mut bypass_filter = DirectForm1::<f32>::new(bypass_coeff);
+        
+        // Reset filter state to ensure clean startup
+        bypass_filter.run(0.0);
+        bypass_filter.run(0.0);
+        bypass_filter.run(0.0);
         
         Self {
             sample_rate,
-            lf_boost_filter: flat_filter,
-            lf_cut_filter: flat_filter,
-            hf_boost_filter: flat_filter,
-            hf_cut_filter: flat_filter,
+            lf_boost_filter: bypass_filter,
+            lf_cut_filter: bypass_filter,
+            hf_boost_filter: bypass_filter,
+            hf_cut_filter: bypass_filter,
             tube_drive: 0.0,
         }
     }
@@ -72,87 +78,120 @@ impl PultecEQ {
         // Update tube drive
         self.tube_drive = tube_drive.clamp(0.0, 1.0);
         
-        // Low Frequency Boost (shelving filter)
+        // Low Frequency Boost (shelving filter) with conservative gain
         if lf_boost_gain > 0.01 {
-            let boost_db = lf_boost_gain * 15.0; // 0-15dB range
+            let shaped_gain = lf_boost_gain * lf_boost_gain; // Quadratic curve for smooth response
+            let boost_db = shaped_gain * 8.0; // Reduced to 0-8dB range to prevent instability
+            let safe_freq = lf_boost_freq.clamp(30.0, 200.0); // Limit frequency range
             let coeff = Coefficients::<f32>::from_params(
                 Type::LowShelf(boost_db),
                 self.sample_rate.hz(),
-                lf_boost_freq.hz(),
-                0.707, // Classic Pultec Q
+                safe_freq.hz(),
+                0.9, // Slightly wider Q for stability
             ).expect("LF boost filter parameters should be valid");
-            self.lf_boost_filter = DirectForm1::<f32>::new(coeff);
+            let mut new_filter = DirectForm1::<f32>::new(coeff);
+            // Prime the filter to prevent startup transients
+            new_filter.run(0.0);
+            new_filter.run(0.0);
+            self.lf_boost_filter = new_filter;
         } else {
-            // Flat response when no boost
+            // True bypass - use stable allpass
             let coeff = Coefficients::<f32>::from_params(
-                Type::LowPass,
+                Type::PeakingEQ(0.0),
                 self.sample_rate.hz(),
-                lf_boost_freq.hz(),
+                100.0_f32.hz(), // Fixed safe frequency
                 0.707,
-            ).expect("LF allpass parameters should be valid");
-            self.lf_boost_filter = DirectForm1::<f32>::new(coeff);
+            ).expect("LF bypass parameters should be valid");
+            let mut bypass_filter = DirectForm1::<f32>::new(coeff);
+            bypass_filter.run(0.0);
+            bypass_filter.run(0.0);
+            self.lf_boost_filter = bypass_filter;
         }
         
         // Low Frequency Cut (simultaneous with boost for classic Pultec behavior)
         if lf_cut_gain > 0.01 {
-            let cut_db = -(lf_cut_gain * 12.0); // 0 to -12dB cut
-            let cut_freq = lf_boost_freq * 0.5; // Cut below boost frequency
+            let shaped_cut = lf_cut_gain * lf_cut_gain; // Simple quadratic for smooth response
+            let cut_db = -(shaped_cut * 6.0); // Reduced to 0 to -6dB cut to prevent artifacts
+            let cut_freq = (lf_boost_freq * 0.6).clamp(20.0, 120.0); // Cut below boost, limit range
             let coeff = Coefficients::<f32>::from_params(
                 Type::LowShelf(cut_db),
                 self.sample_rate.hz(),
                 cut_freq.hz(),
-                1.4, // Wider Q for cut
+                1.2, // Moderate Q for smooth cut
             ).expect("LF cut filter parameters should be valid");
-            self.lf_cut_filter = DirectForm1::<f32>::new(coeff);
+            let mut new_filter = DirectForm1::<f32>::new(coeff);
+            new_filter.run(0.0);
+            new_filter.run(0.0);
+            self.lf_cut_filter = new_filter;
         } else {
             let coeff = Coefficients::<f32>::from_params(
-                Type::LowPass,
+                Type::PeakingEQ(0.0),
                 self.sample_rate.hz(),
-                lf_boost_freq.hz(),
+                80.0_f32.hz(), // Fixed safe frequency
                 0.707,
-            ).expect("LF cut allpass parameters should be valid");
-            self.lf_cut_filter = DirectForm1::<f32>::new(coeff);
+            ).expect("LF cut bypass parameters should be valid");
+            let mut bypass_filter = DirectForm1::<f32>::new(coeff);
+            bypass_filter.run(0.0);
+            bypass_filter.run(0.0);
+            self.lf_cut_filter = bypass_filter;
         }
         
-        // High Frequency Boost (peaking filter)
+        // High Frequency Boost (peaking filter) with conservative gain
         if hf_boost_gain > 0.01 {
-            let boost_db = hf_boost_gain * 18.0; // 0-18dB range (Pultec can be generous)
-            let q = 0.5 + (hf_boost_bandwidth * 2.0); // 0.5 to 2.5 Q range
+            let shaped_gain = hf_boost_gain * hf_boost_gain; // Quadratic curve
+            let boost_db = shaped_gain * 10.0; // Reduced to 0-10dB to prevent harshness
+            let shaped_bandwidth = hf_boost_bandwidth * hf_boost_bandwidth; // Smooth Q control
+            let q = 0.6 + (shaped_bandwidth * 1.4); // More conservative Q range: 0.6 to 2.0
+            let safe_freq = hf_boost_freq.clamp(3000.0, 20000.0); // Limit frequency range
             let coeff = Coefficients::<f32>::from_params(
                 Type::PeakingEQ(boost_db),
                 self.sample_rate.hz(),
-                hf_boost_freq.hz(),
+                safe_freq.hz(),
                 q,
             ).expect("HF boost filter parameters should be valid");
-            self.hf_boost_filter = DirectForm1::<f32>::new(coeff);
+            let mut new_filter = DirectForm1::<f32>::new(coeff);
+            new_filter.run(0.0);
+            new_filter.run(0.0);
+            self.hf_boost_filter = new_filter;
         } else {
             let coeff = Coefficients::<f32>::from_params(
-                Type::LowPass,
+                Type::PeakingEQ(0.0),
                 self.sample_rate.hz(),
-                hf_boost_freq.hz(),
+                8000.0_f32.hz(), // Fixed safe frequency
                 0.707,
-            ).expect("HF boost allpass parameters should be valid");
-            self.hf_boost_filter = DirectForm1::<f32>::new(coeff);
+            ).expect("HF boost bypass parameters should be valid");
+            let mut bypass_filter = DirectForm1::<f32>::new(coeff);
+            bypass_filter.run(0.0);
+            bypass_filter.run(0.0);
+            self.hf_boost_filter = bypass_filter;
         }
         
-        // High Frequency Cut (separate from boost)
+        // High Frequency Cut (separate from boost) with conservative scaling
         if hf_cut_gain > 0.01 {
-            let cut_db = -(hf_cut_gain * 15.0); // 0 to -15dB cut
+            let shaped_cut = hf_cut_gain * hf_cut_gain; // Simple quadratic
+            let cut_db = -(shaped_cut * 8.0); // Reduced to 0 to -8dB cut for gentleness
+            let safe_freq = hf_cut_freq.clamp(5000.0, 20000.0); // Limit frequency range
             let coeff = Coefficients::<f32>::from_params(
                 Type::HighShelf(cut_db),
                 self.sample_rate.hz(),
-                hf_cut_freq.hz(),
-                0.707,
+                safe_freq.hz(),
+                0.9, // Slightly wider Q for smoother response
             ).expect("HF cut filter parameters should be valid");
-            self.hf_cut_filter = DirectForm1::<f32>::new(coeff);
+            let mut new_filter = DirectForm1::<f32>::new(coeff);
+            new_filter.run(0.0);
+            new_filter.run(0.0);
+            self.hf_cut_filter = new_filter;
         } else {
             let coeff = Coefficients::<f32>::from_params(
-                Type::LowPass,
+                Type::PeakingEQ(0.0),
                 self.sample_rate.hz(),
-                hf_cut_freq.hz(),
+                10000.0_f32.hz(), // Fixed safe frequency
                 0.707,
-            ).expect("HF cut allpass parameters should be valid");
-            self.hf_cut_filter = DirectForm1::<f32>::new(coeff);
+            ).expect("HF cut bypass parameters should be valid");
+            let mut bypass_filter = DirectForm1::<f32>::new(coeff);
+            bypass_filter.run(0.0);
+            bypass_filter.run(0.0);
+            self.hf_cut_filter = bypass_filter;
         }
     }
     
@@ -162,57 +201,33 @@ impl PultecEQ {
             for sample in samples {
                 let mut s = *sample;
                 
-                // Apply filters in Pultec-style order
+                // Apply filters in Pultec-style order with soft clipping between stages
                 // 1. Low frequency boost
                 s = self.lf_boost_filter.run(s);
+                s = s.clamp(-2.0, 2.0); // Prevent filter overflow
                 
                 // 2. Low frequency cut (can be simultaneous with boost)
                 s = self.lf_cut_filter.run(s);
+                s = s.clamp(-2.0, 2.0);
                 
                 // 3. High frequency boost  
                 s = self.hf_boost_filter.run(s);
+                s = s.clamp(-2.0, 2.0);
                 
                 // 4. High frequency cut
                 s = self.hf_cut_filter.run(s);
+                s = s.clamp(-2.0, 2.0);
                 
-                // 5. Tube saturation modeling (soft clipping with harmonics)
+                // 5. Very gentle tube saturation to reduce harshness
                 if self.tube_drive > 0.01 {
-                    s = tube_saturation(s, self.tube_drive);
+                    let drive_amount = self.tube_drive * 0.3; // Much gentler tube drive
+                    s = s.tanh() * (1.0 + drive_amount * 0.2); // Soft tube-style saturation
                 }
                 
-                *sample = s;
+                // Final soft clipping to prevent digital clipping
+                *sample = s.clamp(-1.0, 1.0);
             }
         }
     }
 }
 
-/// Tube saturation modeling
-/// 
-/// Models the harmonic distortion and soft clipping characteristics of tube circuits
-fn tube_saturation(input: f32, drive: f32) -> f32 {
-    if drive < 0.01 {
-        return input;
-    }
-    
-    // Scale input by drive amount
-    let driven = input * (1.0 + drive * 3.0);
-    
-    // Soft clipping with asymmetric characteristics (tube-like)
-    let output = if driven > 0.0 {
-        // Positive half-cycle (slightly harder clipping)
-        driven / (1.0 + driven.abs().powf(0.8))
-    } else {
-        // Negative half-cycle (softer clipping)
-        driven / (1.0 + driven.abs().powf(0.6))
-    };
-    
-    // Add subtle even harmonics (tube characteristic)
-    let harmonics = output * output * drive * 0.1;
-    
-    // Mix back to appropriate level
-    let wet = output + harmonics;
-    let dry = input;
-    
-    // Blend based on drive amount
-    dry * (1.0 - drive * 0.5) + wet * (drive * 0.5)
-}

@@ -52,10 +52,15 @@ impl ButterComp2 {
     /// * `output` - Output gain (0.0 to 1.0, maps to 0-2x gain)
     /// * `dry_wet` - Dry/wet mix (0.0 = dry, 1.0 = wet)
     pub fn update_parameters(&mut self, compress: f32, output: f32, dry_wet: f32) {
+        // Scale parameters to prevent over-compression and distortion
+        let safe_compress = (compress * 0.5).clamp(0.0, 0.5); // Reduce max compression
+        let safe_output = (output * 0.8 + 0.2).clamp(0.2, 1.0); // Keep output in reasonable range
+        let safe_dry_wet = dry_wet.clamp(0.0, 1.0);
+        
         unsafe {
-            buttercomp2_set_compress(self.state, compress as f64);
-            buttercomp2_set_output(self.state, output as f64);
-            buttercomp2_set_dry_wet(self.state, dry_wet as f64);
+            buttercomp2_set_compress(self.state, safe_compress as f64);
+            buttercomp2_set_output(self.state, safe_output as f64);
+            buttercomp2_set_dry_wet(self.state, safe_dry_wet as f64);
         }
     }
     

@@ -63,11 +63,19 @@ impl Api5500 {
         hf_freq: f32,
         hf_gain: f32,
     ) {
-        self.lf = Filter::new(self.sample_rate, FilterType::LowShelf, lf_freq, Q_BUTTERWORTH_F32, lf_gain);
-        self.lmf = Filter::new(self.sample_rate, FilterType::Bell, lmf_freq, lmf_q, lmf_gain);
-        self.mf = Filter::new(self.sample_rate, FilterType::Bell, mf_freq, mf_q, mf_gain);
-        self.hmf = Filter::new(self.sample_rate, FilterType::Bell, hmf_freq, hmf_q, hmf_gain);
-        self.hf = Filter::new(self.sample_rate, FilterType::HighShelf, hf_freq, Q_BUTTERWORTH_F32, hf_gain);
+        // Limit gains to prevent instability and distortion
+        let safe_lf_gain = lf_gain.clamp(-12.0, 12.0);
+        let safe_lmf_gain = lmf_gain.clamp(-12.0, 12.0);
+        let safe_mf_gain = mf_gain.clamp(-12.0, 12.0);
+        let safe_hmf_gain = hmf_gain.clamp(-12.0, 12.0);
+        let safe_hf_gain = hf_gain.clamp(-12.0, 12.0);
+
+        // Update filters with safe gains
+        self.lf.update_parameters(self.sample_rate, FilterType::LowShelf, lf_freq, Q_BUTTERWORTH_F32, safe_lf_gain);
+        self.lmf.update_parameters(self.sample_rate, FilterType::Bell, lmf_freq, lmf_q, safe_lmf_gain);
+        self.mf.update_parameters(self.sample_rate, FilterType::Bell, mf_freq, mf_q, safe_mf_gain);
+        self.hmf.update_parameters(self.sample_rate, FilterType::Bell, hmf_freq, hmf_q, safe_hmf_gain);
+        self.hf.update_parameters(self.sample_rate, FilterType::HighShelf, hf_freq, Q_BUTTERWORTH_F32, safe_hf_gain);
     }
 
     pub fn process(&mut self, buffer: &mut Buffer) {

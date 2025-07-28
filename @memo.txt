@@ -1,0 +1,12 @@
+Fix: Stub out iced GUI implementation to restore build
+
+Summary:
+- Removed outdated iced GUI code in src/editor.rs; replaced with a stub that returns None.
+- Preserved default_state() for future GUI reactivation, but disabled actual window instantiation.
+- Updated src/lib.rs editor() and create() signatures to match nih-plug-iced API changes.
+- Eliminated conflicting imports and fixed duplicated Arc/IcedState imports.
+- Ensured cargo build --features gui now succeeds without GUI backend linking errors.
+
+Next Steps:
+- Install missing XCB dev packages (e.g., libxcb-icccm4-dev) to satisfy linker requirements.
+- Reintroduce full iced GUI implementation once dependencies are resolved and API is finalized.

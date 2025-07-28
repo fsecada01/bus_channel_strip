@@ -17,7 +17,11 @@
       "Bash(~/.cargo/bin/cargo build)",
       "Bash(~/.cargo/bin/cargo check)",
       "Bash(find:*)",
-      "WebFetch(domain:github.blog)"
+      "WebFetch(domain:github.blog)",
+      "Bash(chmod:*)",
+      "Bash(grep:*)",
+      "Bash(mv:*)",
+      "WebFetch(domain:nih-plug.robbertvanderhelm.nl)"
     ],
     "deny": []
   }

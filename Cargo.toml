@@ -21,8 +21,25 @@ idsp = "0.18.0"
 # Remove the `assert_process_allocs` feature to allow allocations on the audio
 # thread in debug builds.
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
-# nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }  # Temporarily disabled due to egui API compatibility
+nih_plug_iced = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 realfft = "3.5.0"
+
+[features]
+default = ["api5500", "buttercomp2", "pultec", "transformer", "gui"]
+# GUI now uses iced-rs instead of egui for better stability
+# Core DSP modules
+api5500 = []
+buttercomp2 = []
+pultec = []
+transformer = []
+
+# Advanced modules (hierarchical)
+dynamic_eq = []
+"dynamic_eq.diff" = ["dynamic_eq"]
+"dynamic_eq.multiband" = ["dynamic_eq"]
+
+# UI system
+gui = []
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 
