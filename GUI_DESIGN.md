@@ -136,31 +136,94 @@ This document describes the comprehensive GUI design for our professional bus ch
 
 ## **🔧 Technical Implementation**
 
-### **Framework**: NIH-plug + egui
+### **Framework**: NIH-plug + iced
+**Current Status**: GUI temporarily disabled due to iced API compatibility issues. Migration to iced in progress.
+
+### **Iced Architecture Pattern**
+Following standard iced Application/Message/Update/View pattern:
+
 ```rust
-// Core structure
+// Core iced Application structure
+pub struct BusChannelStripEditor {
+    params: Arc<BusChannelStripParams>,
+    // GUI state
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    // Parameter update messages
+    ParamChanged(ParamId, f32),
+    // Module-specific messages
+    ModuleToggled(ModuleType),
+}
+
+impl Application for BusChannelStripEditor {
+    type Message = Message;
+    type Theme = Theme;
+    type Executor = executor::Default;
+    type Flags = EditorFlags;
+
+    fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) { ... }
+    fn title(&self) -> String { ... }
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> { ... }
+    fn view(&self) -> Element<Self::Message> { ... }
+}
+
+// NIH-Plug integration
 pub fn create_editor(
     params: Arc<BusChannelStripParams>,
-    editor_state: Arc<EguiState>,
-) -> Option<Box<dyn Editor>>
+    editor_state: Arc<IcedState>,
+) -> Option<Box<dyn Editor>> {
+    nih_plug_iced::create_iced_editor::<BusChannelStripEditor>(
+        editor_state, 
+        EditorFlags { params }
+    )
+}
 
 // Module rendering functions
-fn draw_api5500_module(ui: &mut Ui, params: &BusChannelStripParams)
-fn draw_buttercomp_module(ui: &mut Ui, params: &BusChannelStripParams)
-fn draw_pultec_module(ui: &mut Ui, params: &BusChannelStripParams)
-fn draw_dynamic_eq_module(ui: &mut Ui, params: &BusChannelStripParams)
-fn draw_transformer_module(ui: &mut Ui, params: &BusChannelStripParams)
+fn draw_api5500_module(params: &BusChannelStripParams) -> Element<Message>
+fn draw_buttercomp_module(params: &BusChannelStripParams) -> Element<Message>
+fn draw_pultec_module(params: &BusChannelStripParams) -> Element<Message>
+fn draw_dynamic_eq_module(params: &BusChannelStripParams) -> Element<Message>
+fn draw_transformer_module(params: &BusChannelStripParams) -> Element<Message>
 ```
 
-### **Parameter Binding**
-- **Real-time Updates**: Direct parameter binding to DSP
-- **Automation Ready**: Full DAW automation support
+### **Key Iced Documentation Resources**
+- **NIH-Plug iced integration**: https://nih-plug.robbertvanderhelm.nl/nih_plug_iced/index.html
+- **Iced architecture guide**: https://book.iced.rs/architecture.html  
+- **Iced first steps**: https://book.iced.rs/first-steps.html
+- **Iced runtime**: https://book.iced.rs/the-runtime.html
+- **Iced examples**: https://github.com/iced-rs/iced/tree/master/examples
+- **Iced API docs**: https://docs.iced.rs/iced/
+- **Iced-Audio GitHub Repo**: https://github.com/iced-rs/iced_audio
+
+### **Parameter Binding with Iced**
+- **Real-time Updates**: Use `ParamSetter` for thread-safe parameter updates
+- **Parameter Access**: Use `ParamPtr` for reading parameter values
+- **Automation Ready**: Full DAW automation support via NIH-Plug integration
+- **Message Handling**: Parameter changes flow through iced's Message system
 - **Preset Management**: State save/restore capability
 
-### **Performance Optimizations**
-- **Efficient Rendering**: Minimal redraws
-- **Cached Graphics**: Static elements cached
-- **Thread Safety**: Audio-thread safe parameter access
+```rust
+// Parameter update in iced
+fn update(&mut self, message: Message) -> Command<Message> {
+    match message {
+        Message::ParamChanged(param_id, value) => {
+            // Update parameter via NIH-Plug
+            self.param_setter.set_parameter(param_id, value);
+        }
+        // ... other messages
+    }
+    Command::none()
+}
+```
+
+### **Performance Optimizations with Iced**
+- **Efficient Rendering**: Iced's virtual DOM minimizes redraws automatically
+- **Widget Caching**: Use iced's built-in widget caching for static elements
+- **Thread Safety**: NIH-Plug handles audio-thread safe parameter access
+- **Update Optimization**: Only update GUI when parameters actually change
+- **View Optimization**: Use `Container` and `Column`/`Row` for efficient layouts
 
 ## **📱 Responsive Design**
 
@@ -180,7 +243,13 @@ fn draw_transformer_module(ui: &mut Ui, params: &BusChannelStripParams)
 ```toml
 [dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+nih_plug_iced = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+# Additional DSP dependencies
+biquad = "0.5.0"
+fundsp = "0.20.0"
+augmented-dsp-filters = "2.5.0"
+idsp = "0.18.0"
+realfft = "3.5.0"
 ```
 
 ### **System Requirements**
@@ -193,11 +262,25 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 # Install system dependencies (Ubuntu/Debian)
 sudo apt install pkg-config libasound2-dev libgl1-mesa-dev libx11-dev
 
-# Build with GUI
+# Development build
+cargo build
+
+# Release build  
 cargo build --release
+
+# Build with specific features
+cargo build --features "api5500,buttercomp2,pultec"
 
 # Bundle plugin
 cargo xtask bundle bus_channel_strip --release
+
+# Install pre-commit hooks (for development)
+pre-commit install
+
+# Format code
+cargo +nightly fmt
+# OR
+pre-commit run rustfmt-nightly --all-files
 ```
 
 ## **✨ Future Enhancements**
@@ -214,17 +297,27 @@ cargo xtask bundle bus_channel_strip --release
 - **A/B Compare**: Settings comparison
 - **CPU Monitor**: Performance display
 
-## **🎯 Status: Design Complete!**
+## **🎯 Status: Design Complete with Iced Architecture!**
 
-The GUI design is fully architected and ready for implementation. The codebase includes:
+The GUI design is fully architected and ready for iced implementation. The codebase includes:
 
 ✅ **Complete module layout designs**  
 ✅ **Professional color schemes**  
 ✅ **Interactive control specifications**  
-✅ **Parameter binding architecture**  
+✅ **Iced Application/Message/Update/View architecture**  
+✅ **NIH-Plug iced integration patterns**  
 ✅ **Performance optimization plans**  
+✅ **Comprehensive iced documentation resources**  
 
-**Ready for implementation once GUI dependencies are resolved!** 🔥
+**Ready for iced implementation with proper architectural guidance!** 🔥
+
+### **Implementation Checklist**
+- [ ] Set up iced Application structure
+- [ ] Implement Message enum for all parameter updates
+- [ ] Create module rendering functions using iced widgets
+- [ ] Integrate with NIH-Plug parameter system
+- [ ] Apply color scheme and styling
+- [ ] Test parameter automation and DAW integration
 
 ---
 

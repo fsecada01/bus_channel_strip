@@ -2,33 +2,56 @@
 
 This document provides context for AI agents collaborating on this project, outlining the current issues and a plan for resolution.
 
-## Current Task: Fix `iced` GUI Compilation Errors
+## Current Task: Implement Modern `iced` GUI Architecture
 
-The project fails to build when the `gui` feature is enabled due to a number of breaking changes in the `nih-plug-iced` dependency. The errors are located in `src/editor.rs` and `src/lib.rs`.
+The project needs GUI implementation using the current iced Application/Message/Update/View pattern with NIH-Plug integration. The previous egui-based GUI was disabled due to API compatibility issues, and migration to iced is required.
 
-### Key Issues & Analysis
+### Key Requirements & Analysis
 
-1.  **`IcedEditor` Trait Mismatch**: The implementation of the `IcedEditor` trait in `src/editor.rs` is outdated. The signatures for the `new`, `update`, and `style` methods do not match the versions in the current `nih-plug-iced` API.
+1.  **Modern Iced Architecture**: Need to implement the standard iced Application/Message/Update/View pattern instead of the old `IcedEditor` trait approach.
 
-2.  **Deprecated Styling System**: The custom styling logic in the `style` module at the bottom of `src/editor.rs` uses a deprecated `StyleSheet` trait. The new API appears to use a `Theme` enum returned from a `style` method on the `IcedEditor` trait itself.
+2.  **NIH-Plug Integration**: Use `nih_plug_iced::create_iced_editor` with proper `IcedState` and editor flags for seamless DAW integration.
 
-3.  **Broken Parameter Update Logic**: The `update` function attempts to handle a `ParamMessage` by accessing fields (`param_id`, `normalized_value`) that no longer exist on the struct. The logic to find the parameter pointer and send the update to the `GuiContext` is also incorrect.
+3.  **Parameter System**: Implement proper parameter binding using `ParamSetter` for updates and `ParamPtr` for reading values through iced's Message system.
 
-4.  **Rust Borrow-Checker Violations**: The `view` method in `src/editor.rs` creates multiple mutable borrows of `self` by calling helper methods (e.g., `self.api5500_module()`) inside the UI construction, which also mutably borrows `self.scrollable_state`. This is a fundamental ownership issue that needs to be refactored.
+4.  **Module Layout**: Create 5 distinct module UIs (API5500 EQ, ButterComp2, Pultec EQ, Dynamic EQ, Transformer) with color-coded professional design.
 
-5.  **Incorrect `GuiContext` Creation**: In `src/lib.rs`, the `editor` function is passing the wrong type to `editor::create`. It needs to call `async_executor.create_gui_context()` to get the required `Arc<dyn GuiContext>`.
+5.  **State Management**: Use `IcedState` for editor state persistence and proper `EditorFlags` for initialization.
 
-### Recommended Plan of Action
+6.  **Performance**: Leverage iced's virtual DOM for efficient rendering and proper widget caching.
 
-1.  **Fix `lib.rs`**: Correct the `editor` function to properly create the `GuiContext` by calling `async_executor.create_gui_context()`.
+### Recommended Implementation Plan
 
-2.  **Refactor `editor.rs`**:
-    *   **Correct `IcedEditor` Implementation**:
-        *   Update the `new` function signature to match the trait.
-        *   Update the `update` function signature and rewrite the parameter update logic to use the correct fields from `ParamMessage` and the correct `GuiContext` methods.
-        *   Implement the `style` method on `IcedEditor` to return a `Theme`, and remove the old `style` module.
-    *   **Resolve Borrow-Checker Errors**:
-        *   Refactor the `view` method. The helper methods for building UI modules (`api5500_module`, etc.) should not take `&mut self`.
-        *   Instead, the `view` method should call these helpers once to get the UI elements, and then construct the final view with them. This will prevent the multiple mutable borrow errors.
+1.  **Update `src/lib.rs`**: 
+    *   Update the `editor` function to use `nih_plug_iced::create_iced_editor` with proper integration
+    *   Ensure `IcedState` is properly initialized and passed to the editor
 
-This comprehensive approach should resolve all the compilation errors and get the GUI working again.
+2.  **Rewrite `src/editor.rs`** using modern iced patterns:
+    *   **Application Structure**: Create `BusChannelStripEditor` struct implementing iced's `Application` trait
+    *   **Message System**: Define comprehensive `Message` enum for all parameter updates and UI interactions  
+    *   **Update Logic**: Implement proper `update()` method using `ParamSetter` for parameter changes
+    *   **View Construction**: Create `view()` method building the complete 5-module layout
+    *   **State Management**: Use `EditorFlags` for initialization with parameter access
+
+3.  **Module Implementation**:
+    *   Create individual module rendering functions for each DSP module
+    *   Apply color-coded professional styling per GUI_DESIGN.md specifications
+    *   Implement proper knob, button, and meter widgets
+    *   Add bypass states and visual feedback
+
+4.  **Parameter Integration**:
+    *   Wire all ~75 plugin parameters through iced's Message system
+    *   Ensure real-time parameter updates and DAW automation compatibility
+    *   Implement proper parameter formatting and display
+
+5.  **Testing & Polish**:
+    *   Test in DAW environment for parameter automation
+    *   Verify module bypass states and visual feedback
+    *   Optimize rendering performance
+
+### Key Resources
+- See `CLAUDE.md` and `GUI_DESIGN.md` for complete iced architecture guidance
+- Reference iced documentation: https://book.iced.rs/architecture.html
+- NIH-Plug iced integration: https://nih-plug.robbertvanderhelm.nl/nih_plug_iced/index.html
+
+This modern approach replaces the deprecated `IcedEditor` trait with the standard iced Application pattern for better maintainability and performance.

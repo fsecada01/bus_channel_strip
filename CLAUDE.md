@@ -39,7 +39,9 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - Use `build.rs` for FFI compilation
 
 ### GUI Development
-- Built with `egui`
+- Built with `iced` via `nih_plug_iced` (GUI temporarily disabled due to API compatibility issues)
+- Follow iced architecture patterns: Application, Message, Update, View
+- Use `IcedState` for editor state management
 - Module color coding:
   - **EQ**: blue-gray background, cyan accents
   - **Compressor**: slate or black, orange knobs
@@ -47,15 +49,26 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
   - **Dynamic EQ**: steel blue, green accents
   - **Console/Tape**: charcoal or oxide red tones
 - Keep GUI interactions performant and audio-thread safe
+- See `GUI_DESIGN.md` for complete design specifications
+
+**Key iced Resources:**
+- NIH-Plug iced integration: https://nih-plug.robbertvanderhelm.nl/nih_plug_iced/index.html
+- Iced architecture guide: https://book.iced.rs/architecture.html
+- Iced examples: https://github.com/iced-rs/iced/tree/master/examples
+- Iced API docs: https://docs.iced.rs/iced/
 
 ## Build Commands
 
 - **Development build**: `cargo build`
 - **Release build**: `cargo build --release`
 - **Run tests**: `cargo test`
-- **Bundle plugin**: `cargo xtask bundle --release` (creates VST3 and CLAP in `target/bundled/`)
-- **Format code**: `cargo fmt` or `pre-commit run fmt --all-files`  
+- **Run specific test**: `cargo test <test_name>`
+- **Bundle plugin**: `cargo xtask bundle bus_channel_strip --release` (creates VST3 and CLAP in `target/bundled/`)
+- **Bundle with specific features**: `cargo build --features "api5500,buttercomp2,pultec"`
+- **Format code**: `cargo +nightly fmt` or `pre-commit run rustfmt-nightly --all-files`  
 - **Lint**: `cargo clippy --all-targets --all-features` (manual run recommended due to upstream issues)
+- **Install pre-commit hooks**: `pre-commit install`
+- **Run pre-commit on all files**: `pre-commit run --all-files`
 
 ## File Structure
 
@@ -104,22 +117,32 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 
 **Key Dependencies:**
 - `nih_plug` - Plugin framework
+- `nih_plug_iced` - Iced GUI integration for NIH-Plug
 - `biquad` v0.5.0 - Filter implementations (updated API)
 - `fundsp` - DSP utilities
 - `realfft` - FFT processing
+- `augmented-dsp-filters` - Additional filter implementations
+- `idsp` - Integer DSP operations
 - Custom C++ FFI wrappers in `cpp/`
+
+**Feature Flags:**
+- Default features: `api5500`, `buttercomp2`, `pultec`, `transformer`, `gui`
+- Optional: `dynamic_eq` (4-band dynamic EQ with hierarchical sub-features)
+- Build with specific modules: `cargo build --features "api5500,pultec"`
 
 ## Known Issues & Fixes
 
 **CI/CD Pipeline:**
-- Bundle command in workflow needs update: use `cargo xtask bundle --release` 
+- Bundle command in workflow needs update: use `cargo xtask bundle bus_channel_strip --release` 
 - Asset paths may point to directories instead of files
-- Test locally: `cargo xtask bundle --release && ls -la target/bundled/`
+- Test locally: `cargo xtask bundle bus_channel_strip --release && ls -la target/bundled/`
 
 **Biquad API Changes (RESOLVED):**
 - Filter constructors now require gain parameter: `Type::PeakingEQ(gain_db)`
 - No longer use `.set_gain()` method
 
 **GUI Status:**
-- Temporarily disabled due to egui API compatibility
+- Temporarily disabled due to iced API compatibility issues
 - All GUI code remains in `src/editor.rs` for future re-enabling
+- Migration from egui to iced required for stability
+- Use iced Application/Message/Update/View pattern for implementation

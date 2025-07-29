@@ -405,7 +405,7 @@ impl Default for BusChannelStripParams {
             .with_unit(" dB")
             .with_step_size(0.1),
 
-            // Low Mid Frequency (LMF) - Parametric at 200Hz
+            // Low Mid-Frequency (LMF) - Parametric at 200Hz
             lmf_freq: FloatParam::new(
                 "LMF Freq",
                 200.0,
@@ -469,7 +469,7 @@ impl Default for BusChannelStripParams {
             )
             .with_step_size(0.01),
 
-            // High Mid Frequency (HMF) - Parametric at 3kHz
+            // High Mid-Frequency (HMF) - Parametric at 3kHz
             hmf_freq: FloatParam::new(
                 "HMF Freq",
                 3000.0,
@@ -956,7 +956,7 @@ impl Plugin for BusChannelStrip {
         aux_input_ports: &[],
         aux_output_ports: &[],
 
-        // Individual ports and the layout as a whole can be named here. By default these names
+        // Individual ports and the layout as a whole can be named here. By default, these names
         // are generated as needed. This layout will be called 'Stereo', while a layout with
         // only one input and output channel would be called 'Mono'.
         names: PortNames::const_default(),
