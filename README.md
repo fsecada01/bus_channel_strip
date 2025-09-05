@@ -1,107 +1,176 @@
-# depot_tools
+# Bus Channel Strip VST Plugin
 
-Tools for working with Chromium development. It requires python 3.8.
+A professional multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-based DSP modules in Rust.
 
+## Features
 
-## Tools
+### Signal Chain
+**[API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer]**
 
-The most important tools are:
+### DSP Modules
+- **API5500 EQ**: 5-band semi-parametric equalizer with classic API 5500 character
+- **ButterComp2**: Airwindows bi-polar interleaved compression system
+- **Pultec EQ**: Custom EQP-1A style EQ with tube saturation modeling  
+- **Dynamic EQ**: 4-band dynamic EQ with frequency-dependent compression
+- **Transformer**: Transformer coloration module with 4 vintage models
 
-- `fetch`: A `gclient` wrapper to checkout a project. Use `fetch --help` for
-  more details.
-- `gclient`: A meta-checkout tool. Think
-  [repo](https://source.android.com/source/using-repo.html) or [git
-  submodules](https://git-scm.com/docs/git-submodule), except that it support
-  OS-specific rules, e.g. do not checkout Windows only dependencies when
-  checking out for Android. Use `gclient help` for more details and
-  [README.gclient.md](README.gclient.md).
-- `git cl`: A code review tool to interact with Rietveld or Gerrit. Use `git cl
-  help` for more details and [README.git-cl.md](README.git-cl.md).
-- `roll-dep`: A gclient dependency management tool to submit a _dep roll_,
-  updating a dependency to a newer revision.
+### Current Status
+- ✅ **ALL 5 CORE MODULES IMPLEMENTED AND FUNCTIONAL**
+- ✅ **MODULE REORDERING SYSTEM COMPLETE** 
+- ✅ **PROFESSIONAL PARAMETER SET (~75 parameters)**
+- ✅ **ALL COMPILATION ERRORS FIXED**
+- ✅ **SUCCESSFUL BUILD AND BUNDLE WORKING**
+- ✅ **vizia-plug GUI INTEGRATION WORKING**
+- 🔧 **CI/CD PIPELINE** needs bundle command fixes
 
-There are a lot of git utilities included.
+## Build Requirements
 
-Also, includes shell script/batch file for tools required to build chromium,
-e.g.
+### Dependencies
+- **Rust Nightly** (required for vizia-plug)
+- **Visual Studio Build Tools 2022** with C++ workload
+- **Windows 10/11 SDK**
+- **LLVM/Clang** (for bindgen)
+- **Ninja** (for Skia build system)
 
-- `gn`: a meta-build system that generates build files for Ninja
-- `autoninja`: a wrapper for `siso` and `ninja`.
-- `siso`: a build tool that aims to significantly speed up Chromium's build.
-- `ninja`: a small build system with a focus on speed.  deprecated by Siso.
+### Quick Setup
+```bash
+# Install Rust nightly
+rustup toolchain install nightly
 
-These shell script/batch file runs python script with `python-bin/python3`
-that find binaries in chromium checkout, and run with proper setup/check.
-To use these wrappers, you need to initialize/bootstrap depot_tools (using
-`gclient`, `update_depot_tools` or `ensure_bootstrap`).
+# Build without GUI
+cargo build --no-default-features --features "api5500,buttercomp2,pultec,transformer"
 
-## Installing
+# Build with GUI  
+cargo +nightly build --features "api5500,buttercomp2,pultec,transformer,gui"
 
-See [set-up documentation](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up).
+# Create plugin bundles
+cargo +nightly xtask bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,gui"
+```
 
-depot_tools is also available in
+### Windows Build Script
+For Windows users, use the automated build script:
+```batch
+bin\preflight_build.bat
+```
 
-- chromium's third_party/depot_tools:
-  propagated by [autoroller](https://autoroll.skia.org/r/depot-tools-chromium-autoroll).
+## Beta Testing Todos
 
-- on builder:
-  [infra_internal/recipe_bundles/chrome-internal.googlesource.com/chrome/tools/build](https://chrome-infra-packages.appspot.com/p/infra_internal/recipe_bundles/chrome-internal.googlesource.com/chrome/tools/build) bundles depot_tools.
-  propagated by [build_internal recipe roller](https://ci.chromium.org/ui/p/infra-internal/builders/cron/build_internal%20recipe%20roller)
+### Pre-Release Testing
+- [ ] **DAW Compatibility Testing**
+  - [ ] Test VST3 in Reaper, Pro Tools, Logic Pro X, Cubase, FL Studio
+  - [ ] Test CLAP in Bitwig Studio, Reaper (CLAP support)
+  - [ ] Verify parameter automation in each DAW
+  - [ ] Test preset save/load functionality
 
-These depot_tools would not be initialized/bootstrapped (i.e. no
-`python-bin/python3` binary available), so the build tool wrapper won't work,
-unless it is explicitly initialized by `ensure_bootstrap`.
-Or, directly call the python script instead of using the shell script/batch
-file.
+- [ ] **Audio Quality Verification**
+  - [ ] A/B test each module against reference implementations
+  - [ ] Measure THD+N, frequency response, phase response
+  - [ ] Test with various sample rates (44.1kHz, 48kHz, 88.2kHz, 96kHz)
+  - [ ] Verify no audio artifacts, clicks, or pops
+  - [ ] Test bypass functionality for each module
 
+- [ ] **Performance Testing**
+  - [ ] CPU usage benchmarks in different DAWs
+  - [ ] Memory leak testing during extended sessions
+  - [ ] Stress test with large buffer sizes and high channel counts
+  - [ ] Test real-time performance under various system loads
 
-## Updating
+- [ ] **GUI Testing**  
+  - [ ] Test GUI responsiveness and parameter updates
+  - [ ] Verify GUI scaling on different screen resolutions
+  - [ ] Test knob/slider interaction and value display
+  - [ ] Verify module reordering interface works correctly
+  - [ ] Test GUI with accessibility tools
 
-`depot_tools` updates itself automatically when running `gclient` tool. To
-disable auto update, set the environment variable `DEPOT_TOOLS_UPDATE=0` or
-run `./update_depot_tools_toggle.py --disable`.
+### Platform Testing
+- [ ] **Windows Testing**
+  - [ ] Windows 10 (x64)
+  - [ ] Windows 11 (x64)  
+  - [ ] Different VST host applications
+  - [ ] Plugin scanner compatibility
 
-To update package manually, run `update_depot_tools.bat` on Windows,
-or `./update_depot_tools` on Linux or Mac.
+- [ ] **macOS Testing** (Future)
+  - [ ] macOS 12+ (Intel and Apple Silicon)
+  - [ ] Audio Unit format support
+  - [ ] Logic Pro X integration
+  - [ ] GateKeeper and code signing
 
-Running `gclient` will install `python3` binary.
+- [ ] **Linux Testing** (Future)
+  - [ ] Ubuntu 20.04+ LTS
+  - [ ] JACK and ALSA support
+  - [ ] Various Linux DAWs (Ardour, Bitwig)
 
+### Documentation & Distribution
+- [ ] **User Documentation**
+  - [ ] Parameter reference guide
+  - [ ] Module descriptions and use cases
+  - [ ] Installation instructions
+  - [ ] Preset library creation
+
+- [ ] **Beta Release Preparation**  
+  - [ ] Create installer packages
+  - [ ] Set up crash reporting system
+  - [ ] Prepare beta feedback collection system
+  - [ ] Create changelog and version tracking
+
+### Known Issues to Address
+- [ ] CI/CD pipeline bundle command needs update
+- [ ] Windows preflight script could be streamlined further
+- [ ] Dead code warnings cleanup (non-critical)
+
+## Architecture
+
+### Plugin Framework
+- **NIH-Plug**: Modern Rust plugin framework with ~75 automation parameters
+- **vizia**: Modern GUI framework with CSS-like styling and Skia rendering
+- **Lock-free Processing**: Allocation-free audio processing thread
+- **Module Reordering**: Dynamic signal chain configuration
+
+### Key Dependencies
+- `nih_plug` - Plugin framework and host communication
+- `vizia_plug` - vizia GUI integration for NIH-Plug
+- `biquad` v0.5.0 - Filter implementations
+- `fundsp` - DSP utilities and filters  
+- `realfft` - FFT processing for spectral analysis
+- `augmented-dsp-filters` - Additional filter types
+
+### Build System
+- **Rust Nightly**: Required for vizia's advanced features
+- **vizia-plug**: Handles Skia compilation automatically with pre-built binaries
+- **FFI Integration**: C++ Airwindows modules via `extern "C"` interfaces
+- **Cross-platform**: Windows (primary), macOS and Linux (planned)
+
+## File Structure
+
+```
+bus_channel_strip/
+├── src/
+│   ├── lib.rs              # Main plugin entry point
+│   ├── api5500.rs          # 5-band semi-parametric EQ
+│   ├── buttercomp2.rs      # Airwindows ButterComp2 wrapper
+│   ├── pultec.rs           # Pultec EQP-1A style EQ
+│   ├── dynamic_eq.rs       # 4-band dynamic EQ (optional)
+│   ├── transformer.rs      # Transformer coloration
+│   ├── editor.rs           # vizia GUI implementation
+│   ├── components.rs       # Reusable GUI components
+│   ├── shaping.rs          # Common DSP shaping functions
+│   └── spectral.rs         # FFT analysis utilities
+├── cpp/                    # FFI wrappers for C++ modules
+├── assets/                 # GUI assets and resources
+├── bin/                    # Build and utility scripts
+└── target/bundled/         # Built plugin bundles (VST3/CLAP)
+```
 
 ## Contributing
 
-To contribute change for review:
+See `CLAUDE.md` for detailed development guidelines and `AGENTS.md` for original project specifications.
 
-    git new-branch <somename>
-    # Hack
-    git add .
-    git commit -a -m "Fixes goat teleporting"
-    # find reviewers
-    git cl owners
-    git log -- <yourfiles>
+## License
 
-    # Request a review.
-    git cl upload -r reviewer1@chromium.org,reviewer2@chromium.org --send-mail
+GPL-3.0-or-later
 
-    # Edit change description if needed.
-    git cl desc
+---
 
-    # If change is approved, flag it to be committed.
-    git cl set-commit
-
-    # If change needs more work.
-    git rebase-update
-    ...
-    git cl upload -t "Fixes goat teleporter destination to be Australia"
-
-See also [open bugs](https://issues.chromium.org/issues?q=status:open%20componentid:1456102),
-[open reviews](https://chromium-review.googlesource.com/q/status:open+project:chromium%252Ftools%252Fdepot_tools),
-[forum](https://groups.google.com/a/chromium.org/forum/#!forum/infra-dev) or
-[report problems](https://issues.chromium.org/issues/new?component=1456102).
-
-### cpplint.py
-
-Until 2018, our `cpplint.py` was a copy of the upstream version at
-https://github.com/google/styleguide/tree/gh-pages/cpplint. Unfortunately, that
-repository is not maintained any more.
-If you want to update `cpplint.py` in `depot_tools`, just upload a patch to do
-so. We will figure out a long-term strategy via issue https://crbug.com/916550.
+**Status**: Ready for beta testing phase
+**Build Date**: September 2025
+**Framework**: NIH-Plug + vizia + Airwindows DSP

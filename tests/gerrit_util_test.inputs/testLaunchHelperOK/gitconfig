@@ -1,2 +1,0 @@
-[http]
-	extraHeader = Authorization: Basic REALLY_COOL_TOKEN

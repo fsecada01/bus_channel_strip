@@ -1,5 +1,0 @@
-Reviewers: [a@example.com]
-Description: Whatever
-M, a.cc
-
-Reviewers: b@example.com

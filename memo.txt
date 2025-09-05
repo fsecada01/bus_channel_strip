@@ -1,0 +1,64 @@
+# Git Memo - vizia-plug Build Issues Resolution
+Date: September 5, 2025
+
+## Problem Statement
+The bus_channel_strip plugin was experiencing build failures related to vizia-plug versioning problems and Skia compilation issues, making it impossible to build with the GUI enabled.
+
+## Root Cause Analysis
+1. **Missing Core Dependency**: The project was missing the fundamental `nih_plug` dependency in Cargo.toml
+2. **Incorrect Rust Toolchain**: Project was configured to use stable Rust, but vizia-plug requires nightly
+3. **Skia Dependency Conflicts**: Direct skia-safe dependency was conflicting with vizia-plug's internal Skia management
+4. **Overcomplicated Configuration**: Previous attempts to manually handle Skia binaries were unnecessary
+
+## Changes Made
+
+### Cargo.toml Updates
+- **Added**: `nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }` - The core plugin framework dependency that was missing
+- **Simplified**: `vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }` - Removed complex skia-safe configurations
+- **Updated GUI feature**: Changed from `gui = ["vizia_plug", "atomic_float", "skia-safe"]` to `gui = ["vizia_plug", "atomic_float"]` - Let vizia-plug handle Skia internally
+
+### Rust Toolchain Configuration  
+- **Updated**: `rust-toolchain.toml` from `channel = "stable"` to `channel = "nightly"` 
+- **Reason**: vizia-plug requires nightly Rust for advanced features and API compatibility
+
+### Build Environment
+- **Installed**: nightly-x86_64-pc-windows-msvc toolchain via `rustup toolchain install nightly`
+- **Verified**: Build process using `cargo +nightly xtask bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,gui"`
+
+## Results
+✅ **Successful Build**: Both VST3 and CLAP plugin bundles created successfully
+- `Bus-Channel-Strip.clap` (22.6 MB)  
+- `Bus-Channel-Strip.vst3/` (VST3 bundle directory)
+
+✅ **vizia-plug Integration**: GUI framework now compiles without Skia-related errors
+✅ **Automated Skia Handling**: vizia-plug manages Skia binaries automatically using pre-built approach
+✅ **Streamlined Build Process**: Removed complex Windows preflight script dependencies for Skia compilation
+
+## Technical Notes
+- vizia-plug uses pre-built Skia binaries (version 0.84.0) instead of compiling from source
+- The vizia framework revision used: `532aa526d40afbcde823c806bf78eb2c7bd1a489`
+- All 21 compiler warnings are non-critical (unused code, dead code analysis)
+
+## Future Implications
+- Build times significantly reduced (no Skia compilation)
+- More reliable cross-platform builds
+- Easier developer onboarding (less complex build dependencies)
+- CI/CD pipeline should now work without manual Skia setup
+
+## Build Command for Future Reference
+```bash
+cargo +nightly xtask bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,gui"
+```
+
+## Files Modified
+- `Cargo.toml` - Updated dependencies and features
+- `rust-toolchain.toml` - Changed to nightly channel
+- `Cargo.lock` - Updated dependency graph (auto-generated)
+
+## Verification
+- Core functionality builds successfully without GUI: ✅
+- GUI-enabled build completes without errors: ✅  
+- Plugin bundles created in `target/bundled/`: ✅
+- All DSP modules compile and link: ✅
+
+This resolves the vizia-plug versioning issues and establishes a stable build foundation for beta testing phase.

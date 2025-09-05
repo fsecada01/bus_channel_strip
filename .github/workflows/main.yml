@@ -1,0 +1,170 @@
+name: Create VST3/CLAP Release
+
+on:
+  push:
+    branches:
+      - main
+      - 'v[0-9]+*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            name: windows
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: macos-intel
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: macos-arm64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxss-dev \
+            libglu1-mesa-dev \
+            freeglut3-dev \
+            mesa-common-dev \
+            build-essential \
+            gcc \
+            g++ \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-icccm4-dev \
+            libxcb-dri2-0-dev
+
+      - name: Install MinGW for Windows cross-compilation
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: |
+          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+
+      - name: Build and bundle plugins
+        run: |
+          cargo xtask bundle bus_channel_strip --release --target ${{ matrix.target }}
+
+      - name: Create archive name
+        id: archive
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            echo "name=Bus-Channel-Strip-${{ matrix.name }}.zip" >> $GITHUB_OUTPUT
+          else
+            echo "name=Bus-Channel-Strip-${{ matrix.name }}.tar.gz" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create archive
+        shell: bash
+        run: |
+          cd target/bundled
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            zip -r Bus-Channel-Strip-${{ matrix.name }}.zip Bus-Channel-Strip.vst3 Bus-Channel-Strip.clap
+          else
+            tar -czf Bus-Channel-Strip-${{ matrix.name }}.tar.gz Bus-Channel-Strip.vst3 Bus-Channel-Strip.clap
+          fi
+          ls -la
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: target/bundled/${{ steps.archive.outputs.name }}
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          ls -la artifacts/
+          find artifacts/ -type f
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          release_name: Bus Channel Strip v${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Upload Linux release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/Bus-Channel-Strip-linux.tar.gz/Bus-Channel-Strip-linux.tar.gz
+          asset_name: Bus-Channel-Strip-linux.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Windows release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/Bus-Channel-Strip-windows.zip/Bus-Channel-Strip-windows.zip
+          asset_name: Bus-Channel-Strip-windows.zip
+          asset_content_type: application/zip
+
+      - name: Upload macOS Intel release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/Bus-Channel-Strip-macos-intel.tar.gz/Bus-Channel-Strip-macos-intel.tar.gz
+          asset_name: Bus-Channel-Strip-macos-intel.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload macOS ARM64 release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/Bus-Channel-Strip-macos-arm64.tar.gz/Bus-Channel-Strip-macos-arm64.tar.gz
+          asset_name: Bus-Channel-Strip-macos-arm64.tar.gz
+          asset_content_type: application/gzip

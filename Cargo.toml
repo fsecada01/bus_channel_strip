@@ -1,0 +1,59 @@
+[package]
+name = "bus_channel_strip"
+version = "0.1.0-prerelease-20250729"
+edition = "2021"
+authors = ["Your Name <your@email.com>"]
+license = "GPL-3.0-or-later"
+homepage = "https://youtu.be/dQw4w9WgXcQ"
+description = "A short description of your plugin"
+
+[workspace]
+members = ["xtask"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+augmented-dsp-filters = "2.5.0"
+biquad = "0.5.0"
+fundsp = "0.20.0"
+idsp = "0.18.0"
+# vizia-plug for GUI integration with nih-plug
+vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
+atomic_float = { version = "0.1", optional = true }
+realfft = "3.5.0"
+
+[features]
+default = ["api5500", "buttercomp2", "pultec", "transformer", "gui"]
+# GUI now uses iced-rs instead of egui for better stability
+# Core DSP modules
+api5500 = []
+buttercomp2 = []
+pultec = []
+transformer = []
+
+# Advanced modules (hierarchical)
+dynamic_eq = []
+"dynamic_eq.diff" = ["dynamic_eq"]
+"dynamic_eq.multiband" = ["dynamic_eq"]
+
+# UI system
+gui = ["vizia_plug", "atomic_float"]
+# Uncomment the below line to disable the on-by-default VST3 feature to remove
+# the GPL compatibility requirement
+
+
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+
+[build-dependencies]
+cc = "1.0"
+chrono = "0.4"
