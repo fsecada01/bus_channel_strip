@@ -102,7 +102,9 @@ jobs:
           # Force exclusive use of pre-built Skia binaries
           echo "SKIA_SOURCE_DIR=" >> $GITHUB_ENV
           echo "SKIA_USE_SYSTEM_LIBRARIES=0" >> $GITHUB_ENV
-          echo "DOCS_RS=1" >> $GITHUB_ENV
+          # Do NOT set DOCS_RS in CI. That variable is meant for docs.rs
+          # and forces skia-bindings into a special docs build path that
+          # fails outside docs.rs with missing files.
           
           # Platform-specific optimizations
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
