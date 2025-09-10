@@ -1,0 +1,71 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows specific
+*.exe
+*.pdb
+*.dll
+*.lib
+
+# Build outputs and logs
+*.log
+build.log
+build_*.log
+temp_test.pdb
+
+# Dependencies and caches
+.cargo/
+.versions/
+
+# Plugin bundles (optional - you may want to keep these)
+# /target/bundled/*.vst3
+# /target/bundled/*.clap
+
+# Development artifacts  
+depot_tools_clean/
+.claude/
+
+# Audio plugin dev files
+*.fxb
+*.fxp
+*.preset
+
+# Temporary files
+*.tmp
+*.temp
+
+# Skia build artifacts
+.cipd_bin/
+.cipd_client*
+.cipd_client_cache/
+.disable_auto_update
+
+# Windows build tools
+/python*_bin/
+/git_bin/
+/win_tools*_bin/
+/external_bin/
+
+# Analysis and debug files
+*.pdbx
+*.traces
+
+# Git memos and commit notes
+memo.txt
