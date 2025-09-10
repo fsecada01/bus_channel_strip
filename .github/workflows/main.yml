@@ -125,7 +125,8 @@ jobs:
       - name: Build and bundle plugins (without GUI for ARM64 only)
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer
+          # Disable default features so the GUI (and Skia) are not pulled.
+          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --no-default-features --features api5500,buttercomp2,transformer
 
       - name: Create archive name
         id: archive
