@@ -92,6 +92,7 @@ jobs:
           echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/" >> $GITHUB_ENV
           echo "SKIA_BINARIES_KEY=skia-binaries-0.84.0" >> $GITHUB_ENV
           echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
+          echo "CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=true" >> $GITHUB_ENV
           
           # Windows-specific environment (matches local debug_plugin.bat)
           if [[ "${{ matrix.target }}" == "x86_64-pc-windows-msvc" ]]; then
