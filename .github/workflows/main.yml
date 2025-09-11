@@ -58,20 +58,20 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get update
           sudo apt-get install -y \
-            clang \
-            libasound2-dev \
-            libfreetype6-dev \
-            libglu1-mesa-dev \
-            libx11-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libxss-dev \
-            pkg-config \
-            build-essential
+          clang \
+          libasound2-dev \
+          libfreetype6-dev \
+          libglu1-mesa-dev \
+          libx11-dev \
+          libxcursor-dev \
+          libxi-dev \
+          libxinerama-dev \
+          libxrandr-dev \
+          libxss-dev \
+          libfontconfig1-dev \    # <-- Add this line
+          pkg-config \
+          build-essential
 
 
       - name: Install Windows dependencies
