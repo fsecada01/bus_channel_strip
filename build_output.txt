@@ -1,0 +1,4 @@
+Microsoft Windows [Version 10.0.22631.5699]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\dev\projects\vst3s\bus_channel_strip>

@@ -76,7 +76,16 @@ jobs:
             libxinerama-dev \
             libxss-dev \
             libglu1-mesa-dev \
-            build-essential
+            build-essential \
+            ninja-build \
+            python3 \
+            clang
+          
+          # Install gn (Google's meta-build system) needed for Skia source builds
+          curl -L https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -o gn.zip
+          unzip -o gn.zip
+          sudo mv gn /usr/local/bin/
+          sudo chmod +x /usr/local/bin/gn
 
       - name: Install Windows dependencies
         if: matrix.os == 'windows-latest'
