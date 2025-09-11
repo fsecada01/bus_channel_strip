@@ -23,7 +23,8 @@ idsp = "0.18.0"
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
 # Force skia-bindings to use binary-cache feature to enable pre-built binary downloads
 # This explicit dependency with binary-cache overrides transitive dependencies from vizia_plug
-skia-bindings = { version = "0.84.0", features = ["binary-cache"], optional = true }
+# Note: skia-safe disables skia-bindings default features, so we must explicitly enable binary-cache
+skia-bindings = { version = "0.84.0", default-features = true, features = ["binary-cache"], optional = true }
 atomic_float = { version = "0.1", optional = true }
 realfft = "3.5.0"
 
