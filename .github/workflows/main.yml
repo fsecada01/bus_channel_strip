@@ -94,24 +94,29 @@ jobs:
           echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
           echo "CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=true" >> $GITHUB_ENV
           
-          # Windows-specific environment (matches local debug_plugin.bat)
-          if [[ "${{ matrix.target }}" == "x86_64-pc-windows-msvc" ]]; then
+          # Platform-specific binary URLs for different targets
+          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-x86_64-unknown-linux-gnu.tar.gz" >> $GITHUB_ENV
+          elif [[ "${{ matrix.target }}" == "x86_64-pc-windows-msvc" ]]; then
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-x86_64-pc-windows-msvc.tar.gz" >> $GITHUB_ENV
             echo "TARGET=x86_64-pc-windows-msvc" >> $GITHUB_ENV
             echo "CARGO_CFG_TARGET_ENV=msvc" >> $GITHUB_ENV
-          fi
-          
-          # Force exclusive use of pre-built Skia binaries
-          echo "SKIA_SOURCE_DIR=" >> $GITHUB_ENV
-          echo "SKIA_USE_SYSTEM_LIBRARIES=0" >> $GITHUB_ENV
-          # Do NOT set DOCS_RS in CI. That variable is meant for docs.rs
-          # and forces skia-bindings into a special docs build path that
-          # fails outside docs.rs with missing files.
-          
-          # Platform-specific optimizations
-          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+          elif [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-x86_64-apple-darwin.tar.gz" >> $GITHUB_ENV
+          elif [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-aarch64-apple-darwin.tar.gz" >> $GITHUB_ENV
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
             echo "CXXFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
           fi
+          
+          # Force exclusive use of pre-built Skia binaries - no source building
+          echo "SKIA_SOURCE_DIR=" >> $GITHUB_ENV
+          echo "SKIA_USE_SYSTEM_LIBRARIES=0" >> $GITHUB_ENV
+          echo "SKIA_NINJA_COMMAND=" >> $GITHUB_ENV
+          echo "SKIA_GN_COMMAND=" >> $GITHUB_ENV
+          # Do NOT set DOCS_RS in CI. That variable is meant for docs.rs
+          # and forces skia-bindings into a special docs build path that
+          # fails outside docs.rs with missing files.
 
       - name: Build xtask
         run: |
