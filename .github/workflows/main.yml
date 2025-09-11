@@ -64,6 +64,7 @@ jobs:
           libfreetype6-dev \
           libglu1-mesa-dev \
           libx11-dev \
+          libxcb1-dev \
           libxcursor-dev \
           libxi-dev \
           libxinerama-dev \
