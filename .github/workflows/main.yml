@@ -94,17 +94,17 @@ jobs:
           echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
           echo "CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=true" >> $GITHUB_ENV
           
-          # Platform-specific binary URLs for different targets
+          # Platform-specific binary URLs with proper hash format (based on actual release assets)
           if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-x86_64-unknown-linux-gnu.tar.gz" >> $GITHUB_ENV
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-x86_64-unknown-linux-gnu-gl-textlayout.tar.gz" >> $GITHUB_ENV
           elif [[ "${{ matrix.target }}" == "x86_64-pc-windows-msvc" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-x86_64-pc-windows-msvc.tar.gz" >> $GITHUB_ENV
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-x86_64-pc-windows-msvc-d3d-gl-textlayout-vulkan.tar.gz" >> $GITHUB_ENV
             echo "TARGET=x86_64-pc-windows-msvc" >> $GITHUB_ENV
             echo "CARGO_CFG_TARGET_ENV=msvc" >> $GITHUB_ENV
           elif [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-x86_64-apple-darwin.tar.gz" >> $GITHUB_ENV
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-x86_64-apple-darwin-gl-metal-textlayout.tar.gz" >> $GITHUB_ENV
           elif [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-0.84.0-aarch64-apple-darwin.tar.gz" >> $GITHUB_ENV
+            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-aarch64-apple-darwin-gl-metal-textlayout.tar.gz" >> $GITHUB_ENV
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
             echo "CXXFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
           fi
