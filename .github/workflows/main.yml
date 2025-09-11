@@ -50,12 +50,6 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      # Fix Git repository state for submodules (addresses Skia build issues)
-      - name: Ensure submodules have full git context
-        run: |
-          git submodule update --init --recursive --depth=0
-          git submodule foreach --recursive 'git fetch --unshallow || true'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
         with:
@@ -76,16 +70,8 @@ jobs:
             libxinerama-dev \
             libxss-dev \
             libglu1-mesa-dev \
-            build-essential \
-            ninja-build \
-            python3 \
-            clang
-          
-          # Install gn (Google's meta-build system) needed for Skia source builds
-          curl -L https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -o gn.zip
-          unzip -o gn.zip
-          sudo mv gn /usr/local/bin/
-          sudo chmod +x /usr/local/bin/gn
+            build-essential
+
 
       - name: Install Windows dependencies
         if: matrix.os == 'windows-latest'
@@ -96,33 +82,16 @@ jobs:
       - name: Set environment for pre-built Skia binaries
         shell: bash
         run: |
-          # Force use of pre-built Skia binaries (mirrors local script exactly)
+          # Force binary downloads using rust-skia's actual environment variables
           echo "FORCE_SKIA_BINARIES_DOWNLOAD=1" >> $GITHUB_ENV
-          echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/" >> $GITHUB_ENV
-          echo "SKIA_BINARIES_KEY=skia-binaries-0.84.0" >> $GITHUB_ENV
           echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
           echo "CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=true" >> $GITHUB_ENV
           
-          # Platform-specific binary URLs (verified from actual release assets)
-          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-x86_64-unknown-linux-gnu-gl-textlayout-vulkan.tar.gz" >> $GITHUB_ENV
-          elif [[ "${{ matrix.target }}" == "x86_64-pc-windows-msvc" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-x86_64-pc-windows-msvc-gl-textlayout-vulkan.tar.gz" >> $GITHUB_ENV
-            echo "TARGET=x86_64-pc-windows-msvc" >> $GITHUB_ENV
-            echo "CARGO_CFG_TARGET_ENV=msvc" >> $GITHUB_ENV
-          elif [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-x86_64-apple-darwin-gl-textlayout-vulkan.tar.gz" >> $GITHUB_ENV
-          elif [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
-            echo "SKIA_BINARIES_URL=https://github.com/rust-skia/skia-binaries/releases/download/0.84.0/skia-binaries-8df1749a67a2800c2904-aarch64-apple-darwin-gl-textlayout-vulkan.tar.gz" >> $GITHUB_ENV
+          # Set platform-specific environment for ARM64 zlib issue only
+          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
             echo "CXXFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
           fi
-          
-          # Force exclusive use of pre-built Skia binaries - no source building
-          echo "SKIA_SOURCE_DIR=" >> $GITHUB_ENV
-          echo "SKIA_USE_SYSTEM_LIBRARIES=0" >> $GITHUB_ENV
-          echo "SKIA_NINJA_COMMAND=" >> $GITHUB_ENV
-          echo "SKIA_GN_COMMAND=" >> $GITHUB_ENV
           # Do NOT set DOCS_RS in CI. That variable is meant for docs.rs
           # and forces skia-bindings into a special docs build path that
           # fails outside docs.rs with missing files.
@@ -131,16 +100,9 @@ jobs:
         run: |
           cargo +nightly build --package xtask
 
-      - name: Build and bundle plugins (with GUI)
-        if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-apple-darwin'
+      - name: Build and bundle plugins (with GUI for all platforms)
         run: |
           cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui
-
-      - name: Build and bundle plugins (without GUI for ARM64 only)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: |
-          # Disable default features so the GUI (and Skia) are not pulled.
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --no-default-features --features api5500,buttercomp2,transformer
 
       - name: Create archive name
         id: archive

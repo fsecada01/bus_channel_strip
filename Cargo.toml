@@ -24,8 +24,6 @@ vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true 
 # Force skia-safe to use binary-cache feature to enable pre-built binary downloads
 # vizia specifies skia-safe without binary-cache, so we override it here
 # This ensures skia-bindings gets built with binary-cache enabled
-skia-safe = { version = "0.84.0", features = ["gl", "textlayout", "svg", "binary-cache"], optional = true }
-skia-bindings = { version = "0.84.0", default-features = true, features = ["binary-cache"], optional = true }
 atomic_float = { version = "0.1", optional = true }
 realfft = "3.5.0"
 
