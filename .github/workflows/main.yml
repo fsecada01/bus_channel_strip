@@ -125,7 +125,7 @@ jobs:
       - name: Build and bundle plugins (with GUI)
         if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-apple-darwin'
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui
+          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui,skia-bindings/binary-cache
 
       - name: Build and bundle plugins (without GUI for ARM64 only)
         if: matrix.target == 'aarch64-apple-darwin'
