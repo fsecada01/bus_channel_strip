@@ -21,6 +21,8 @@ fundsp = "0.20.0"
 idsp = "0.18.0"
 # vizia-plug for GUI integration with nih-plug
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
+# Force skia-bindings to use binary-cache feature to enable pre-built binary downloads
+skia-bindings = { version = "0.84.0", features = ["binary-cache"], optional = true }
 atomic_float = { version = "0.1", optional = true }
 realfft = "3.5.0"
 
@@ -39,7 +41,7 @@ dynamic_eq = []
 "dynamic_eq.multiband" = ["dynamic_eq"]
 
 # UI system
-gui = ["vizia_plug", "atomic_float"]
+gui = ["vizia_plug", "atomic_float", "skia-bindings"]
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 
