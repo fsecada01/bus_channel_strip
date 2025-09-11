@@ -60,16 +60,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            pkg-config \
+            clang \
             libasound2-dev \
-            libgl1-mesa-dev \
+            libfreetype6-dev \
+            libglu1-mesa-dev \
             libx11-dev \
             libxcursor-dev \
-            libxrandr-dev \
             libxi-dev \
             libxinerama-dev \
+            libxrandr-dev \
             libxss-dev \
-            libglu1-mesa-dev \
+            pkg-config \
             build-essential
 
 
