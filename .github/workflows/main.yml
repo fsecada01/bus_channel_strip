@@ -69,7 +69,7 @@ jobs:
           libxinerama-dev \
           libxrandr-dev \
           libxss-dev \
-          libfontconfig1-dev \ 
+          font-config \ 
           pkg-config \
           build-essential
 
