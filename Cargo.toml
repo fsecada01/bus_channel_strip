@@ -21,8 +21,8 @@ fundsp = "0.20.0"
 idsp = "0.18.0"
 # vizia-plug for GUI integration with nih-plug
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
-skia-safe = { version = "0.84", optional = true }
-skia-bindings = { version = "0.84", optional = true }
+# Use skia-safe with an explicit feature set that matches typical prebuilts and vizia on Linux
+skia-safe = { version = "0.84", features = ["gl", "textlayout", "svg", "x11"], optional = true }
 atomic_float = { version = "0.1", optional = true }
 realfft = "3.5.0"
 
@@ -41,7 +41,7 @@ dynamic_eq = []
 "dynamic_eq.multiband" = ["dynamic_eq"]
 
 # UI system
-gui = ["vizia_plug", "atomic_float", "skia-safe", "skia-bindings"]
+gui = ["vizia_plug", "atomic_float", "skia-safe"]
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 
