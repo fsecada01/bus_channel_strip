@@ -67,6 +67,11 @@ jobs:
           libglu1-mesa-dev \
           libegl1-mesa-dev \
           libwayland-egl1-mesa \
+          libwayland-egl1-mesa-dev \
+          libwayland-dev \
+          mesa-common-dev \
+          wayland-protocols \
+          libxkbcommon-dev \
           libx11-dev \
           libx11-xcb-dev \
           libxcb1-dev \
@@ -134,13 +139,16 @@ jobs:
           fi
           # If SKIA_BINARIES_URL was already a file:// or absolute path, the previous step has exported it unchanged.
 
+      - name: Clean previous build artifacts
+        run: cargo clean
+
       - name: Build xtask
         run: |
-          cargo +nightly build --package xtask
+          cargo +nightly build --package xtask -vv
 
       - name: Build and bundle plugins (with GUI for all platforms)
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui
+          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui -vv
 
       - name: Create archive name
         id: archive
