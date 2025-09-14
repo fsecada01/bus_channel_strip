@@ -31,7 +31,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             name: linux
           - target: x86_64-pc-windows-msvc
             os: windows-latest
@@ -56,7 +56,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu-')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -65,6 +65,7 @@ jobs:
           libfreetype6-dev \
           libfontconfig-dev \
           libglu1-mesa-dev \
+          libegl1-mesa-dev \
           libx11-dev \
           libx11-xcb-dev \
           libxcb1-dev \
@@ -94,6 +95,26 @@ jobs:
           echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
           echo "CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG=true" >> $GITHUB_ENV
           
+          # Optionally point rust-skia at your own prebuilt tarball and key using repository Variables (Actions -> Variables)
+          # - SKIA_BINARIES_URL: Full URL to the prebuilt tarball (or leave unset to use rust-skia defaults)
+          # - SKIA_BINARIES_KEY: Optional override for the binary key (platform/features selector)
+          if [[ -n "${{ vars.SKIA_BINARIES_URL }}" ]]; then
+            echo "SKIA_BINARIES_URL=${{ vars.SKIA_BINARIES_URL }}" >> $GITHUB_ENV
+          fi
+          if [[ -n "${{ vars.SKIA_BINARIES_KEY }}" ]]; then
+            echo "SKIA_BINARIES_KEY=${{ vars.SKIA_BINARIES_KEY }}" >> $GITHUB_ENV
+          fi
+
+          # Optionally override binary source/key from repository Variables (Actions -> Variables):
+          # - Define org/repo variable SKIA_BINARIES_URL with the full tarball URL or base as required by your hosting
+          # - Define org/repo variable SKIA_BINARIES_KEY matching the desired binary key
+          if [[ -n "${{ vars.SKIA_BINARIES_URL }}" ]]; then
+            echo "SKIA_BINARIES_URL=${{ vars.SKIA_BINARIES_URL }}" >> $GITHUB_ENV
+          fi
+          if [[ -n "${{ vars.SKIA_BINARIES_KEY }}" ]]; then
+            echo "SKIA_BINARIES_KEY=${{ vars.SKIA_BINARIES_KEY }}" >> $GITHUB_ENV
+          fi
+
           # Set platform-specific environment for ARM64 zlib issue only
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
@@ -102,6 +123,20 @@ jobs:
           # Do NOT set DOCS_RS in CI. That variable is meant for docs.rs
           # and forces skia-bindings into a special docs build path that
           # fails outside docs.rs with missing files.
+
+      - name: Prepare Skia offline tarball (optional)
+        if: ${{ vars.SKIA_BINARIES_URL != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${{ vars.SKIA_BINARIES_URL }}"
+          # If the provided URL is http(s), download it locally and point SKIA_BINARIES_URL to a file:// path
+          if [[ "$url" =~ ^https?:// ]]; then
+            out="$RUNNER_TEMP/skia-prebuilt.tar.gz"
+            curl -fsSL "$url" -o "$out"
+            echo "SKIA_BINARIES_URL=file://$out" >> "$GITHUB_ENV"
+          fi
+          # If SKIA_BINARIES_URL was already a file:// or absolute path, the previous step has exported it unchanged.
 
       - name: Build xtask
         run: |
