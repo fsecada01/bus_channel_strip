@@ -105,14 +105,9 @@ jobs:
             echo "SKIA_BINARIES_KEY=${{ vars.SKIA_BINARIES_KEY }}" >> $GITHUB_ENV
           fi
 
-          # Optionally override binary source/key from repository Variables (Actions -> Variables):
-          # - Define org/repo variable SKIA_BINARIES_URL with the full tarball URL or base as required by your hosting
-          # - Define org/repo variable SKIA_BINARIES_KEY matching the desired binary key
-          if [[ -n "${{ vars.SKIA_BINARIES_URL }}" ]]; then
-            echo "SKIA_BINARIES_URL=${{ vars.SKIA_BINARIES_URL }}" >> $GITHUB_ENV
-          fi
-          if [[ -n "${{ vars.SKIA_BINARIES_KEY }}" ]]; then
-            echo "SKIA_BINARIES_KEY=${{ vars.SKIA_BINARIES_KEY }}" >> $GITHUB_ENV
+          # On Linux, avoid requiring EGL headers if a source build is triggered
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "SKIA_GN_ARGS=skia_use_egl=false" >> $GITHUB_ENV
           fi
 
           # Set platform-specific environment for ARM64 zlib issue only
