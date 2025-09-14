@@ -66,6 +66,7 @@ jobs:
           libfontconfig-dev \
           libglu1-mesa-dev \
           libegl1-mesa-dev \
+          libwayland-egl1-mesa \
           libx11-dev \
           libx11-xcb-dev \
           libxcb1-dev \
