@@ -55,6 +55,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install rustfmt component (Windows)
+        if: matrix.os == 'windows-latest'
+        run: rustup component add rustfmt
+
       - name: Install Linux dependencies
         if: startsWith(matrix.os, 'ubuntu-')
         run: |
@@ -91,6 +95,10 @@ jobs:
         run: |
           # Configure Rust for MSVC target (matches local script)
           rustup target add x86_64-pc-windows-msvc
+
+      - name: Install zip (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install -y zip
 
       - name: Set environment for pre-built Skia binaries
         shell: bash
@@ -143,11 +151,11 @@ jobs:
 
       - name: Build xtask
         run: |
-          cargo +nightly build --package xtask -vv
+          cargo +nightly build --package xtask
 
       - name: Build and bundle plugins (with GUI for all platforms)
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui -vv
+          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui
 
       - name: Create archive name
         id: archive
