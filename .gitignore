@@ -70,3 +70,5 @@ depot_tools_clean/
 # Git memos and commit notes
 memo.txt
 *.txt
+
+*.env
