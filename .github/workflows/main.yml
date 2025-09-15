@@ -67,7 +67,6 @@ jobs:
           libglu1-mesa-dev \
           libegl1-mesa-dev \
           libwayland-egl1-mesa \
-          libwayland-egl1-mesa-dev \
           libwayland-dev \
           mesa-common-dev \
           wayland-protocols \
