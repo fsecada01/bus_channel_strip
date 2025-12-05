@@ -17,13 +17,16 @@
 # for full rationale and history.
 # -------------------------------------------------------------------------------------
 
-name: Create VST3/CLAP Release
+name: Build and Release VST3/CLAP
 
 on:
   push:
     branches:
-      - main
-      - 'v[0-9]+*'
+      - main              # Build only (no release)
+      - 'release/**'      # Build and release
+      - 'feature/**'      # Build and release for testing
+  tags:
+    - 'v*'               # Build and release on version tags
 
 jobs:
   build:
@@ -155,7 +158,7 @@ jobs:
 
       - name: Build and bundle plugins (with GUI for all platforms)
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,transformer,gui
+          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,pultec,transformer,punch,gui
 
       - name: Create archive name
         id: archive
@@ -187,15 +190,33 @@ jobs:
   create-release:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v')
+    # Only create releases for release/feature branches and version tags, NOT main
+    if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get version
+      - name: Get version and branch info
         id: get_version
-        run: echo "VERSION=$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+          # Determine if this is a prerelease based on branch
+          if [[ "$GITHUB_REF" == refs/heads/feature/* ]]; then
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+            echo "BRANCH_SUFFIX=-$(echo $GITHUB_REF | sed 's|refs/heads/feature/||')" >> $GITHUB_OUTPUT
+          elif [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
+            echo "BRANCH_SUFFIX=" >> $GITHUB_OUTPUT
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
+            echo "BRANCH_SUFFIX=" >> $GITHUB_OUTPUT
+          else
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+            echo "BRANCH_SUFFIX=-dev" >> $GITHUB_OUTPUT
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -214,10 +235,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         with:
-          tag_name: v${{ steps.get_version.outputs.VERSION }}
-          release_name: Bus Channel Strip v${{ steps.get_version.outputs.VERSION }}
+          tag_name: v${{ steps.get_version.outputs.VERSION }}${{ steps.get_version.outputs.BRANCH_SUFFIX }}
+          release_name: Bus Channel Strip v${{ steps.get_version.outputs.VERSION }}${{ steps.get_version.outputs.BRANCH_SUFFIX }}
           draft: false
-          prerelease: ${{ github.ref != 'refs/heads/main' }}
+          prerelease: ${{ steps.get_version.outputs.PRERELEASE }}
 
       - name: Upload Linux release
         uses: actions/upload-release-asset@v1
