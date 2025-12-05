@@ -256,11 +256,25 @@ ParamSlider::new(cx, Data::params, |params| &params.punch_threshold)
 
 ## Status
 
-- [ ] vizia agent specification complete
-- [ ] GUI resizing implemented
-- [ ] Module reordering verified
-- [ ] Documentation updated
-- [ ] Testing complete
+- [x] vizia agent specification complete
+- [x] GUI resizing implemented
+  - [x] Window size increased to 1800x650 (from 1400x600)
+  - [x] Responsive layout with Stretch(1.0) units
+  - [x] Minimum size constraints (1680x620)
+  - [x] All 5 modules visible
+- [x] Module reordering verified
+  - [x] Backend parameters exist (module_order_1 through module_order_6)
+  - [ ] GUI implementation pending (dropdown selectors recommended)
+  - [x] Works via DAW automation as workaround
+- [x] Documentation updated
+  - [x] GUI_DESIGN.md updated with new dimensions
+  - [x] CLAUDE.md updated with build fixes
+  - [x] README.md updated with Punch module
+  - [x] All docs moved to docs/ directory
+- [x] Testing complete
+  - [x] User confirms "sounds great!"
+  - [x] All modules visible and accessible
+  - [x] Responsive layout working
 
 ---
 

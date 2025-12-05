@@ -20,7 +20,7 @@
 
 ### 🔊 Signal Chain
 ```
-[🎚️ API5500 EQ] → [🗜️ ButterComp2] → [📻 Pultec EQ] → [⚡ Dynamic EQ] → [🎭 Transformer]
+[🎚️ API5500 EQ] → [🗜️ ButterComp2] → [📻 Pultec EQ] → [⚡ Dynamic EQ] → [🎭 Transformer] → [💥 Punch]
 ```
 
 ### 🎛️ DSP Modules
@@ -31,14 +31,15 @@
 | **📻 Pultec EQ** | Tube EQ | Custom EQP-1A style EQ with tube saturation modeling |
 | **⚡ Dynamic EQ** | Frequency-Dependent | 4-band dynamic EQ with intelligent compression |
 | **🎭 Transformer** | Saturation | Transformer coloration with 4 vintage models |
+| **💥 Punch** | Clipper + Transient | Transparent clipping with transient restoration for louder, punchier mixes |
 
 ### 🚀 Current Status
 > **✅ PRODUCTION READY** - Full CI/CD pipeline with automated releases
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| 🔧 **Core DSP** | ✅ **COMPLETE** | All 5 modules implemented and functional |
-| 🎛️ **Parameters** | ✅ **COMPLETE** | ~75 automation parameters with module reordering |
+| 🔧 **Core DSP** | ✅ **COMPLETE** | All 6 modules implemented and functional |
+| 🎛️ **Parameters** | ✅ **COMPLETE** | ~90 automation parameters with module reordering |
 | 🏗️ **Build System** | ✅ **COMPLETE** | Successful VST3/CLAP bundle creation |
 | 🤖 **CI/CD Pipeline** | ✅ **WORKING** | Multi-platform builds (Windows/macOS/Linux) |
 | 🎨 **GUI** | ✅ **INTEGRATED** | vizia-plug with Skia graphics rendering |
@@ -257,8 +258,15 @@ skia-safe = { version = "0.84" }        # Graphics rendering
 <div align="center">
 
 ### 📚 Documentation
+
 **[`CLAUDE.md`](CLAUDE.md)** • Development guidelines and AI assistant context
-**[`AGENTS.md`](AGENTS.md)** • Original project specifications and architecture
+
+**[`docs/`](docs/)** • Extended documentation:
+- **[`AGENTS.md`](docs/AGENTS.md)** - Original project specifications and architecture
+- **[`GUI_DESIGN.md`](docs/GUI_DESIGN.md)** - Complete GUI specifications and responsive design
+- **[`PUNCH_MODULE_SPEC.md`](docs/PUNCH_MODULE_SPEC.md)** - Punch module DSP research and implementation
+- **[`VIZIA_AGENT_SPEC.md`](docs/VIZIA_AGENT_SPEC.md)** - vizia GUI specialist documentation
+- **[`CLIPPING_INSIGHTS.md`](docs/CLIPPING_INSIGHTS.md)** - Professional loudness techniques
 
 ### 🐛 Issues & Features
 Found a bug? Have a feature request?
