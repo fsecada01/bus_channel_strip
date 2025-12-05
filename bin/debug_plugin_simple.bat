@@ -25,11 +25,13 @@ if errorlevel 1 (
 )
 
 echo === Building VST3 plugin with GUI ===
-echo Features: api5500, buttercomp2, transformer, gui
+echo Features: api5500, buttercomp2, pultec, transformer, punch, gui
 REM Use minimal environment for reliable build
 set "FORCE_SKIA_BINARIES_DOWNLOAD=1"
 set "RUST_BACKTRACE=1"
-cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features api5500,buttercomp2,transformer,gui
+set "LLVM_HOME=C:\Program Files\LLVM"
+set "LIBCLANG_PATH=C:\Program Files\LLVM\bin"
+cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features api5500,buttercomp2,pultec,transformer,punch,gui
 
 if %errorlevel% neq 0 (
     echo Error: Build failed

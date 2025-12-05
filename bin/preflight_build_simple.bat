@@ -28,11 +28,13 @@ if errorlevel 1 (
 
 echo.
 echo [3/3] Building VST plugin with GUI
-echo Features: api5500, buttercomp2, transformer, gui
+echo Features: api5500, buttercomp2, pultec, transformer, punch, gui
 echo.
 set "FORCE_SKIA_BINARIES_DOWNLOAD=1"
 set "RUST_BACKTRACE=1"
-cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features api5500,buttercomp2,transformer,gui
+set "LLVM_HOME=C:\Program Files\LLVM"
+set "LIBCLANG_PATH=C:\Program Files\LLVM\bin"
+cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features api5500,buttercomp2,pultec,transformer,punch,gui
 
 if errorlevel 1 (
   echo.
