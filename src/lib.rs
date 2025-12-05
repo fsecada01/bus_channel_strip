@@ -30,6 +30,11 @@ mod transformer;
 #[cfg(feature = "transformer")]
 use transformer::{TransformerModule, TransformerModel};
 
+#[cfg(feature = "punch")]
+mod punch;
+#[cfg(feature = "punch")]
+use punch::{PunchModule, ClipMode, OversamplingFactor};
+
 #[cfg(feature = "gui")]
 mod editor;
 #[cfg(feature = "gui")]
@@ -50,6 +55,8 @@ pub enum ModuleType {
     DynamicEQ,
     #[name = "Transformer"]
     Transformer,
+    #[name = "Punch"]
+    Punch,
 }
 
 impl Default for ModuleType {
@@ -79,7 +86,10 @@ struct BusChannelStrip {
     /// Transformer coloration module
     #[cfg(feature = "transformer")]
     transformer: TransformerModule,
-    
+    /// Punch module (Clipper + Transient Shaper)
+    #[cfg(feature = "punch")]
+    punch: PunchModule,
+
     /// Buffers for module reordering
     temp_buffer_1: Vec<Vec<f32>>,
     temp_buffer_2: Vec<Vec<f32>>,
@@ -323,6 +333,50 @@ pub struct BusChannelStripParams {
     #[id = "transformer_compression"]
     pub transformer_compression: FloatParam,
 
+    // Punch Module Parameters (Clipper + Transient Shaper)
+    #[cfg(feature = "punch")]
+    #[id = "punch_bypass"]
+    pub punch_bypass: BoolParam,
+    // Clipper section
+    #[cfg(feature = "punch")]
+    #[id = "punch_threshold"]
+    pub punch_threshold: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_clip_mode"]
+    pub punch_clip_mode: EnumParam<ClipMode>,
+    #[cfg(feature = "punch")]
+    #[id = "punch_softness"]
+    pub punch_softness: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_oversampling"]
+    pub punch_oversampling: EnumParam<OversamplingFactor>,
+    // Transient shaper section
+    #[cfg(feature = "punch")]
+    #[id = "punch_attack"]
+    pub punch_attack: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_sustain"]
+    pub punch_sustain: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_attack_time"]
+    pub punch_attack_time: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_release_time"]
+    pub punch_release_time: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_sensitivity"]
+    pub punch_sensitivity: FloatParam,
+    // Global controls
+    #[cfg(feature = "punch")]
+    #[id = "punch_input_gain"]
+    pub punch_input_gain: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_output_gain"]
+    pub punch_output_gain: FloatParam,
+    #[cfg(feature = "punch")]
+    #[id = "punch_mix"]
+    pub punch_mix: FloatParam,
+
     // Module Ordering Parameters
     #[id = "module_order_1"]
     pub module_order_1: EnumParam<ModuleType>,
@@ -334,6 +388,8 @@ pub struct BusChannelStripParams {
     pub module_order_4: EnumParam<ModuleType>,
     #[id = "module_order_5"]
     pub module_order_5: EnumParam<ModuleType>,
+    #[id = "module_order_6"]
+    pub module_order_6: EnumParam<ModuleType>,
 }
 
 impl Default for BusChannelStrip {
@@ -350,6 +406,8 @@ impl Default for BusChannelStrip {
             dynamic_eq: DynamicEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "transformer")]
             transformer: TransformerModule::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "punch")]
+            punch: PunchModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             temp_buffer_1: Vec::new(),
             temp_buffer_2: Vec::new(),
             #[cfg(feature = "gui")]
@@ -933,12 +991,122 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            // Punch Module Parameters (Clipper + Transient Shaper)
+            // Default: BYPASSED - user must enable intentionally
+            #[cfg(feature = "punch")]
+            punch_bypass: BoolParam::new("Punch Bypass", true),
+
+            #[cfg(feature = "punch")]
+            punch_threshold: FloatParam::new(
+                "Clip Threshold",
+                -0.1, // -0.1dB default (gentle, near 0dB ceiling)
+                FloatRange::Linear { min: -12.0, max: 0.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            #[cfg(feature = "punch")]
+            punch_clip_mode: EnumParam::new("Clip Mode", ClipMode::Soft),
+
+            #[cfg(feature = "punch")]
+            punch_softness: FloatParam::new(
+                "Softness",
+                0.3, // Gentle soft clip knee by default
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            #[cfg(feature = "punch")]
+            punch_oversampling: EnumParam::new("Oversampling", OversamplingFactor::X8),
+
+            #[cfg(feature = "punch")]
+            punch_attack: FloatParam::new(
+                "Attack",
+                0.0, // Neutral by default - user adds punch as needed
+                FloatRange::Linear { min: -1.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            #[cfg(feature = "punch")]
+            punch_sustain: FloatParam::new(
+                "Sustain",
+                0.0, // Neutral sustain
+                FloatRange::Linear { min: -1.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            #[cfg(feature = "punch")]
+            punch_attack_time: FloatParam::new(
+                "Attack Time",
+                5.0, // 5ms default
+                FloatRange::Skewed {
+                    min: 0.1,
+                    max: 30.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_step_size(0.1),
+
+            #[cfg(feature = "punch")]
+            punch_release_time: FloatParam::new(
+                "Release Time",
+                100.0, // 100ms default
+                FloatRange::Skewed {
+                    min: 10.0,
+                    max: 500.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_step_size(1.0),
+
+            #[cfg(feature = "punch")]
+            punch_sensitivity: FloatParam::new(
+                "Sensitivity",
+                0.5, // 50% default
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
+            #[cfg(feature = "punch")]
+            punch_input_gain: FloatParam::new(
+                "Punch Input",
+                0.0, // 0dB
+                FloatRange::Linear { min: -12.0, max: 12.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            #[cfg(feature = "punch")]
+            punch_output_gain: FloatParam::new(
+                "Punch Output",
+                0.0, // 0dB
+                FloatRange::Linear { min: -12.0, max: 12.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            #[cfg(feature = "punch")]
+            punch_mix: FloatParam::new(
+                "Punch Mix",
+                1.0, // Fully wet
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("")
+            .with_step_size(0.01),
+
             // Module Ordering Parameters (default signal chain)
             module_order_1: EnumParam::new("Module Order 1", ModuleType::Api5500EQ),
             module_order_2: EnumParam::new("Module Order 2", ModuleType::ButterComp2),
             module_order_3: EnumParam::new("Module Order 3", ModuleType::PultecEQ),
             module_order_4: EnumParam::new("Module Order 4", ModuleType::DynamicEQ),
             module_order_5: EnumParam::new("Module Order 5", ModuleType::Transformer),
+            module_order_6: EnumParam::new("Module Order 6", ModuleType::Punch),
         }
     }
 }
@@ -1014,7 +1182,9 @@ impl Plugin for BusChannelStrip {
         { self.dynamic_eq = DynamicEQ::new(sr); }
         #[cfg(feature = "transformer")]
         { self.transformer = TransformerModule::new(sr); }
-        
+        #[cfg(feature = "punch")]
+        { self.punch = PunchModule::new(sr); }
+
         // Initialize temporary buffers for module reordering
         let max_buffer_size = _buffer_config.max_buffer_size as usize;
         let num_channels = _audio_io_layout.main_output_channels.unwrap().get() as usize;
@@ -1034,6 +1204,8 @@ impl Plugin for BusChannelStrip {
         { self.dynamic_eq.reset(); }
         #[cfg(feature = "transformer")]
         { self.transformer.reset(); }
+        #[cfg(feature = "punch")]
+        { self.punch.reset(); }
     }
 
     fn process(
@@ -1181,7 +1353,30 @@ impl Plugin for BusChannelStrip {
             }
         }
 
-        // 6) Output gain
+        // 6) Punch Module (Clipper + Transient Shaper)
+        #[cfg(feature = "punch")]
+        {
+            self.punch.update_parameters(
+                self.params.punch_threshold.value(),
+                self.params.punch_clip_mode.value(),
+                self.params.punch_softness.value(),
+                self.params.punch_oversampling.value(),
+                self.params.punch_attack.value(),
+                self.params.punch_sustain.value(),
+                self.params.punch_attack_time.value(),
+                self.params.punch_release_time.value(),
+                self.params.punch_sensitivity.value(),
+                self.params.punch_input_gain.value(),
+                self.params.punch_output_gain.value(),
+                self.params.punch_mix.value(),
+            );
+
+            if !self.params.punch_bypass.value() {
+                self.punch.process(buffer);
+            }
+        }
+
+        // 7) Output gain
         for channel_samples in buffer.iter_samples() {
             let gain = self.params.gain.smoothed.next();
             for sample in channel_samples {

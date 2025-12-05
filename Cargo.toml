@@ -21,19 +21,21 @@ fundsp = "0.20.0"
 idsp = "0.18.0"
 # vizia-plug for GUI integration with nih-plug
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
-# Use skia-safe with an explicit feature set that matches typical prebuilts and vizia on Linux
-skia-safe = { version = "0.84", features = ["gl", "textlayout", "svg", "x11"], optional = true }
+# Use skia-safe with features that have pre-built binaries for Windows
+# Note: x11 is Linux-only, removed for cross-platform compatibility
+skia-safe = { version = "0.84", features = ["gl", "textlayout"], optional = true }
 atomic_float = { version = "0.1", optional = true }
 realfft = "3.5.0"
 
 [features]
-default = ["api5500", "buttercomp2", "pultec", "transformer", "gui"]
+default = ["api5500", "buttercomp2", "pultec", "transformer", "punch", "gui"]
 # GUI now uses iced-rs instead of egui for better stability
 # Core DSP modules
 api5500 = []
 buttercomp2 = []
 pultec = []
 transformer = []
+punch = []
 
 # Advanced modules (hierarchical)
 dynamic_eq = []
