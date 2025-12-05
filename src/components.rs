@@ -16,6 +16,7 @@ pub enum ModuleTheme {
     Pultec,
     DynamicEq,
     Transformer,
+    Punch,
     Master,
 }
 
@@ -23,14 +24,15 @@ impl ModuleTheme {
     pub fn class_name(self) -> &'static str {
         match self {
             Self::Api5500 => "api5500-theme",
-            Self::ButterComp2 => "buttercomp2-theme", 
+            Self::ButterComp2 => "buttercomp2-theme",
             Self::Pultec => "pultec-theme",
             Self::DynamicEq => "dynamic-eq-theme",
             Self::Transformer => "transformer-theme",
+            Self::Punch => "punch-theme",
             Self::Master => "master-section",
         }
     }
-    
+
     pub fn accent_color(self) -> Color {
         match self {
             Self::Api5500 => Color::rgb(64, 160, 208),      // #40a0d0
@@ -38,6 +40,7 @@ impl ModuleTheme {
             Self::Pultec => Color::rgb(255, 215, 0),        // #ffd700
             Self::DynamicEq => Color::rgb(102, 204, 102),   // #66cc66
             Self::Transformer => Color::rgb(204, 102, 51),  // #cc6633
+            Self::Punch => Color::rgb(0, 160, 255),         // #00a0ff electric blue
             Self::Master => Color::rgb(85, 85, 85),         // #555555
         }
     }

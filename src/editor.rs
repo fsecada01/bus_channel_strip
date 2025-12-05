@@ -18,6 +18,8 @@ fn get_eq_bypass(p: &Arc<BusChannelStripParams>) -> &BoolParam { &p.eq_bypass }
 fn get_comp_bypass(p: &Arc<BusChannelStripParams>) -> &BoolParam { &p.comp_bypass }
 fn get_pultec_bypass(p: &Arc<BusChannelStripParams>) -> &BoolParam { &p.pultec_bypass }
 fn get_transformer_bypass(p: &Arc<BusChannelStripParams>) -> &BoolParam { &p.transformer_bypass }
+#[cfg(feature = "punch")]
+fn get_punch_bypass(p: &Arc<BusChannelStripParams>) -> &BoolParam { &p.punch_bypass }
 
 
 #[derive(Lens)]
@@ -28,8 +30,10 @@ pub struct Data {
 impl Model for Data {}
 
 /// Create default editor state with 500 series lunchbox dimensions
+/// Minimum width: 5 modules × 320px + gaps + padding = ~1680px
+/// Default size provides comfortable spacing for all 5 modules
 pub(crate) fn default_state() -> Arc<ViziaState> {
-    ViziaState::new(|| (1400, 600))
+    ViziaState::new(|| (1800, 650))
 }
 
 /// Create the vizia editor
@@ -57,27 +61,38 @@ pub(crate) fn create(
             .class("chassis-header")
             .height(Pixels(80.0))
             .width(Stretch(1.0));
-            
+
             // 500 Series module slots in horizontal layout
+            // NOTE: Module ordering is controlled by parameters module_order_1 through module_order_6
+            // TODO: Implement UI for module reordering (dropdown selectors or drag-and-drop)
             HStack::new(cx, |cx| {
                 // Slot 1: API5500 EQ
                 create_api5500_module_slot(cx);
-                
+
                 // Slot 2: ButterComp2
                 create_buttercomp2_module_slot(cx);
-                
+
                 // Slot 3: Pultec EQ
                 create_pultec_module_slot(cx);
-                
+
                 // Slot 4: Transformer
                 create_transformer_module_slot(cx);
+
+                // Slot 5: Punch (Clipper + Transient Shaper)
+                #[cfg(feature = "punch")]
+                create_punch_module_slot(cx);
             })
             .class("lunchbox-slots")
-            .height(Pixels(480.0))
+            .height(Stretch(1.0))
             .width(Stretch(1.0))
+            .min_width(Pixels(1620.0))  // 5 modules × 320px + gaps
             .gap(Pixels(4.0));
         })
         .class("lunchbox-chassis")
+        .width(Stretch(1.0))
+        .height(Stretch(1.0))
+        .min_width(Pixels(1680.0))  // Total minimum including padding
+        .min_height(Pixels(620.0))
         .padding(Pixels(20.0));
     })
 }
@@ -236,7 +251,7 @@ fn create_transformer_module_slot(cx: &mut Context) {
                     components::create_ratio_slider(cx, "COMP", Data::params, |p| &p.transformer_compression);
                 })
                 .gap(Pixels(8.0));
-                
+
                 // Drive controls
                 VStack::new(cx, |cx| {
                     Label::new(cx, "DRIVE")
@@ -248,7 +263,7 @@ fn create_transformer_module_slot(cx: &mut Context) {
                     .gap(Pixels(8.0));
                 })
                 .gap(Pixels(4.0));
-                
+
                 // Saturation and Response
                 VStack::new(cx, |cx| {
                     Label::new(cx, "CHARACTER")
@@ -257,6 +272,62 @@ fn create_transformer_module_slot(cx: &mut Context) {
                         components::create_param_slider(cx, "SAT", Data::params, |p| &p.transformer_input_saturation);
                         components::create_param_slider(cx, "LOW", Data::params, |p| &p.transformer_low_response);
                         components::create_param_slider(cx, "HIGH", Data::params, |p| &p.transformer_high_response);
+                    })
+                    .gap(Pixels(8.0));
+                })
+                .gap(Pixels(4.0));
+            })
+            .gap(Pixels(6.0));
+        }
+    );
+}
+
+#[cfg(feature = "punch")]
+fn create_punch_module_slot(cx: &mut Context) {
+    create_500_series_module(
+        cx,
+        "PUNCH",
+        "CLIP + TRANSIENT",
+        ModuleTheme::Punch,
+        Some(get_punch_bypass),
+        |cx| {
+            VStack::new(cx, |cx| {
+                // Clipper section
+                VStack::new(cx, |cx| {
+                    Label::new(cx, "CLIPPER")
+                        .class("section-label");
+                    HStack::new(cx, |cx| {
+                        components::create_gain_slider(cx, "THRESH", Data::params, |p| &p.punch_threshold);
+                        components::create_param_slider(cx, "SOFT", Data::params, |p| &p.punch_softness);
+                    })
+                    .gap(Pixels(8.0));
+                })
+                .gap(Pixels(4.0));
+
+                // Transient shaper section
+                VStack::new(cx, |cx| {
+                    Label::new(cx, "TRANSIENTS")
+                        .class("section-label");
+                    HStack::new(cx, |cx| {
+                        components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.punch_attack);
+                        components::create_param_slider(cx, "SUSTAIN", Data::params, |p| &p.punch_sustain);
+                    })
+                    .gap(Pixels(8.0));
+                    HStack::new(cx, |cx| {
+                        components::create_param_slider(cx, "SENS", Data::params, |p| &p.punch_sensitivity);
+                    })
+                    .gap(Pixels(8.0));
+                })
+                .gap(Pixels(4.0));
+
+                // Output section
+                VStack::new(cx, |cx| {
+                    Label::new(cx, "OUTPUT")
+                        .class("section-label");
+                    HStack::new(cx, |cx| {
+                        components::create_gain_slider(cx, "IN", Data::params, |p| &p.punch_input_gain);
+                        components::create_gain_slider(cx, "OUT", Data::params, |p| &p.punch_output_gain);
+                        components::create_param_slider(cx, "MIX", Data::params, |p| &p.punch_mix);
                     })
                     .gap(Pixels(8.0));
                 })

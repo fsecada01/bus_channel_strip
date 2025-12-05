@@ -206,6 +206,16 @@ pub const COMPONENT_STYLES: &str = r#"
     text-shadow: 0 0 8px rgba(204, 102, 51, 0.3);
 }
 
+.punch-theme {
+    border-color: #00a0ff;
+    background: linear-gradient(145deg, #2a2a3a, #3a3050);
+}
+
+.punch-theme .module-title {
+    color: #00a0ff;
+    text-shadow: 0 0 8px rgba(0, 160, 255, 0.3);
+}
+
 .master-section {
     background: linear-gradient(145deg, #333333, #3a3a3a);
     border-radius: 8px;
