@@ -25,8 +25,8 @@ on:
       - main              # Build only (no release)
       - 'release/**'      # Build and release
       - 'feature/**'      # Build and release for testing
-  tags:
-    - 'v*'               # Build and release on version tags
+    tags:
+      - 'v*'             # Build and release on version tags
 
 jobs:
   build:
