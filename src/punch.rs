@@ -381,10 +381,11 @@ fn apply_transient_shaping(
     // Transient component: the difference between fast and slow envelope detection
     // attack_gain > 0: boost transients, attack_gain < 0: cut transients
 
-    // Calculate transient boost/cut
+    // Calculate transient boost/cut with gentler scaling to avoid artifacts
+    // Reduced from 1.5 to 0.8 to prevent low-mid thump at higher attack values
     let transient_mult = if attack_gain > 0.0 {
-        // Boost transients
-        1.0 + transient_amount * attack_gain * 1.5
+        // Boost transients - gentler scaling prevents harsh artifacts
+        1.0 + transient_amount * attack_gain * 0.8
     } else {
         // Cut transients
         1.0 / (1.0 - attack_gain * transient_amount * 0.8).max(0.5)
@@ -442,6 +443,10 @@ pub struct PunchModule {
     oversampler_l: Oversampler,
     oversampler_r: Oversampler,
 
+    // Smoothing for transient gain to prevent artifacts
+    transient_gain_smooth_l: f32,
+    transient_gain_smooth_r: f32,
+
     // Metering (for GUI)
     current_gain_reduction: f32,
     current_transient_activity: f32,
@@ -481,6 +486,10 @@ impl PunchModule {
             transient_detector_r: TransientDetector::new(sample_rate),
             oversampler_l: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
             oversampler_r: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
+
+            // Smoothing state
+            transient_gain_smooth_l: 1.0,
+            transient_gain_smooth_r: 1.0,
 
             // Metering
             current_gain_reduction: 0.0,
@@ -567,10 +576,10 @@ impl PunchModule {
                 let dry = gained;
 
                 // 2. Upsample
-                let (oversampler, transient_detector) = if ch_idx == 0 {
-                    (&mut self.oversampler_l, &mut self.transient_detector_l)
+                let (oversampler, transient_detector, transient_smooth) = if ch_idx == 0 {
+                    (&mut self.oversampler_l, &mut self.transient_detector_l, &mut self.transient_gain_smooth_l)
                 } else {
-                    (&mut self.oversampler_r, &mut self.transient_detector_r)
+                    (&mut self.oversampler_r, &mut self.transient_detector_r, &mut self.transient_gain_smooth_r)
                 };
 
                 let upsampled = oversampler.upsample(gained, sample_idx);
@@ -604,7 +613,12 @@ impl PunchModule {
                         self.sustain,
                     );
 
-                    temp_os_buffer[os_idx] = shaped;
+                    // Apply smoothing to prevent abrupt gain changes (reduces low-mid thump)
+                    // One-pole lowpass at oversampled rate (~1-2ms time constant)
+                    let smooth_coeff = 0.05; // Adjust for sample rate
+                    *transient_smooth = *transient_smooth * (1.0 - smooth_coeff) + shaped * smooth_coeff;
+
+                    temp_os_buffer[os_idx] = *transient_smooth;
                 }
 
                 // 4. Downsample
@@ -634,6 +648,8 @@ impl PunchModule {
         self.transient_detector_r.reset();
         self.oversampler_l.reset();
         self.oversampler_r.reset();
+        self.transient_gain_smooth_l = 1.0;
+        self.transient_gain_smooth_r = 1.0;
         self.current_gain_reduction = 0.0;
         self.current_transient_activity = 0.0;
     }

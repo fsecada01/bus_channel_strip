@@ -56,6 +56,18 @@ pub(crate) fn create(
                     .class("chassis-brand");
                 Label::new(cx, "Bus Channel Strip")
                     .class("chassis-title");
+
+                // Signal flow indicator
+                VStack::new(cx, |cx| {
+                    Label::new(cx, "SIGNAL FLOW")
+                        .class("signal-flow-label");
+                    Label::new(cx, "Change module order via DAW automation →")
+                        .class("signal-flow-hint");
+                    Label::new(cx, "Parameters: 'Module Order 1' through 'Module Order 6'")
+                        .class("signal-flow-params");
+                })
+                .class("signal-flow-section");
+
                 create_master_section(cx);
             })
             .class("chassis-header")

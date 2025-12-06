@@ -155,65 +155,103 @@ pub const COMPONENT_STYLES: &str = r#"
     margin-bottom: 6px;
 }
 
-/* Module themes with enhanced styling */
+/* Module themes with enhanced styling and prominent borders */
 .api5500-theme {
-    border-color: #40a0d0;
-    background: linear-gradient(145deg, #2a2a2a, #2f3540);
+    border: 3px solid #40a0d0 !important;
+    background: linear-gradient(145deg, #2a3a4a, #2f3540) !important;
+    box-shadow: 0 0 12px rgba(64, 160, 208, 0.2);
 }
 
 .api5500-theme .module-title {
     color: #40a0d0;
-    text-shadow: 0 0 8px rgba(64, 160, 208, 0.3);
+    text-shadow: 0 0 8px rgba(64, 160, 208, 0.4);
 }
 
 .buttercomp2-theme {
-    border-color: #ff9640;
-    background: linear-gradient(145deg, #2a2a2a, #3a2f28);
+    border: 3px solid #ff9640 !important;
+    background: linear-gradient(145deg, #2a2a2a, #3a2f28) !important;
+    box-shadow: 0 0 12px rgba(255, 150, 64, 0.2);
 }
 
 .buttercomp2-theme .module-title {
     color: #ff9640;
-    text-shadow: 0 0 8px rgba(255, 150, 64, 0.3);
+    text-shadow: 0 0 8px rgba(255, 150, 64, 0.4);
 }
 
 .pultec-theme {
-    border-color: #ffd700;
-    background: linear-gradient(145deg, #2a2a2a, #3a3628);
+    border: 3px solid #ffd700 !important;
+    background: linear-gradient(145deg, #3a3428, #423828) !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.2);
 }
 
 .pultec-theme .module-title {
     color: #ffd700;
-    text-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+    text-shadow: 0 0 8px rgba(255, 215, 0, 0.4);
 }
 
 .dynamic-eq-theme {
-    border-color: #66cc66;
-    background: linear-gradient(145deg, #2a2a2a, #28362a);
+    border: 3px solid #66cc66 !important;
+    background: linear-gradient(145deg, #28362a, #2a3a2a) !important;
+    box-shadow: 0 0 12px rgba(102, 204, 102, 0.2);
 }
 
 .dynamic-eq-theme .module-title {
     color: #66cc66;
-    text-shadow: 0 0 8px rgba(102, 204, 102, 0.3);
+    text-shadow: 0 0 8px rgba(102, 204, 102, 0.4);
 }
 
 .transformer-theme {
-    border-color: #cc6633;
-    background: linear-gradient(145deg, #2a2a2a, #362a28);
+    border: 3px solid #cc6633 !important;
+    background: linear-gradient(145deg, #2a2a2a, #362a28) !important;
+    box-shadow: 0 0 12px rgba(204, 102, 51, 0.2);
 }
 
 .transformer-theme .module-title {
     color: #cc6633;
-    text-shadow: 0 0 8px rgba(204, 102, 51, 0.3);
+    text-shadow: 0 0 8px rgba(204, 102, 51, 0.4);
 }
 
 .punch-theme {
-    border-color: #00a0ff;
-    background: linear-gradient(145deg, #2a2a3a, #3a3050);
+    border: 3px solid #00a0ff !important;
+    background: linear-gradient(145deg, #2a2a3a, #3a3050) !important;
+    box-shadow: 0 0 12px rgba(0, 160, 255, 0.2);
 }
 
 .punch-theme .module-title {
     color: #00a0ff;
-    text-shadow: 0 0 8px rgba(0, 160, 255, 0.3);
+    text-shadow: 0 0 8px rgba(0, 160, 255, 0.4);
+}
+
+/* Signal flow indicator */
+.signal-flow-section {
+    padding: 8px 16px;
+    margin: 0 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.signal-flow-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #888888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+}
+
+.signal-flow-hint {
+    font-size: 8px;
+    font-weight: 400;
+    color: #666666;
+    font-style: italic;
+}
+
+.signal-flow-params {
+    font-size: 7px;
+    font-weight: 400;
+    color: #555555;
+    font-family: monospace;
 }
 
 .master-section {
