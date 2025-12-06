@@ -170,24 +170,30 @@ fn create_500_series_module<F>(
         // Module faceplate header
         VStack::new(cx, |cx| {
             Label::new(cx, module_name)
-                .class("module-name");
+                .class("module-name")
+                .color(theme.accent_color());
             Label::new(cx, module_type)
                 .class("module-type");
         })
         .class("module-header");
-        
+
         // Bypass LED and button
         if let Some(bypass_fn) = bypass_param {
             components::create_bypass_button(cx, "BYPASS", bypass_fn);
         }
-        
+
         // Module controls
         content_builder(cx);
     })
     .class("module-slot")
     .class(theme.class_name())
     .width(Pixels(320.0))
-    .height(Stretch(1.0));
+    .height(Stretch(1.0))
+    .border_width(Pixels(3.0))
+    .border_color(theme.accent_color())
+    .background_color(Color::rgb(42, 42, 42))
+    .padding(Pixels(12.0));
+    // Note: Inner spacing controlled by VStack gaps in content_builder
 }
 
 fn create_buttercomp2_module_slot(cx: &mut Context) {
