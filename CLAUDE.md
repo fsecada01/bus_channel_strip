@@ -4,6 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This document provides context and guidelines for AI assistance with the bus channel strip plugin development.
 
+# Extended AI Session Context
+@docs/SYSTEM_PROMPT.md
+
 ## Project Overview
 
 A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-based DSP modules in Rust.

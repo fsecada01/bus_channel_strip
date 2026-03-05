@@ -378,65 +378,65 @@ Leverage existing module reordering system for flexibility.
 
 | Task ID | Task | Model | Parent | Dependencies | Status |
 |---------|------|-------|--------|--------------|--------|
-| `1.0` | Phase 1 Coordinator | **sonnet** | master | - | pending |
-| `1.1` | Create `src/punch.rs` module skeleton | **haiku** | 1.0 | - | pending |
-| `1.2` | Implement hard clip algorithm | **sonnet** | 1.0 | 1.1 | pending |
-| `1.3` | Implement soft clip (tanh/cubic) | **sonnet** | 1.0 | 1.2 | pending |
-| `1.4` | Implement oversampling | **sonnet** | 1.0 | 1.2 | pending |
-| `1.5` | Add input/output gain staging | **haiku** | 1.0 | 1.2 | pending |
-| `1.6` | Unit tests for clipper | **sonnet** | 1.0 | 1.2, 1.3 | pending |
-| `1.7` | Phase 1 integration test | **sonnet** | 1.0 | 1.2-1.6 | pending |
+| `1.0` | Phase 1 Coordinator | **sonnet** | master | - | completed |
+| `1.1` | Create `src/punch.rs` module skeleton | **haiku** | 1.0 | - | completed |
+| `1.2` | Implement hard clip algorithm | **sonnet** | 1.0 | 1.1 | completed |
+| `1.3` | Implement soft clip (tanh/cubic) | **sonnet** | 1.0 | 1.2 | completed |
+| `1.4` | Implement oversampling | **sonnet** | 1.0 | 1.2 | completed |
+| `1.5` | Add input/output gain staging | **haiku** | 1.0 | 1.2 | completed |
+| `1.6` | Unit tests for clipper | **sonnet** | 1.0 | 1.2, 1.3 | completed |
+| `1.7` | Phase 1 integration test | **sonnet** | 1.0 | 1.2-1.6 | completed |
 
 #### Phase 2: Transient Detection
 
 | Task ID | Task | Model | Parent | Dependencies | Status |
 |---------|------|-------|--------|--------------|--------|
-| `2.0` | Phase 2 Coordinator | **sonnet** | master | 1.7 | pending |
-| `2.1` | Implement fast envelope follower | **sonnet** | 2.0 | - | pending |
-| `2.2` | Implement slow envelope follower | **sonnet** | 2.0 | - | pending |
-| `2.3` | Differential transient detector | **sonnet** | 2.0 | 2.1, 2.2 | pending |
-| `2.4` | Add sensitivity/threshold controls | **haiku** | 2.0 | 2.3 | pending |
-| `2.5` | Tune time constants (psychoacoustic) | **opus** | 2.0 | 2.3 | pending |
-| `2.6` | Unit tests for detection | **sonnet** | 2.0 | 2.3-2.5 | pending |
+| `2.0` | Phase 2 Coordinator | **sonnet** | master | 1.7 | completed |
+| `2.1` | Implement fast envelope follower | **sonnet** | 2.0 | - | completed |
+| `2.2` | Implement slow envelope follower | **sonnet** | 2.0 | - | completed |
+| `2.3` | Differential transient detector | **sonnet** | 2.0 | 2.1, 2.2 | completed |
+| `2.4` | Add sensitivity/threshold controls | **haiku** | 2.0 | 2.3 | completed |
+| `2.5` | Tune time constants (psychoacoustic) | **opus** | 2.0 | 2.3 | completed |
+| `2.6` | Unit tests for detection | **sonnet** | 2.0 | 2.3-2.5 | completed |
 
 #### Phase 3: Transient Shaping
 
 | Task ID | Task | Model | Parent | Dependencies | Status |
 |---------|------|-------|--------|--------------|--------|
-| `3.0` | Phase 3 Coordinator | **sonnet** | master | 2.6 | pending |
-| `3.1` | Implement attack gain shaper | **sonnet** | 3.0 | - | pending |
-| `3.2` | Implement sustain control | **sonnet** | 3.0 | 3.1 | pending |
-| `3.3` | Parallel blend architecture | **sonnet** | 3.0 | 3.1, 3.2 | pending |
-| `3.4` | Smoothing/anti-artifact filters | **sonnet** | 3.0 | 3.3 | pending |
-| `3.5` | Integration with clipper | **sonnet** | 3.0 | 1.7, 3.4 | pending |
-| `3.6` | End-to-end DSP tests | **sonnet** | 3.0 | 3.5 | pending |
+| `3.0` | Phase 3 Coordinator | **sonnet** | master | 2.6 | completed |
+| `3.1` | Implement attack gain shaper | **sonnet** | 3.0 | - | completed |
+| `3.2` | Implement sustain control | **sonnet** | 3.0 | 3.1 | completed |
+| `3.3` | Parallel blend architecture | **sonnet** | 3.0 | 3.1, 3.2 | completed |
+| `3.4` | Smoothing/anti-artifact filters | **sonnet** | 3.0 | 3.3 | completed |
+| `3.5` | Integration with clipper | **sonnet** | 3.0 | 1.7, 3.4 | completed |
+| `3.6` | End-to-end DSP tests | **sonnet** | 3.0 | 3.5 | completed |
 
 #### Phase 4: Plugin Integration & GUI
 
 | Task ID | Task | Model | Parent | Dependencies | Status |
 |---------|------|-------|--------|--------------|--------|
-| `4.0` | Phase 4 Coordinator | **sonnet** | master | 3.6 | pending |
-| `4.1` | Define NIH-Plug parameters (~14) | **sonnet** | 4.0 | - | pending |
-| `4.2` | Add to `lib.rs` module chain | **sonnet** | 4.0 | 4.1 | pending |
-| `4.3` | Implement bypass logic | **haiku** | 4.0 | 4.2 | pending |
-| `4.4` | Create vizia GUI layout | **sonnet** | 4.0 | 4.1 | pending |
-| `4.5` | Implement knob/button bindings | **sonnet** | 4.0 | 4.4 | pending |
-| `4.6` | Add GR/transient metering | **sonnet** | 4.0 | 4.5 | pending |
-| `4.7` | GUI styling (purple/blue theme) | **haiku** | 4.0 | 4.6 | pending |
-| `4.8` | Full plugin build test | **sonnet** | 4.0 | 4.2-4.7 | pending |
+| `4.0` | Phase 4 Coordinator | **sonnet** | master | 3.6 | completed |
+| `4.1` | Define NIH-Plug parameters (~14) | **sonnet** | 4.0 | - | completed |
+| `4.2` | Add to `lib.rs` module chain | **sonnet** | 4.0 | 4.1 | completed |
+| `4.3` | Implement bypass logic | **haiku** | 4.0 | 4.2 | completed |
+| `4.4` | Create vizia GUI layout | **sonnet** | 4.0 | 4.1 | completed |
+| `4.5` | Implement knob/button bindings | **sonnet** | 4.0 | 4.4 | completed |
+| `4.6` | Add GR/transient metering | **sonnet** | 4.0 | 4.5 | completed |
+| `4.7` | GUI styling (purple/blue theme) | **haiku** | 4.0 | 4.6 | completed |
+| `4.8` | Full plugin build test | **sonnet** | 4.0 | 4.2-4.7 | completed |
 
 #### Phase 5: Optimization & Polish
 
 | Task ID | Task | Model | Parent | Dependencies | Status |
 |---------|------|-------|--------|--------------|--------|
-| `5.0` | Phase 5 Coordinator | **opus** | master | 4.8 | pending |
-| `5.1` | CPU profiling analysis | **opus** | 5.0 | - | pending |
-| `5.2` | SIMD optimization (oversampling) | **opus** | 5.0 | 5.1 | pending |
-| `5.3` | Memory optimization | **sonnet** | 5.0 | 5.1 | pending |
-| `5.4` | A/B testing vs reference plugins | **opus** | 5.0 | 5.2, 5.3 | pending |
-| `5.5` | Create default presets | **haiku** | 5.0 | 5.4 | pending |
-| `5.6` | Update CLAUDE.md documentation | **haiku** | 5.0 | 5.5 | pending |
-| `5.7` | Final integration test | **sonnet** | 5.0 | 5.5 | pending |
+| `5.0` | Phase 5 Coordinator | `claude-opus-4-6` | master | 4.8 | pending |
+| `5.1` | CPU profiling analysis | `claude-opus-4-6` | 5.0 | - | pending |
+| `5.2` | SIMD optimization (oversampling) | `claude-opus-4-6` | 5.0 | 5.1 | pending |
+| `5.3` | Memory optimization | `claude-sonnet-4-6` | 5.0 | 5.1 | pending |
+| `5.4` | A/B testing vs reference plugins | `claude-opus-4-6` | 5.0 | 5.2, 5.3 | pending |
+| `5.5` | Create default presets | `claude-haiku-4-5-20251001` | 5.0 | 5.4 | pending |
+| `5.6` | Update docs | `claude-haiku-4-5-20251001` | 5.0 | 5.5 | pending |
+| `5.7` | Final integration test | `claude-sonnet-4-6` | 5.0 | 5.5 | pending |
 
 ### Master Agent Prompt Template
 
@@ -518,20 +518,19 @@ When complete, provide:
 
 | Model | Cost | Speed | Best For |
 |-------|------|-------|----------|
-| **opus** | $$$ | Slow | Architecture, optimization, complex debugging, psychoacoustic tuning |
-| **sonnet** | $$ | Medium | Implementation, integration, testing, most coding tasks |
-| **haiku** | $ | Fast | Boilerplate, simple edits, documentation, styling |
+| `claude-opus-4-6` | $$$ | Slow | Architecture, optimization, complex debugging, psychoacoustic tuning |
+| `claude-sonnet-4-6` | $$ | Medium | Implementation, integration, testing, most coding tasks |
+| `claude-haiku-4-5-20251001` | $ | Fast | Boilerplate, simple edits, documentation, styling |
 
 ### Execution Estimate
 
-| Phase | Tasks | Estimated Agent Calls | Primary Model |
-|-------|-------|----------------------|---------------|
-| 1 | 8 | 10-12 | sonnet |
-| 2 | 7 | 8-10 | sonnet/opus |
-| 3 | 7 | 8-10 | sonnet |
-| 4 | 9 | 12-15 | sonnet |
-| 5 | 8 | 10-12 | opus/sonnet |
-| **Total** | **39** | **~50-60** | - |
+| Phase | Tasks | Status | Primary Model |
+|-------|-------|--------|---------------|
+| 1 | 8 | **complete** | `claude-sonnet-4-6` |
+| 2 | 7 | **complete** | `claude-sonnet-4-6` / `claude-opus-4-6` |
+| 3 | 7 | **complete** | `claude-sonnet-4-6` |
+| 4 | 9 | **complete** | `claude-sonnet-4-6` |
+| 5 | 8 | **pending** | `claude-opus-4-6` / `claude-sonnet-4-6` |
 
 ---
 

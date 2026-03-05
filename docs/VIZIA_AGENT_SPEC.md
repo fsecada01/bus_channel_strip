@@ -82,104 +82,49 @@ VStack (Main Container)
 │   ├── Label: "API"
 │   ├── Label: "Bus Channel Strip"
 │   └── Master Section (Gain controls)
-└── HStack (Lunchbox Slots - 480px height, 1400px total width)
-    ├── Slot 1: API5500 EQ (320px width)
-    ├── Slot 2: ButterComp2 (320px width)
-    ├── Slot 3: Pultec EQ (320px width)
-    ├── Slot 4: Transformer (320px width)
-    └── Slot 5: Punch (320px width)
+└── HStack (Module Slots - 570px height, 1800px total width)
+    ├── Slot 1: API5500 EQ     (320px width)
+    ├── Slot 2: ButterComp2   (320px width)
+    ├── Slot 3: Pultec EQ     (320px width)
+    ├── Slot 4: Transformer   (320px width)
+    ├── Slot 5: Punch         (320px width)
+    └── Slot 6: Dynamic EQ   (320px width, optional feature)
 ```
 
-**Total Size**: 1400x600 pixels (FIXED - needs to be responsive)
+**Total Size**: 1800x650 pixels default; 1680x620 minimum; responsive via `Stretch(1.0)`
 
 ### Module Themes
-| Module | Background Gradient | Accent Color |
-|--------|-------------------|--------------|
-| API5500 | `#2a3a4a → #364050` | `#40a0d0` (cyan) |
-| ButterComp2 | `#2a2a2a → #322a28` | `#ff9640` (orange) |
-| Pultec | `#3a3428 → #423828` | `#ffd700` (gold) |
-| Transformer | `#2a2a2a → #362a28` | `#cc6633` (rust) |
-| Punch | `#2a2a3a → #3a3050` | `#00a0ff` (electric blue) |
+| Module | Background | Accent Color |
+|--------|-----------|--------------|
+| API5500 EQ | `#3C5064` | `#00C8FF` (cyan) |
+| ButterComp2 | `#282828` | `#FF8C00` (orange) |
+| Pultec EQ | `#786450` | `#FFD700` (gold) |
+| Dynamic EQ | `#465A78` | `#00FF64` (green) |
+| Transformer | `#3C2D2D` | `#C8503C` (rust/oxide) |
+| Punch | `#3A3050` | `#00A0FF` (electric blue) |
 
 ---
 
-## Known Issues
+## Outstanding Work
 
-### Issue 1: GUI Cut Off / Not Visible on Expansion
-**Symptoms**: GUI is cut off, not visible when VST window is expanded
-
-**Possible Causes**:
-1. Fixed pixel dimensions (1400x600) don't adapt to window size
-2. Missing `width(Stretch(1.0))` on containers
-3. ViziaState size doesn't update on window resize
-4. Parent containers use fixed Pixels instead of Stretch
-
-**Investigation Steps**:
-1. Check `default_state()` in `src/editor.rs` - uses fixed `(1400, 600)`
-2. Verify container sizing - should use `Stretch(1.0)` for responsive
-3. Check if vizia-plug supports dynamic resizing
-4. Review vizia examples for resizable window patterns
-
-### Issue 2: Module Reordering
-**Current State**: Module order parameters exist (`module_order_1` through `module_order_6`)
-
-**Question**: How is reordering done?
-- Via dropdown selectors per slot?
-- Via drag-and-drop?
-- Via separate settings panel?
-
-**Investigation Needed**:
-1. Search codebase for module ordering UI
-2. Check if drag-and-drop is implemented
-3. Determine UX pattern for reordering
+### Module Reordering UI
+**Status**: Backend complete, GUI not yet implemented
+- `module_order_1` through `module_order_6` parameters exist and control signal flow
+- Currently accessible via DAW automation as a workaround
+- Recommended: dropdown selector per slot in each module title bar
+- Model: `claude-sonnet-4-6`
 
 ---
 
-## Task Breakdown
-
-### Task 1: Make GUI Resizable
-**Priority**: High
-**Complexity**: Medium
-**Model**: Sonnet
-
-**Subtasks**:
-1. Change fixed dimensions to responsive units
-2. Implement window resize handling
-3. Test in multiple DAW environments
-4. Ensure minimum size constraints
-
-### Task 2: Verify Module Reordering UI
-**Priority**: Medium
-**Complexity**: Low
-**Model**: Haiku
-
-**Subtasks**:
-1. Search for existing reordering UI
-2. Document current implementation
-3. Recommend improvements if needed
-
-### Task 3: Update Documentation
-**Priority**: Medium
-**Complexity**: Low
-**Model**: Haiku
-
-**Subtasks**:
-1. Update `GUI_DESIGN.md` with resizing info
-2. Update `CLAUDE.md` with vizia agent info
-3. Update `README.md` if needed
-4. Update `PUNCH_MODULE_SPEC.md` status
-
----
-
-## Claude Model Selection
+## Model Selection
 
 | Task Type | Model | Reasoning |
 |-----------|-------|-----------|
-| **Architecture & Design** | Opus | Complex layout decisions, vizia architecture understanding |
-| **Implementation** | Sonnet | Standard vizia component development |
-| **Bug Investigation** | Sonnet | Debugging layout/rendering issues |
-| **Documentation** | Haiku | Straightforward markdown updates |
-| **Simple Fixes** | Haiku | CSS tweaks, small parameter changes |
+| **Architecture & Design** | `claude-opus-4-6` | Complex layout decisions, vizia architecture understanding |
+| **Implementation** | `claude-sonnet-4-6` | Standard vizia component development |
+| **Bug Investigation** | `claude-sonnet-4-6` | Debugging layout/rendering issues |
+| **Documentation** | `claude-haiku-4-5-20251001` | Straightforward markdown updates |
+| **Simple Fixes** | `claude-haiku-4-5-20251001` | CSS tweaks, small parameter changes |
 
 ---
 
@@ -256,40 +201,17 @@ ParamSlider::new(cx, Data::params, |params| &params.punch_threshold)
 
 ## Status
 
-- [x] vizia agent specification complete
-- [x] GUI resizing implemented
-  - [x] Window size increased to 1800x650 (from 1400x600)
-  - [x] Responsive layout with Stretch(1.0) units
-  - [x] Minimum size constraints (1680x620)
-  - [x] All 5 modules visible
-- [x] Module reordering verified
-  - [x] Backend parameters exist (module_order_1 through module_order_6)
-  - [ ] GUI implementation pending (dropdown selectors recommended)
-  - [x] Works via DAW automation as workaround
-- [x] Documentation updated
-  - [x] GUI_DESIGN.md updated with new dimensions
-  - [x] CLAUDE.md updated with build fixes
-  - [x] README.md updated with Punch module
-  - [x] All docs moved to docs/ directory
-- [x] Testing complete
-  - [x] User confirms "sounds great!"
-  - [x] All modules visible and accessible
-  - [x] Responsive layout working
+- [x] vizia-plug integration complete
+- [x] GUI resizing (1800x650 default, 1680x620 minimum, Stretch(1.0) responsive)
+- [x] All 6 modules rendered (API5500, ButterComp2, Pultec, Transformer, Punch, Dynamic EQ)
+- [x] Module padding and visual spacing applied
+- [x] User confirms audio output "sounds great!"
+- [ ] Module reorder GUI (dropdowns per slot) — backend params exist, UI pending
 
 ---
 
-## Master Agent Invocation
+## Agent Invocation
 
-To spawn the vizia GUI specialist agent:
+The vizia GUI specialist is now handled through the standard orchestration protocol in `docs/SYSTEM_PROMPT.md`. GUI tasks that meet the complexity threshold (2+ criteria) route the **Rust Engineer** agent (`claude-sonnet-4-6` + `/rust-dsp-dev`) for implementation and the **Coordinator** (`claude-opus-4-6`) for layout architecture decisions.
 
-```
-Task tool:
-  - subagent_type: "general-purpose"
-  - model: "sonnet" (or "opus" for complex architecture)
-  - prompt: [Include context from this spec + specific task]
-```
-
-The agent should have access to:
-- Full vizia documentation (via WebFetch)
-- Current project files (editor.rs, components.rs, styles.rs)
-- Ability to implement changes and rebuild
+Invoke via: `just claude` (standard) or `just claude-auto` (auto-approve).

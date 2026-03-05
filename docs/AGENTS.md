@@ -1,58 +1,84 @@
 # AI Agent Collaboration Notes
 
-This document provides context for AI agents collaborating on this project, outlining the current issues and a plan for resolution.
+This document provides context for AI agents collaborating on this project. It reflects the **current state** of the codebase and serves as a quick-reference for multi-agent orchestration.
 
-## Current Task: Implement Modern `vizia` GUI Architecture
+---
 
-The project needs GUI implementation using vizia's Entity-Component-System (ECS) pattern with vizia-plug integration. The vizia-plug framework provides modern GUI capabilities with Skia rendering and CSS-like styling.
+## Current Project Status
 
-### Key Requirements & Analysis
+All 6 core modules are implemented, tested, and functional. The plugin builds and ships as both VST3 and CLAP via CI/CD.
 
-1.  **Modern vizia Architecture**: Need to implement the Entity-Component-System (ECS) pattern with reactive state management and CSS-like styling.
+| Module | File | Status |
+|--------|------|--------|
+| API5500 EQ | `src/api5500.rs` | Complete |
+| ButterComp2 | `src/buttercomp2.rs` + `cpp/buttercomp2.cpp` | Complete (FFI) |
+| Pultec EQ | `src/pultec.rs` | Complete |
+| Dynamic EQ | `src/dynamic_eq.rs` | Complete (optional feature) |
+| Transformer | `src/transformer.rs` | Complete |
+| Punch | `src/punch.rs` | Complete (clipper + transient shaper, 8x OS) |
 
-2.  **NIH-Plug Integration**: Use `vizia-plug` with proper editor creation and parameter binding for seamless DAW integration.
+**GUI**: vizia-plug (ECS, Skia rendering) — implemented, 1800x650 default size, responsive.
+**Parameters**: ~75 automation parameters via `#[derive(Params)]`.
+**Build**: Nightly Rust required for GUI; `just bundle` for production builds.
 
-3.  **Parameter System**: Implement proper parameter binding using vizia's reactive data system with `Lens` traits for parameter access and updates.
+---
 
-4.  **Module Layout**: Create 5 distinct module UIs (API5500 EQ, ButterComp2, Pultec EQ, Dynamic EQ, Transformer) with color-coded professional design.
+## Multi-Agent Orchestration
 
-5.  **State Management**: Use `IcedState` for editor state persistence and proper `EditorFlags` for initialization.
+The full orchestration protocol — including complexity criteria, agent roster, 7-step workflow, and escalation rules — is defined in `docs/SYSTEM_PROMPT.md`. All agents should read that document as their primary context.
 
-6.  **Performance**: Leverage vizia's ECS architecture and Skia rendering for efficient GUI performance with built-in caching.
+### Agent Roster (Quick Reference)
 
-### Recommended Implementation Plan
+| Role | Model | Skill | When to Use |
+|------|-------|-------|-------------|
+| Coordinator | `claude-opus-4-6` | — | Complex task decomposition, cross-domain conflicts, architectural decisions |
+| DSP Specialist | `claude-sonnet-4-6` | `/dsp-audio-engineer` | Algorithm design, filter math, signal chain, psychoacoustics |
+| Rust Engineer | `claude-sonnet-4-6` | `/rust-dsp-dev` | Implementation, FFI safety, NIH-plug idioms, lock-free patterns |
+| QA Verifier | `claude-haiku-4-5-20251001` | — | Format/clippy gate, parameter ID audit, audio thread safety sweep |
 
-1.  **Update `src/lib.rs`**: 
-    *   Update the `editor` function to use vizia-plug integration with proper parameter access
-    *   Ensure vizia editor state is properly initialized and passed to the GUI
+### Orchestration Trigger
 
-2.  **Rewrite `src/editor.rs`** using modern vizia patterns:
-    *   **App Structure**: Create `BusChannelStripEditor` struct implementing vizia's app creation pattern
-    *   **Event System**: Use vizia's event system for parameter updates and UI interactions  
-    *   **Data Binding**: Implement proper data flow using vizia's `Lens` system for parameter changes
-    *   **View Construction**: Create view hierarchy building the complete 5-module layout with vizia widgets
-    *   **State Management**: Use vizia's reactive state system for GUI state persistence
+Activate multi-agent mode when 2+ of these criteria apply:
+1. Modifies 3+ source files
+2. Spans multiple domains (DSP + Rust + GUI)
+3. Architectural decision (parameter IDs, module order, FFI interface)
+4. New DSP module from scratch
+5. Debugging unknown audio artifact
+6. >150 lines of new/rewritten code
+7. Plugin API stability impact
 
-3.  **Module Implementation**:
-    *   Create individual module rendering functions for each DSP module
-    *   Apply color-coded professional styling per GUI_DESIGN.md specifications
-    *   Implement proper knob, button, and meter widgets
-    *   Add bypass states and visual feedback
+---
 
-4.  **Parameter Integration**:
-    *   Wire all ~75 plugin parameters through vizia's reactive data system
-    *   Ensure real-time parameter updates and DAW automation compatibility
-    *   Implement proper parameter formatting and display using vizia's data binding
+## Known Outstanding Work
 
-5.  **Testing & Polish**:
-    *   Test in DAW environment for parameter automation
-    *   Verify module bypass states and visual feedback
-    *   Optimize rendering performance
+| Item | Priority | Notes |
+|------|----------|-------|
+| Module reorder GUI | Medium | Backend `module_order_*` params exist; GUI dropdowns not yet implemented |
+| Phase 5: Optimization | Low | CPU profiling, SIMD for oversampling, A/B vs reference plugins |
+| Preset system | Low | No factory presets yet |
+| Dynamic EQ feature flag | Low | Implemented but disabled by default |
 
-### Key Resources
-- See `CLAUDE.md` and `GUI_DESIGN.md` for complete vizia architecture guidance
-- Reference vizia documentation: https://vizia.dev/
-- vizia-plug GitHub: https://github.com/vizia/vizia-plug
-- vizia examples: https://github.com/vizia/vizia/tree/main/examples
+---
 
-This modern approach uses vizia's Entity-Component-System architecture with Skia rendering for professional audio plugin GUIs.
+## Key Architectural Invariants
+
+These must be respected by all agents at all times:
+
+1. **No allocations in `process()`** — no `Vec`, `Box`, `String`, `format!()`
+2. **No locking in `process()`** — no `Mutex`, `RwLock`
+3. **Parameter IDs are stable** — `#[id = "..."]` values baked into DAW sessions; never rename
+4. **All `unsafe` blocks require a safety comment** — no exceptions
+5. **Nightly Rust for GUI** — `cargo +nightly` when building with `gui` feature
+6. **Do not set `BINDGEN_EXTRA_CLANG_ARGS`** when building GUI (breaks Skia)
+
+---
+
+## Key Resources
+
+- Orchestration workflow: `docs/SYSTEM_PROMPT.md`
+- GUI design spec: `docs/GUI_DESIGN.md`
+- Punch module spec: `docs/PUNCH_MODULE_SPEC.md`
+- ButterComp2 algorithm: `docs/buttercomp2_analysis.md`
+- Clipping research: `docs/CLIPPING_INSIGHTS.md`
+- vizia-plug: https://github.com/vizia/vizia-plug
+- vizia docs: https://vizia.dev/

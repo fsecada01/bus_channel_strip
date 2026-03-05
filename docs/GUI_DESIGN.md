@@ -122,20 +122,23 @@ This document describes the comprehensive GUI design for our professional bus ch
 
 ```css
 /* Module Colors */
---eq-bg: #3C5064;           /* API5500 EQ background */
---eq-accent: #00C8FF;       /* API5500 EQ accents */
+--eq-bg: #3C5064;              /* API5500 EQ background */
+--eq-accent: #00C8FF;          /* API5500 EQ accents (cyan) */
 
---comp-bg: #282828;         /* ButterComp2 background */
---comp-accent: #FF8C00;     /* ButterComp2 accents */
+--comp-bg: #282828;            /* ButterComp2 background */
+--comp-accent: #FF8C00;        /* ButterComp2 accents (orange) */
 
---pultec-bg: #786450;       /* Pultec EQ background */
---pultec-accent: #FFD700;   /* Pultec EQ accents */
+--pultec-bg: #786450;          /* Pultec EQ background */
+--pultec-accent: #FFD700;      /* Pultec EQ accents (gold) */
 
---dyneq-bg: #465A78;        /* Dynamic EQ background */
---dyneq-accent: #00FF64;    /* Dynamic EQ accents */
+--dyneq-bg: #465A78;           /* Dynamic EQ background */
+--dyneq-accent: #00FF64;       /* Dynamic EQ accents (green) */
 
---transformer-bg: #3C2D2D;  /* Transformer background */
---transformer-accent: #C8503C; /* Transformer accents */
+--transformer-bg: #3C2D2D;     /* Transformer background */
+--transformer-accent: #C8503C; /* Transformer accents (rust/oxide) */
+
+--punch-bg: #3A3050;           /* Punch background (deep purple) */
+--punch-accent: #00A0FF;       /* Punch accents (electric blue) */
 
 /* Global Colors */
 --main-bg: #191920;         /* Main background */
@@ -257,6 +260,7 @@ impl View for ParameterKnob {
 [dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
+skia-safe = { version = "0.84", features = ["gl", "textlayout"], optional = true }
 atomic_float = { version = "0.1", optional = true }
 # Additional DSP dependencies
 biquad = "0.5.0"
@@ -266,7 +270,7 @@ idsp = "0.18.0"
 realfft = "3.5.0"
 
 [features]
-gui = ["vizia_plug", "atomic_float"]
+gui = ["vizia_plug", "atomic_float", "skia-safe"]
 ```
 
 ### **System Requirements**
@@ -276,65 +280,57 @@ gui = ["vizia_plug", "atomic_float"]
 
 ### **Compilation**
 ```bash
-# Install system dependencies (Ubuntu/Debian)
-sudo apt install pkg-config libasound2-dev libgl1-mesa-dev libx11-dev
+# Fast type-check (no GUI, fastest feedback)
+just check
 
-# Development build
-cargo build
+# Debug build with GUI
+just build-gui
 
-# Release build  
-cargo build --release
+# Production bundle: VST3 + CLAP with full GUI (Windows)
+just bundle
+# Equivalent manual command:
+# FORCE_SKIA_BINARIES_DOWNLOAD=1 \
+# LLVM_HOME="C:/Program Files/LLVM" \
+# LIBCLANG_PATH="C:/Program Files/LLVM/bin" \
+# cargo +nightly run --package xtask -- bundle bus_channel_strip --release \
+#   --features "api5500,buttercomp2,pultec,transformer,punch,gui"
 
-# Build with specific features
-cargo build --features "api5500,buttercomp2,pultec"
+# Bundle without GUI (faster, no Skia)
+just bundle-core
 
-# Bundle plugin
-cargo xtask bundle bus_channel_strip --release
+# Bundle + install to system VST3 dir
+just deploy
 
-# Install pre-commit hooks (for development)
+# Install pre-commit hooks
 pre-commit install
 
-# Format code
-cargo +nightly fmt
-# OR
-pre-commit run rustfmt-nightly --all-files
+# Format code (nightly required)
+just fmt
+# OR: cargo +nightly fmt
 ```
 
-## **✨ Future Enhancements**
+**Important**: Do NOT use `cargo xtask bundle` directly — use `just bundle` or the explicit `cargo +nightly run --package xtask --` form. Do NOT set `BINDGEN_EXTRA_CLANG_ARGS` when building with GUI (breaks Skia).
+
+## **Future Enhancements**
 
 ### **Phase 2 Features**
-- **Spectrum Analyzer**: Real-time frequency display
+- **Module Reordering UI**: Dropdown selectors per slot (backend `module_order_*` params exist; UI pending)
+- **Spectrum Analyzer**: Real-time frequency display per EQ module
 - **Preset Browser**: Visual preset management
-- **Module Reordering**: Drag-and-drop signal chain
 - **Skin Support**: Multiple visual themes
 
 ### **Advanced Features**
 - **MIDI Learn**: Parameter automation mapping
-- **Undo/Redo**: Parameter history
 - **A/B Compare**: Settings comparison
-- **CPU Monitor**: Performance display
 
-## **🎯 Status: Design Complete with vizia Architecture!**
+## **Status**
 
-The GUI design is fully architected and ready for vizia implementation. The codebase includes:
-
-✅ **Complete module layout designs**  
-✅ **Professional color schemes**  
-✅ **Interactive control specifications**  
-✅ **vizia Entity-Component-System architecture**  
-✅ **vizia-plug integration patterns**  
-✅ **Performance optimization plans**  
-✅ **Comprehensive vizia documentation resources**  
-
-**Ready for vizia implementation with proper architectural guidance!** 🔥
-
-### **Implementation Checklist**
-- [ ] Set up vizia app structure with ECS pattern
-- [ ] Implement event system for all parameter updates
-- [ ] Create module rendering functions using vizia widgets
-- [ ] Integrate with vizia-plug parameter system
-- [ ] Apply color scheme and CSS-like styling
-- [ ] Test parameter automation and DAW integration
+✅ vizia-plug integration complete (ECS, Skia rendering)
+✅ All 6 module UIs implemented
+✅ Responsive layout (1800x650 default, 1680x620 minimum)
+✅ All parameters bound to vizia Lens system
+✅ Plugin passes DAW testing (Reaper) — "sounds great!"
+🔧 Module reordering GUI not yet implemented (DAW automation workaround available)
 
 ---
 
