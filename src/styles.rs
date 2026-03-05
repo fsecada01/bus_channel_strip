@@ -106,18 +106,18 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .module-type {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 500;
-    color: #666666;
+    color: #999999;
     letter-spacing: 0.5px;
     text-transform: uppercase;
     margin-top: 2px;
 }
 
 .section-label {
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
-    color: #444444;
+    color: #a0a0a0;
     text-transform: uppercase;
     letter-spacing: 0.8px;
     text-align: center;
@@ -232,25 +232,25 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .signal-flow-label {
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 700;
-    color: #888888;
+    color: #aaaaaa;
     text-transform: uppercase;
     letter-spacing: 1px;
     margin-bottom: 2px;
 }
 
 .signal-flow-hint {
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 400;
-    color: #666666;
+    color: #999999;
     font-style: italic;
 }
 
 .signal-flow-params {
-    font-size: 7px;
+    font-size: 9px;
     font-weight: 400;
-    color: #555555;
+    color: #888888;
     font-family: monospace;
 }
 
@@ -288,8 +288,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 /* Parameter labels for 500 series modules */
 .param-label {
-    font-size: 9px;
-    color: #333333;
+    font-size: 11px;
+    color: #d0d0d0;
     text-align: center;
     margin-bottom: 4px;
     font-weight: 600;
@@ -475,6 +475,54 @@ scrollbar .thumb:hover {
 
 .module-section.active {
     animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* ── Drag-to-reorder handle ──────────────────────────────────────────────── */
+
+.drag-handle {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin-bottom: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: background 0.12s ease, border-color 0.12s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.drag-handle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Applied when this slot is the selected source */
+.drag-handle-active {
+    background: rgba(64, 160, 255, 0.2) !important;
+    border-color: rgba(64, 160, 255, 0.7) !important;
+}
+
+.drag-handle-icon {
+    font-size: 15px;
+    font-weight: 900;
+    color: #aaaaaa;
+    line-height: 1;
+}
+
+.drag-handle-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #888888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Module slot highlighted as the selected reorder source */
+.drag-source {
+    box-shadow:
+        0 0 0 2px rgba(64, 160, 255, 0.9),
+        0 0 18px rgba(64, 160, 255, 0.35),
+        inset 0 0 8px rgba(64, 160, 255, 0.08) !important;
 }
 
 /* Responsive adjustments */

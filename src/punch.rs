@@ -251,17 +251,17 @@ impl Oversampler {
         if self.factor == 1 {
             self.upsample_buffer[start] = input;
         } else {
-            // Zero-stuffing with linear interpolation between samples
-            let prev = if idx > 0 {
-                self.downsample_buffer[idx - 1]
-            } else {
-                self.filter_state[0]
-            };
+            // Linear interpolation from the previous *input* sample to the current input.
+            // filter_state[1] holds the previous input across consecutive upsample() calls.
+            let prev = self.filter_state[1];
 
             for i in 0..self.factor {
                 let t = i as f32 / self.factor as f32;
                 self.upsample_buffer[start + i] = prev * (1.0 - t) + input * t;
             }
+
+            // Store current input so the next call can use it as `prev`
+            self.filter_state[1] = input;
         }
 
         &self.upsample_buffer[start..end]
@@ -314,7 +314,9 @@ fn soft_clip_tanh(input: f32, threshold: f32, softness: f32) -> f32 {
         let normalized = input / threshold;
         let drive = 1.0 + softness * 2.0;
         let saturated = (normalized * drive).tanh() / drive.tanh();
-        saturated * threshold
+        // Clamp to [-1, 1] before scaling: tanh approaches but never reaches 1.0,
+        // but with drive > 1 the division can yield values slightly above 1.0.
+        saturated.clamp(-1.0, 1.0) * threshold
     }
 }
 
@@ -443,10 +445,6 @@ pub struct PunchModule {
     oversampler_l: Oversampler,
     oversampler_r: Oversampler,
 
-    // Smoothing for transient gain to prevent artifacts
-    transient_gain_smooth_l: f32,
-    transient_gain_smooth_r: f32,
-
     // Metering (for GUI)
     current_gain_reduction: f32,
     current_transient_activity: f32,
@@ -486,10 +484,6 @@ impl PunchModule {
             transient_detector_r: TransientDetector::new(sample_rate),
             oversampler_l: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
             oversampler_r: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
-
-            // Smoothing state
-            transient_gain_smooth_l: 1.0,
-            transient_gain_smooth_r: 1.0,
 
             // Metering
             current_gain_reduction: 0.0,
@@ -564,22 +558,34 @@ impl PunchModule {
         let mut max_transient = 0.0f32;
 
         for (sample_idx, mut channel_samples) in buffer.iter_samples().enumerate() {
-            // Get channel samples
-            let channels: Vec<*mut f32> = channel_samples.iter_mut().map(|s| s as *mut f32).collect();
+            // Stack-allocated channel pointer array — no Vec, no heap allocation on the audio thread.
+            // SAFETY: each pointer is derived from a valid `&mut f32` reference within this
+            // sample block. Channels are processed sequentially, so no aliasing occurs.
+            let mut channel_ptrs: [*mut f32; 2] = [std::ptr::null_mut(); 2];
+            let mut num_channels = 0_usize;
+            for s in channel_samples.iter_mut() {
+                if num_channels < 2 {
+                    channel_ptrs[num_channels] = s as *mut f32;
+                    num_channels += 1;
+                }
+            }
 
             // Process each channel
-            for (ch_idx, sample_ptr) in channels.iter().enumerate() {
-                let sample = unsafe { **sample_ptr };
+            for ch_idx in 0..num_channels {
+                // SAFETY: channel_ptrs[ch_idx] was assigned from a valid mutable reference
+                // and remains valid for the duration of this loop body.
+                let sample_ptr = channel_ptrs[ch_idx];
+                let sample = unsafe { *sample_ptr };
 
                 // 1. Apply input gain
                 let gained = sample * self.input_gain;
                 let dry = gained;
 
                 // 2. Upsample
-                let (oversampler, transient_detector, transient_smooth) = if ch_idx == 0 {
-                    (&mut self.oversampler_l, &mut self.transient_detector_l, &mut self.transient_gain_smooth_l)
+                let (oversampler, transient_detector) = if ch_idx == 0 {
+                    (&mut self.oversampler_l, &mut self.transient_detector_l)
                 } else {
-                    (&mut self.oversampler_r, &mut self.transient_detector_r, &mut self.transient_gain_smooth_r)
+                    (&mut self.oversampler_r, &mut self.transient_detector_r)
                 };
 
                 let upsampled = oversampler.upsample(gained, sample_idx);
@@ -613,12 +619,10 @@ impl PunchModule {
                         self.sustain,
                     );
 
-                    // Apply smoothing to prevent abrupt gain changes (reduces low-mid thump)
-                    // One-pole lowpass at oversampled rate (~1-2ms time constant)
-                    let smooth_coeff = 0.05; // Adjust for sample rate
-                    *transient_smooth = *transient_smooth * (1.0 - smooth_coeff) + shaped * smooth_coeff;
-
-                    temp_os_buffer[os_idx] = *transient_smooth;
+                    // Write shaped sample directly — no signal-level smoothing here.
+                    // Signal smoothing was causing pumping artifacts; transient detection
+                    // already has its own internal smoothing at the gain-control level.
+                    temp_os_buffer[os_idx] = shaped;
                 }
 
                 // 4. Downsample
@@ -629,8 +633,9 @@ impl PunchModule {
                 let output = mixed * self.output_gain;
 
                 // Write output
+                // SAFETY: sample_ptr is valid and aligned (set above from NIH-plug buffer).
                 unsafe {
-                    **sample_ptr = output;
+                    *sample_ptr = output;
                 }
             }
         }
@@ -648,8 +653,6 @@ impl PunchModule {
         self.transient_detector_r.reset();
         self.oversampler_l.reset();
         self.oversampler_r.reset();
-        self.transient_gain_smooth_l = 1.0;
-        self.transient_gain_smooth_r = 1.0;
         self.current_gain_reduction = 0.0;
         self.current_transient_activity = 0.0;
     }

@@ -1101,12 +1101,14 @@ impl Default for BusChannelStripParams {
             .with_step_size(0.01),
 
             // Module Ordering Parameters (default signal chain)
+            // Default order matches the standard 500-series layout:
+            // EQ -> Comp -> Pultec -> Transformer -> Punch  (DynamicEQ in reserve slot 6)
             module_order_1: EnumParam::new("Module Order 1", ModuleType::Api5500EQ),
             module_order_2: EnumParam::new("Module Order 2", ModuleType::ButterComp2),
             module_order_3: EnumParam::new("Module Order 3", ModuleType::PultecEQ),
-            module_order_4: EnumParam::new("Module Order 4", ModuleType::DynamicEQ),
-            module_order_5: EnumParam::new("Module Order 5", ModuleType::Transformer),
-            module_order_6: EnumParam::new("Module Order 6", ModuleType::Punch),
+            module_order_4: EnumParam::new("Module Order 4", ModuleType::Transformer),
+            module_order_5: EnumParam::new("Module Order 5", ModuleType::Punch),
+            module_order_6: EnumParam::new("Module Order 6", ModuleType::DynamicEQ),
         }
     }
 }

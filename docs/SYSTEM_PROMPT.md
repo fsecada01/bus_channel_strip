@@ -108,6 +108,16 @@ STEP 7  SYNTHESIZE
 - **Scope creep detected**: Coordinator pauses, flags to user before expanding
 - **Uncertainty in algorithm**: DSP Specialist must cite a reference (textbook, Airwindows source, RBJ cookbook) before proceeding
 
+### Parallel Dispatch Rule
+
+Independent tool calls **must** be dispatched in the same response — never sequentially unless one output feeds the next as an input. This applies to:
+
+- Concurrent file reads when no read depends on another
+- Concurrent file edits touching non-overlapping regions
+- Agent invocations in STEP 3 where the dependency graph permits parallelism
+
+**Sequential dispatch is required only when** the output of one tool call determines an argument to the next (e.g., read a file → use its content to decide what to edit).
+
 ### Invoking From justfile
 
 ```bash
