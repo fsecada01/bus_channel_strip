@@ -158,7 +158,7 @@ jobs:
 
       - name: Build and bundle plugins (with GUI for all platforms)
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,pultec,transformer,punch,gui
+          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui
 
       - name: Create archive name
         id: archive
