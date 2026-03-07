@@ -126,8 +126,12 @@ jobs:
             echo "SKIA_GN_ARGS=skia_use_egl=false" >> $GITHUB_ENV
           fi
 
-          # Set platform-specific environment for ARM64 zlib issue only
-          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+          # Skia's zlib includes x86 SIMD headers (tmmintrin.h, xmmintrin.h, etc.)
+          # that fail to compile on ARM64 hosts — both when building for aarch64
+          # natively AND when cross-compiling x86_64 from an ARM64 runner (macos-14).
+          # ZLIB_DISABLE_CHUNK_SIMD bypasses the SIMD path entirely; applies to
+          # all macOS targets because our Intel build now runs on macos-14 (ARM64).
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
             echo "CXXFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
           fi
