@@ -65,7 +65,7 @@ pub enum OversamplingFactor {
 
 impl Default for OversamplingFactor {
     fn default() -> Self {
-        Self::X8
+        Self::X4 // 4x gives good alias suppression at lower CPU cost; user can increase
     }
 }
 
@@ -273,13 +273,15 @@ impl Oversampler {
         if self.factor == 1 {
             processed[0]
         } else {
-            // Simple averaging with slight lowpass
+            // Simple averaging for downsampling
             let sum: f32 = processed.iter().sum();
             let result = sum / self.factor as f32;
 
-            // Simple IIR lowpass to reduce aliasing
+            // Very light IIR: pole at 0.05 is nearly transparent at audio
+            // frequencies but prevents highest-frequency aliasing. The old
+            // 0.3 pole had enough group delay to cause pumping artifacts.
             let prev = self.filter_state[0];
-            let filtered = prev * 0.3 + result * 0.7;
+            let filtered = prev * 0.05 + result * 0.95;
             self.filter_state[0] = filtered;
 
             self.downsample_buffer[idx] = filtered;
@@ -368,50 +370,6 @@ fn apply_clipping(input: f32, threshold: f32, softness: f32, mode: ClipMode) -> 
 }
 
 // ============================================================================
-// Transient Shaper
-// ============================================================================
-
-/// Apply transient shaping gain
-#[inline]
-fn apply_transient_shaping(
-    clipped: f32,
-    _dry: f32,
-    transient_amount: f32,
-    attack_gain: f32,  // -1.0 to +1.0 (cut to boost)
-    sustain_gain: f32, // -1.0 to +1.0
-) -> f32 {
-    // Transient component: the difference between fast and slow envelope detection
-    // attack_gain > 0: boost transients, attack_gain < 0: cut transients
-
-    // Calculate transient boost/cut with gentler scaling to avoid artifacts
-    // Reduced from 1.5 to 0.8 to prevent low-mid thump at higher attack values
-    let transient_mult = if attack_gain > 0.0 {
-        // Boost transients - gentler scaling prevents harsh artifacts
-        1.0 + transient_amount * attack_gain * 0.8
-    } else {
-        // Cut transients
-        1.0 / (1.0 - attack_gain * transient_amount * 0.8).max(0.5)
-    };
-
-    // Calculate sustain adjustment (inverse of transient)
-    let sustain_mult = if sustain_gain > 0.0 {
-        // Boost sustain (non-transient portions)
-        1.0 + (1.0 - transient_amount).max(0.0) * sustain_gain * 0.5
-    } else {
-        // Cut sustain
-        1.0 - (1.0 - transient_amount).max(0.0) * sustain_gain.abs() * 0.3
-    };
-
-    // Blend transient-shaped and original clipped signal
-    let transient_component = clipped * transient_mult;
-    let sustain_component = clipped * sustain_mult;
-
-    // The final output blends both components based on transient detection
-    let transient_weight = transient_amount.clamp(0.0, 1.0);
-    transient_component * transient_weight + sustain_component * (1.0 - transient_weight)
-}
-
-// ============================================================================
 // Punch Module - Main Processor
 // ============================================================================
 
@@ -465,7 +423,7 @@ impl PunchModule {
             clip_threshold: 0.891, // -1dB
             clip_mode: ClipMode::Hard,
             softness: 0.0,
-            oversampling: OversamplingFactor::X8,
+            oversampling: OversamplingFactor::X4,
 
             // Default transient shaper settings
             attack: 0.2,       // +20% boost
@@ -532,28 +490,37 @@ impl PunchModule {
         self.oversampler_l.set_factor(os_factor);
         self.oversampler_r.set_factor(os_factor);
 
-        // Update transient detectors
-        let effective_sample_rate = self.sample_rate * os_factor as f32;
+        // Update transient detectors at NATIVE sample rate.
+        // Detection now runs pre-oversampling, so time constants are calibrated
+        // to the native rate. Using oversampled rate would make them too fast
+        // (e.g., 8x oversampled at 44.1kHz would be ~353kHz rate).
         self.transient_detector_l.update_parameters(
-            effective_sample_rate,
+            self.sample_rate,
             self.attack_time,
             self.release_time,
             self.sensitivity,
         );
         self.transient_detector_r.update_parameters(
-            effective_sample_rate,
+            self.sample_rate,
             self.attack_time,
             self.release_time,
             self.sensitivity,
         );
     }
 
-    /// Process a stereo buffer in-place
+    /// Process a stereo buffer in-place.
+    ///
+    /// Signal path (pumping-free design):
+    ///   Input → InputGain → TransientShape → Oversample → Clip → Downsample → Mix → OutputGain
+    ///
+    /// The transient detector runs at the NATIVE sample rate on the pre-clip signal.
+    /// Gain adjustment is applied BEFORE oversampling, so the clipper naturally
+    /// limits any resulting peaks. This eliminates post-clip time-varying gain
+    /// modulation, which was the root cause of the pumping artifacts.
     pub fn process(&mut self, buffer: &mut Buffer) {
         let os_factor = self.oversampling.factor();
         let mut temp_os_buffer = [0.0f32; Self::MAX_OS_FACTOR];
 
-        // Track metering
         let mut max_gr = 0.0f32;
         let mut max_transient = 0.0f32;
 
@@ -570,7 +537,6 @@ impl PunchModule {
                 }
             }
 
-            // Process each channel
             for ch_idx in 0..num_channels {
                 // SAFETY: channel_ptrs[ch_idx] was assigned from a valid mutable reference
                 // and remains valid for the duration of this loop body.
@@ -581,22 +547,38 @@ impl PunchModule {
                 let gained = sample * self.input_gain;
                 let dry = gained;
 
-                // 2. Upsample
                 let (oversampler, transient_detector) = if ch_idx == 0 {
                     (&mut self.oversampler_l, &mut self.transient_detector_l)
                 } else {
                     (&mut self.oversampler_r, &mut self.transient_detector_r)
                 };
 
-                let upsampled = oversampler.upsample(gained, sample_idx);
+                // 2. Detect transients at NATIVE sample rate on the pre-clip signal.
+                //    Operating pre-clip avoids the feedback loop where clipping changes
+                //    the envelope the detector is tracking.
+                let transient_amount = transient_detector.process(gained);
+                max_transient = max_transient.max(transient_amount);
 
-                // 3. Process each oversampled sample
+                // 3. Apply transient shaping gain PRE-CLIP.
+                //    Because the gain change happens before the clipper, any resulting
+                //    peaks are naturally limited by the clipper — no pumping.
+                let pre_clip = if self.attack.abs() > 0.001 || self.sustain.abs() > 0.001 {
+                    let t = transient_amount.min(1.0);
+                    // Transient (fast-onset) gain: boost/cut on signal attacks
+                    let transient_mult = 1.0 + t * self.attack * 0.5;
+                    // Sustain (slow-decay) gain: boost/cut on held portions
+                    let sustain_mult = 1.0 + (1.0 - t) * self.sustain * 0.3;
+                    // Blend based on transient amount; clamp to prevent extreme levels
+                    let gain = (transient_mult * t + sustain_mult * (1.0 - t)).clamp(0.25, 2.0);
+                    gained * gain
+                } else {
+                    gained
+                };
+
+                // 4. Oversample → Clip → Downsample
+                let upsampled = oversampler.upsample(pre_clip, sample_idx);
+
                 for (os_idx, &os_sample) in upsampled.iter().enumerate() {
-                    // Transient detection
-                    let transient_amount = transient_detector.process(os_sample);
-                    max_transient = max_transient.max(transient_amount);
-
-                    // Clipping
                     let clipped = apply_clipping(
                         os_sample,
                         self.clip_threshold,
@@ -604,47 +586,29 @@ impl PunchModule {
                         self.clip_mode,
                     );
 
-                    // Calculate gain reduction for metering
+                    // Gain reduction metering
                     if os_sample.abs() > 0.0001 {
                         let gr = (os_sample.abs() - clipped.abs()) / os_sample.abs();
                         max_gr = max_gr.max(gr);
                     }
 
-                    // Transient shaping
-                    let shaped = apply_transient_shaping(
-                        clipped,
-                        os_sample,
-                        transient_amount,
-                        self.attack,
-                        self.sustain,
-                    );
-
-                    // Write shaped sample directly — no signal-level smoothing here.
-                    // Signal smoothing was causing pumping artifacts; transient detection
-                    // already has its own internal smoothing at the gain-control level.
-                    temp_os_buffer[os_idx] = shaped;
+                    temp_os_buffer[os_idx] = clipped;
                 }
 
-                // 4. Downsample
                 let processed = oversampler.downsample(&temp_os_buffer[..os_factor], sample_idx);
 
-                // 5. Apply mix and output gain
+                // 5. Mix and output
                 let mixed = dry * (1.0 - self.mix) + processed * self.mix;
                 let output = mixed * self.output_gain;
 
-                // Write output
                 // SAFETY: sample_ptr is valid and aligned (set above from NIH-plug buffer).
-                unsafe {
-                    *sample_ptr = output;
-                }
+                unsafe { *sample_ptr = output; }
             }
         }
 
         // Update metering (smoothed)
-        self.current_gain_reduction =
-            self.current_gain_reduction * 0.9 + max_gr * 0.1;
-        self.current_transient_activity =
-            self.current_transient_activity * 0.9 + max_transient * 0.1;
+        self.current_gain_reduction = self.current_gain_reduction * 0.9 + max_gr * 0.1;
+        self.current_transient_activity = self.current_transient_activity * 0.9 + max_transient * 0.1;
     }
 
     /// Reset all internal state
@@ -657,12 +621,16 @@ impl PunchModule {
         self.current_transient_activity = 0.0;
     }
 
-    /// Get current gain reduction (0.0 - 1.0) for metering
+    /// Get current gain reduction (0.0 - 1.0) for metering.
+    /// Reserved for future clipper GR visualization.
+    #[allow(dead_code)]
     pub fn get_gain_reduction(&self) -> f32 {
         self.current_gain_reduction
     }
 
-    /// Get current transient activity (0.0 - 1.0+) for metering
+    /// Get current transient activity (0.0 - 1.0+) for metering.
+    /// Reserved for future transient detector visualization.
+    #[allow(dead_code)]
     pub fn get_transient_activity(&self) -> f32 {
         self.current_transient_activity
     }

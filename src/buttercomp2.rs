@@ -25,12 +25,11 @@ extern "C" {
 }
 
 /// ButterComp2 wrapper for Rust integration
-/// 
-/// Airwindows ButterComp2: "The single richest, lushest 'glue' compressor" 
+///
+/// Airwindows ButterComp2: "The single richest, lushest 'glue' compressor"
 /// Features 4 independent compressors per channel in bipolar, interleaved configuration
 pub struct ButterComp2 {
     state: *mut ButterComp2State,
-    sample_rate: f32,
 }
 
 impl ButterComp2 {
@@ -38,11 +37,7 @@ impl ButterComp2 {
     pub fn new(sample_rate: f32) -> Self {
         let state = unsafe { buttercomp2_create(sample_rate as f64) };
         assert!(!state.is_null(), "Failed to create ButterComp2 state");
-        
-        Self {
-            state,
-            sample_rate,
-        }
+        Self { state }
     }
     
     /// Update compressor parameters
@@ -64,28 +59,35 @@ impl ButterComp2 {
         }
     }
     
-    /// Process audio buffer in place
-    /// 
-    /// Requires stereo input (2 channels)
+    /// Process audio buffer in place (stereo, lock-free, allocation-free).
+    ///
+    /// Calls the C++ function once per buffer (O(1) FFI overhead) rather than
+    /// once per sample (O(block_size) overhead). The C++ implementation loops
+    /// over `num_samples` internally — see buttercomp2_process_stereo in cpp/.
     pub fn process(&mut self, buffer: &mut Buffer) {
-        // Process buffer sample by sample for stereo
-        for samples in buffer.iter_samples() {
-            let mut channels: Vec<&mut f32> = samples.into_iter().collect();
-            if channels.len() >= 2 {
-                let mut left = *channels[0];
-                let mut right = *channels[1];
-                
-                unsafe {
-                    buttercomp2_process_stereo(
-                        self.state,
-                        &mut left,
-                        &mut right,
-                        1,
-                    );
+        let num_samples = buffer.samples();
+        if num_samples == 0 { return; }
+
+        // Capture a *mut f32 to the start of each channel from the first sample
+        // iteration. NIH-plug guarantees each channel is a contiguous, non-overlapping
+        // f32 slice, so ch[n]+i accesses sample i of channel n.
+        let mut ch: [*mut f32; 2] = [std::ptr::null_mut(); 2];
+        let mut count = 0usize;
+        if let Some(first) = buffer.iter_samples().next() {
+            for s in first {
+                if count < 2 {
+                    ch[count] = s as *mut f32;
+                    count += 1;
                 }
-                
-                *channels[0] = left;
-                *channels[1] = right;
+            }
+        }
+
+        if count >= 2 {
+            // Safety: ch[0] and ch[1] are valid *mut f32 pointers to the first
+            // element of non-overlapping, contiguous channel slices of length
+            // num_samples. buttercomp2_process_stereo iterates [0..num_samples).
+            unsafe {
+                buttercomp2_process_stereo(self.state, ch[0], ch[1], num_samples as i32);
             }
         }
     }

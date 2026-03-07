@@ -10,19 +10,24 @@ use nih_plug::prelude::Enum;
 /// - Multiple vintage transformer models (Neve, API, SSL-style)
 pub struct TransformerModule {
     sample_rate: f32,
-    
+
     // Input transformer stage
     input_transformer: TransformerStage,
-    
-    // Output transformer stage  
+
+    // Output transformer stage
     output_transformer: TransformerStage,
-    
-    // Frequency response filters
-    low_shelf: DirectForm1<f32>,    // Low frequency response
-    high_shelf: DirectForm1<f32>,   // High frequency response
-    
+
+    // Frequency response filters — updated via update_coefficients(), never recreated.
+    low_shelf: DirectForm1<f32>,
+    high_shelf: DirectForm1<f32>,
+
     // Transformer model
     model: TransformerModel,
+
+    // Cached parameter values — frequency response is only recomputed when these change.
+    cached_model: TransformerModel,
+    cached_low_response: f32,
+    cached_high_response: f32,
 }
 
 /// Individual transformer stage (input or output)
@@ -143,6 +148,9 @@ impl TransformerModule {
             low_shelf: DirectForm1::<f32>::new(flat_coeff),
             high_shelf: DirectForm1::<f32>::new(flat_coeff),
             model: TransformerModel::Vintage,
+            cached_model: TransformerModel::Vintage,
+            cached_low_response: f32::NAN, // NAN forces recompute on first call
+            cached_high_response: f32::NAN,
         }
     }
     
@@ -170,49 +178,49 @@ impl TransformerModule {
         self.output_transformer.saturation_amount = output_saturation * 0.5; // Reduce saturation
         self.output_transformer.compression_amount = transformer_compression * 0.7;
         
-        // Update frequency response based on transformer model
-        self.update_frequency_response(low_frequency_response, high_frequency_response);
+        // Only recompute filter coefficients when model or response values change.
+        // Comparing f32 for exact equality is valid here: we are checking whether
+        // the stored parameter value (same f32 bits) has been updated by the host,
+        // not comparing computed results where rounding would be an issue.
+        if model != self.cached_model
+            || low_frequency_response != self.cached_low_response
+            || high_frequency_response != self.cached_high_response
+        {
+            self.cached_model = model;
+            self.cached_low_response = low_frequency_response;
+            self.cached_high_response = high_frequency_response;
+            self.update_frequency_response(low_frequency_response, high_frequency_response);
+        }
     }
     
-    /// Update frequency response characteristics
+    /// Update frequency response characteristics.
+    ///
+    /// Uses `update_coefficients()` on existing filter objects — no state reset,
+    /// no heap allocation. Called only when model or response values change
+    /// (guarded in `update_parameters()`).
     fn update_frequency_response(&mut self, low_response: f32, high_response: f32) {
-        // Low frequency shelf (transformer low-end response)
         let low_freq = match self.model {
-            TransformerModel::Vintage => 80.0,   // Warmer low end
-            TransformerModel::Modern => 60.0,    // Extended low end
-            TransformerModel::British => 100.0,  // Tighter low end
-            TransformerModel::American => 70.0,  // Balanced
+            TransformerModel::Vintage  => 80.0,
+            TransformerModel::Modern   => 60.0,
+            TransformerModel::British  => 100.0,
+            TransformerModel::American => 70.0,
         };
-        
-        let low_gain = low_response * 3.0; // ±3dB
-        if low_gain.abs() > 0.1 {
-            let low_coeff = Coefficients::<f32>::from_params(
-                Type::LowShelf(low_gain),
-                self.sample_rate.hz(),
-                low_freq.hz(),
-                0.707,
-            ).expect("Low shelf should be valid");
-            self.low_shelf = DirectForm1::<f32>::new(low_coeff);
-        }
-        
-        // High frequency shelf (transformer high-end response)
+        // Always update (even at 0 dB) so that model changes take effect immediately.
+        let low_gain = low_response * 3.0; // ±3 dB
+        if let Ok(coeff) = Coefficients::<f32>::from_params(
+            Type::LowShelf(low_gain), self.sample_rate.hz(), low_freq.hz(), 0.707,
+        ) { self.low_shelf.update_coefficients(coeff); }
+
         let high_freq = match self.model {
-            TransformerModel::Vintage => 8000.0,  // Gentle high roll-off
-            TransformerModel::Modern => 15000.0,  // Extended high end
-            TransformerModel::British => 12000.0, // Crisp but controlled
-            TransformerModel::American => 10000.0, // Balanced
+            TransformerModel::Vintage  => 8000.0,
+            TransformerModel::Modern   => 15000.0,
+            TransformerModel::British  => 12000.0,
+            TransformerModel::American => 10000.0,
         };
-        
-        let high_gain = high_response * 2.0; // ±2dB
-        if high_gain.abs() > 0.1 {
-            let high_coeff = Coefficients::<f32>::from_params(
-                Type::HighShelf(high_gain),
-                self.sample_rate.hz(),
-                high_freq.hz(),
-                0.707,
-            ).expect("High shelf should be valid");
-            self.high_shelf = DirectForm1::<f32>::new(high_coeff);
-        }
+        let high_gain = high_response * 2.0; // ±2 dB
+        if let Ok(coeff) = Coefficients::<f32>::from_params(
+            Type::HighShelf(high_gain), self.sample_rate.hz(), high_freq.hz(), 0.707,
+        ) { self.high_shelf.update_coefficients(coeff); }
     }
     
     /// Process audio buffer through transformer module
