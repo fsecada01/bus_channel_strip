@@ -1,20 +1,22 @@
 # -------------------------------------------------------------------------------------
 # NOTE FOR MAINTAINERS:
 #
-# This workflow is intentionally configured to use ONLY pre-built Skia binaries.
-# Do NOT add installation steps for gn, ninja, depot_tools, or any Skia source build tools.
+# This workflow uses pre-built Skia binaries where available (FORCE_SKIA_BINARIES_DOWNLOAD=1).
+# When pre-built binaries are unavailable for a target, Skia compiles from source.
 #
-# Why?
-# - Source building Skia is slow and unstable in CI (missing tools, corrupted binaries, git errors, etc.)
-# - Pre-built Skia binaries (via FORCE_SKIA_BINARIES_DOWNLOAD=1 and related env vars) are fast and reliable.
-# - This mirrors the local debug_plugin.bat script and eliminates all prior CI failures.
+# Do NOT add gn, ninja, or depot_tools — Skia's GN build system is embedded in skia-bindings.
 #
-# To upgrade Skia, ONLY update SKIA_BINARIES_URL and SKIA_BINARIES_KEY to point at a new prebuilt release.
-# If you need to build Skia from source, do so locally and contribute new binaries upstream.
+# macOS Intel (x86_64-apple-darwin) cross-compile from ARM64 runner (macos-14):
+# - Xcode's bundled clang on ARM64 blocks x86 SIMD headers with a compile error.
+# - We install Homebrew LLVM and prepend it to PATH so Skia's GN finds a proper
+#   multi-target clang with x86 intrinsic headers.
+# - Do NOT set CC/CXX env vars — Skia's GN configures its own compiler separately.
 #
-# See commit bfe64569821613638ad91266a19215bbdc22d1b5 and the workflow run at
-# https://github.com/fsecada01/bus_channel_strip/actions/runs/17618457424/job/50057771486
-# for full rationale and history.
+# macOS ARM64 (aarch64-apple-darwin) native build:
+# - CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD disables x86-only zlib SIMD paths for skia-safe
+#   (reaches skia-safe via cc crate / CFLAGS passthrough, but NOT Skia's ninja).
+#
+# To upgrade Skia, ONLY update SKIA_BINARIES_URL and SKIA_BINARIES_KEY.
 # -------------------------------------------------------------------------------------
 
 name: Build and Release VST3/CLAP
@@ -93,6 +95,23 @@ jobs:
           build-essential
 
 
+      - name: Set up Homebrew LLVM for macOS Intel cross-compile
+        if: matrix.target == 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          # Homebrew LLVM ships x86/x86_64 intrinsic headers on all host architectures,
+          # including ARM64. Xcode's bundled clang on macos-14 (ARM64) blocks x86 SIMD
+          # headers with "#error This header is only meant to be used on x86 and x64
+          # architecture" — even when the Cargo target is x86_64-apple-darwin.
+          #
+          # CFLAGS/CXXFLAGS do NOT fix this because Skia's GN/ninja ignores host env vars
+          # and compiles its own C files (zlib SIMD, harfbuzz, etc.) independently.
+          #
+          # Prepending Homebrew LLVM to PATH lets Skia's GN discover the right clang
+          # without conflicting CC/CXX overrides that break Skia's own build config.
+          LLVM_PREFIX=$(brew --prefix llvm)
+          echo "${LLVM_PREFIX}/bin" >> $GITHUB_PATH
+
       - name: Install Windows dependencies
         if: matrix.os == 'windows-latest'
         run: |
@@ -126,12 +145,11 @@ jobs:
             echo "SKIA_GN_ARGS=skia_use_egl=false" >> $GITHUB_ENV
           fi
 
-          # Skia's zlib includes x86 SIMD headers (tmmintrin.h, xmmintrin.h, etc.)
-          # that fail to compile on ARM64 hosts — both when building for aarch64
-          # natively AND when cross-compiling x86_64 from an ARM64 runner (macos-14).
-          # ZLIB_DISABLE_CHUNK_SIMD bypasses the SIMD path entirely; applies to
-          # all macOS targets because our Intel build now runs on macos-14 (ARM64).
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
+          # aarch64 native build: Skia's zlib adler32_simd.c tries to include x86
+          # SIMD headers that don't exist on ARM. ZLIB_DISABLE_CHUNK_SIMD skips them.
+          # NOTE: this env var only reaches skia-safe via cc crate / CFLAGS passthrough.
+          # For x86_64 cross-compile from ARM, we use Homebrew LLVM instead (see below).
+          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
             echo "CXXFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
           fi
