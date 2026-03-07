@@ -71,53 +71,37 @@ pub const COMPONENT_STYLES: &str = r#"
 
 /* 500 Series Module Slots */
 .module-slot {
-    background: linear-gradient(145deg, #d0d0d0, #e8e8e8);
-    border: 2px solid #999999;
     border-radius: 8px;
-    padding: 16px 12px;
     margin: 2px;
-    box-shadow: 
-        inset 0 2px 4px rgba(255, 255, 255, 0.3),
-        inset 0 -2px 4px rgba(0, 0, 0, 0.2),
-        0 4px 8px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s ease;
-}
-
-.module-slot:hover {
-    box-shadow: 
-        inset 0 2px 4px rgba(255, 255, 255, 0.4),
-        inset 0 -2px 4px rgba(0, 0, 0, 0.3),
-        0 6px 12px rgba(0, 0, 0, 0.4);
 }
 
 .module-header {
     text-align: center;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #aaaaaa;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #444444;
 }
 
 .module-name {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
-    color: #222222;
+    color: #e0e0e0;
     letter-spacing: 1px;
     text-transform: uppercase;
 }
 
 .module-type {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
-    color: #999999;
+    color: #b8b8b8;
     letter-spacing: 0.5px;
     text-transform: uppercase;
     margin-top: 2px;
 }
 
 .section-label {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    color: #a0a0a0;
+    color: #c8c8c8;
     text-transform: uppercase;
     letter-spacing: 0.8px;
     text-align: center;
@@ -274,12 +258,10 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .param-control {
-    margin: 3px;
-    padding: 4px;
+    /* padding removed — morphorm counts padding in Auto height resolution,
+       causing DynEQ band columns to overflow by ~64px (8 sliders × 8px) */
     border-radius: 3px;
     transition: background-color 0.15s ease;
-    min-width: 85px;
-    width: auto;
 }
 
 .param-control:hover {
@@ -288,8 +270,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 /* Parameter labels for 500 series modules */
 .param-label {
-    font-size: 11px;
-    color: #d0d0d0;
+    font-size: 12px;
+    color: #e0e0e0;
     text-align: center;
     margin-bottom: 4px;
     font-weight: 600;
@@ -300,6 +282,17 @@ pub const COMPONENT_STYLES: &str = r#"
 /* Dark param labels for dark chassis areas */
 .param-label.dark {
     color: #cccccc;
+}
+
+/* Compact param label for DynEQ band columns — slightly smaller to recover
+   vertical space. Used with dynamic (Stretch) spacing in dyneq_band_col!. */
+.dyneq-param-label {
+    font-size: 11px;
+    color: #d0d0d0;
+    text-align: center;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 /* Specialized parameter controls */
@@ -351,6 +344,37 @@ pub const COMPONENT_STYLES: &str = r#"
     border-color: #9a4a4a;
     color: #ffffff;
     box-shadow: 0 0 12px rgba(122, 42, 42, 0.4);
+}
+
+/* Band ON button — inverted convention vs bypass buttons.
+   :checked = param is true = band ENABLED = should look DARK (normal state).
+   Unchecked = param is false = band DISABLED = should look LIT (alert state). */
+.on-button {
+    background: linear-gradient(145deg, #4a4a4a, #3a3a3a);
+    border: 1px solid #666666;
+    border-radius: 4px;
+    color: #aaaaaa;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    min-width: 60px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.on-button:hover {
+    background: linear-gradient(145deg, #555555, #444444);
+}
+
+/* Checked = enabled = DARK (normal processing state, like bypass=false) */
+.on-button:checked {
+    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
+    border-color: #555555;
+    color: #888888;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 /* Enhanced slider styling */
@@ -481,9 +505,8 @@ scrollbar .thumb:hover {
 
 .drag-handle {
     background: rgba(255, 255, 255, 0.04);
-    border-radius: 4px;
-    padding: 3px 8px;
-    margin-bottom: 6px;
+    border-radius: 3px;
+    padding: 2px 6px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     transition: background 0.12s ease, border-color 0.12s ease;
     display: flex;
@@ -498,31 +521,169 @@ scrollbar .thumb:hover {
 
 /* Applied when this slot is the selected source */
 .drag-handle-active {
-    background: rgba(64, 160, 255, 0.2) !important;
-    border-color: rgba(64, 160, 255, 0.7) !important;
+    background: rgba(64, 160, 255, 0.35) !important;
+    border-color: rgba(64, 160, 255, 0.95) !important;
+}
+
+/* "● SELECTED" badge shown inside the drag handle when active */
+.drag-selected-indicator {
+    font-size: 9px;
+    font-weight: 700;
+    color: #ffdc32;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-left: auto;
 }
 
 .drag-handle-icon {
     font-size: 15px;
     font-weight: 900;
-    color: #aaaaaa;
+    color: #cccccc;
     line-height: 1;
 }
 
 .drag-handle-label {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
-    color: #888888;
+    color: #bbbbbb;
     text-transform: uppercase;
     letter-spacing: 1px;
 }
 
-/* Module slot highlighted as the selected reorder source */
+/* Module slot highlighted as the selected reorder source.
+   Note: box-shadow has limited support in vizia; use border-color +
+   background instead. Border and name color are also set reactively
+   in Rust (see create_dynamic_module_slot) for reliable rendering. */
 .drag-source {
-    box-shadow:
-        0 0 0 2px rgba(64, 160, 255, 0.9),
-        0 0 18px rgba(64, 160, 255, 0.35),
-        inset 0 0 8px rgba(64, 160, 255, 0.08) !important;
+    background-color: rgba(64, 160, 255, 0.10) !important;
+}
+
+/* ── DynEQ flip-view styles ──────────────────────────────────────────────── */
+
+/* Compact card shown inside the strip slot */
+.dyneq-card-hint {
+    font-size: 13px;
+    font-weight: 600;
+    color: #66cc66;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.dyneq-card-desc {
+    font-size: 11px;
+    color: #999999;
+    font-style: italic;
+    line-height: 1.4;
+}
+
+.dyneq-open-btn {
+    background: linear-gradient(145deg, #1e3d1e, #2a5c2a);
+    border: 2px solid #66cc66;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dyneq-open-btn:hover {
+    background: linear-gradient(145deg, #2a5c2a, #3a7a3a);
+    border-color: #88ee88;
+}
+
+.dyneq-open-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #66cc66;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Back view container */
+.dyneq-back-view {
+    background: linear-gradient(145deg, #1a2a1a, #1e2e1e);
+    border: 2px solid #66cc66;
+    border-radius: 8px;
+}
+
+/* Back button */
+.dyneq-back-btn {
+    background: linear-gradient(145deg, #2a2a2a, #333333);
+    border: 1px solid #66cc66;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dyneq-back-btn:hover {
+    background: linear-gradient(145deg, #333333, #444444);
+    border-color: #88ee88;
+}
+
+.dyneq-back-btn-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #66cc66;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.dyneq-back-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #66cc66;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(102, 204, 102, 0.4);
+}
+
+/* Spectral analyzer placeholder */
+.dyneq-spectrum {
+    background: linear-gradient(145deg, #0d1a0d, #111f11);
+    border: 1px solid rgba(102, 204, 102, 0.4);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dyneq-spectrum-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #66cc66;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    opacity: 0.7;
+}
+
+.dyneq-spectrum-hint {
+    font-size: 11px;
+    color: #556655;
+    text-align: center;
+    font-style: italic;
+}
+
+/* Per-band column in the back view */
+.dyneq-band-col {
+    background: rgba(102, 204, 102, 0.04);
+    border: 1px solid rgba(102, 204, 102, 0.15);
+    border-radius: 6px;
+    padding: 6px;
+}
+
+.dyneq-band-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #66cc66;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 4px;
 }
 
 /* Responsive adjustments */

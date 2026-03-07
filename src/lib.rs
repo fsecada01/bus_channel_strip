@@ -93,8 +93,51 @@ struct BusChannelStrip {
     /// Buffers for module reordering
     temp_buffer_1: Vec<Vec<f32>>,
     temp_buffer_2: Vec<Vec<f32>>,
-    
-    /// GUI state  
+
+    /// Spectrum data shared lock-free with the GUI thread.
+    spectrum_data: Arc<spectral::SpectrumData>,
+
+    /// Pre-allocated FFT ring buffer — no audio-thread allocation.
+    #[cfg(feature = "dynamic_eq")]
+    fft_ring: Vec<f32>,
+    #[cfg(feature = "dynamic_eq")]
+    fft_ring_pos: usize,
+    #[cfg(feature = "dynamic_eq")]
+    fft_engine: Option<Arc<dyn realfft::RealToComplex<f32>>>,
+    #[cfg(feature = "dynamic_eq")]
+    fft_input: Vec<f32>,
+    #[cfg(feature = "dynamic_eq")]
+    fft_output: Vec<realfft::num_complex::Complex<f32>>,
+    #[cfg(feature = "dynamic_eq")]
+    fft_scratch: Vec<realfft::num_complex::Complex<f32>>,
+    #[cfg(feature = "dynamic_eq")]
+    fft_window: Vec<f32>,
+    #[cfg(feature = "dynamic_eq")]
+    fft_magnitude_smooth: Vec<f32>,
+
+    // ── Sidechain masking analysis (Strategy A — one-shot, UI-triggered) ──────
+    /// Circular ring buffer for the sidechain mono mix-down.
+    #[cfg(feature = "dynamic_eq")]
+    sc_ring: Vec<f32>,
+    #[cfg(feature = "dynamic_eq")]
+    sc_ring_pos: usize,
+    /// Windowed sidechain snapshot for FFT (pre-allocated in initialize()).
+    #[cfg(feature = "dynamic_eq")]
+    sc_fft_input: Vec<f32>,
+    /// Sidechain FFT output (pre-allocated, same size as fft_output).
+    #[cfg(feature = "dynamic_eq")]
+    sc_fft_output: Vec<realfft::num_complex::Complex<f32>>,
+    /// Sample rate cached from initialize() for FFT bin → Hz conversion.
+    #[cfg(feature = "dynamic_eq")]
+    sample_rate: f32,
+    /// GUI → audio: GUI sets true to request an analysis on the next FFT frame.
+    analysis_requested: Arc<std::sync::atomic::AtomicBool>,
+    /// audio → GUI: results of the last masking analysis.
+    analysis_result: Arc<spectral::AnalysisResult>,
+    /// audio → GUI: per-band gain reduction for the DynEQ spectrum display.
+    gr_data: Arc<spectral::GainReductionData>,
+
+    /// GUI state
     #[cfg(feature = "gui")]
     editor_state: Arc<ViziaState>,
 }
@@ -216,6 +259,9 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_mode"]
     pub dyneq_band1_mode: EnumParam<DynamicMode>,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band1_solo"]
+    pub dyneq_band1_solo: BoolParam,
 
     #[cfg(feature = "dynamic_eq")]
     // Band 2 (Low-Mid) - 800Hz default
@@ -248,6 +294,9 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_mode"]
     pub dyneq_band2_mode: EnumParam<DynamicMode>,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band2_solo"]
+    pub dyneq_band2_solo: BoolParam,
 
     #[cfg(feature = "dynamic_eq")]
     // Band 3 (High-Mid) - 3kHz default
@@ -280,6 +329,9 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_mode"]
     pub dyneq_band3_mode: EnumParam<DynamicMode>,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band3_solo"]
+    pub dyneq_band3_solo: BoolParam,
 
     #[cfg(feature = "dynamic_eq")]
     // Band 4 (High) - 8kHz default
@@ -312,6 +364,9 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_mode"]
     pub dyneq_band4_mode: EnumParam<DynamicMode>,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band4_solo"]
+    pub dyneq_band4_solo: BoolParam,
 
     // Transformer Module Parameters
     #[id = "transformer_bypass"]
@@ -410,6 +465,36 @@ impl Default for BusChannelStrip {
             punch: PunchModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             temp_buffer_1: Vec::new(),
             temp_buffer_2: Vec::new(),
+            spectrum_data: Arc::new(spectral::SpectrumData::new()),
+            #[cfg(feature = "dynamic_eq")]
+            fft_ring: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            fft_ring_pos: 0,
+            #[cfg(feature = "dynamic_eq")]
+            fft_engine: None,
+            #[cfg(feature = "dynamic_eq")]
+            fft_input: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            fft_output: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            fft_scratch: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            fft_window: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            fft_magnitude_smooth: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            sc_ring: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            sc_ring_pos: 0,
+            #[cfg(feature = "dynamic_eq")]
+            sc_fft_input: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            sc_fft_output: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            sample_rate: 44100.0,
+            analysis_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            analysis_result: Arc::new(spectral::AnalysisResult::new()),
+            gr_data: Arc::new(spectral::GainReductionData::new()),
             #[cfg(feature = "gui")]
             editor_state: editor::default_state(),
         }
@@ -715,71 +800,73 @@ impl Default for BusChannelStripParams {
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_threshold: FloatParam::new(
                 "DynEQ 1 Thresh",
-                0.7, // -3dB
-                FloatRange::Linear { min: 0.0, max: 1.0 },
+                -18.0,
+                FloatRange::Linear { min: -60.0, max: 0.0 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" dB")
+            .with_step_size(0.1),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_ratio: FloatParam::new(
                 "DynEQ 1 Ratio",
-                0.5, // 3:1 ratio
+                4.0,
                 FloatRange::Skewed {
-                    min: 0.0,
-                    max: 1.0,
-                    factor: FloatRange::skew_factor(-1.0),
+                    min: 1.0,
+                    max: 20.0,
+                    factor: FloatRange::skew_factor(-1.5),
                 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_step_size(0.1),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_attack: FloatParam::new(
                 "DynEQ 1 Attack",
-                0.3, // ~10ms
+                10.0,
                 FloatRange::Skewed {
-                    min: 0.0,
-                    max: 1.0,
+                    min: 0.1,
+                    max: 200.0,
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" ms")
+            .with_step_size(0.1),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_release: FloatParam::new(
                 "DynEQ 1 Release",
-                0.4, // ~100ms
+                100.0,
                 FloatRange::Skewed {
-                    min: 0.0,
-                    max: 1.0,
-                    factor: FloatRange::skew_factor(-1.0),
+                    min: 1.0,
+                    max: 2000.0,
+                    factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" ms")
+            .with_step_size(1.0),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_gain: FloatParam::new(
                 "DynEQ 1 Gain",
                 0.0,
-                FloatRange::Linear { min: -1.0, max: 1.0 },
+                FloatRange::Linear { min: -18.0, max: 18.0 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" dB")
+            .with_step_size(0.1),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_q: FloatParam::new(
                 "DynEQ 1 Q",
-                0.5, // Q = 1.0
-                FloatRange::Linear { min: 0.1, max: 1.0 },
+                1.0,
+                FloatRange::Skewed {
+                    min: 0.3,
+                    max: 8.0,
+                    factor: FloatRange::skew_factor(0.5),
+                },
             )
-            .with_unit("")
             .with_step_size(0.01),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band1_enabled: BoolParam::new("DynEQ 1 On", false),
+            dyneq_band1_enabled: BoolParam::new("DynEQ 1 On", true),
             
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_detector_freq: FloatParam::new(
@@ -796,6 +883,8 @@ impl Default for BusChannelStripParams {
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_mode: EnumParam::new("DynEQ 1 Mode", DynamicMode::CompressDownward),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band1_solo: BoolParam::new("DynEQ 1 Solo", false),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 2 (Low-Mid) - 800Hz (similar pattern, different defaults)
@@ -812,19 +901,19 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_threshold: FloatParam::new("DynEQ 2 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band2_threshold: FloatParam::new("DynEQ 2 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_ratio: FloatParam::new("DynEQ 2 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band2_ratio: FloatParam::new("DynEQ 2 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_attack: FloatParam::new("DynEQ 2 Attack", 0.3, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01),
+            dyneq_band2_attack: FloatParam::new("DynEQ 2 Attack", 10.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_release: FloatParam::new("DynEQ 2 Release", 0.4, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band2_release: FloatParam::new("DynEQ 2 Release", 100.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_gain: FloatParam::new("DynEQ 2 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band2_gain: FloatParam::new("DynEQ 2 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_q: FloatParam::new("DynEQ 2 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            dyneq_band2_q: FloatParam::new("DynEQ 2 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_enabled: BoolParam::new("DynEQ 2 On", false),
+            dyneq_band2_enabled: BoolParam::new("DynEQ 2 On", true),
             
             #[cfg(feature = "dynamic_eq")]
             dyneq_band2_detector_freq: FloatParam::new(
@@ -841,6 +930,8 @@ impl Default for BusChannelStripParams {
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band2_mode: EnumParam::new("DynEQ 2 Mode", DynamicMode::CompressDownward),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band2_solo: BoolParam::new("DynEQ 2 Solo", false),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 3 (High-Mid) - 3kHz
@@ -857,19 +948,19 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_threshold: FloatParam::new("DynEQ 3 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band3_threshold: FloatParam::new("DynEQ 3 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_ratio: FloatParam::new("DynEQ 3 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band3_ratio: FloatParam::new("DynEQ 3 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_attack: FloatParam::new("DynEQ 3 Attack", 0.2, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01), // Faster for highs
+            dyneq_band3_attack: FloatParam::new("DynEQ 3 Attack", 5.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_release: FloatParam::new("DynEQ 3 Release", 0.3, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01), // Faster for highs
+            dyneq_band3_release: FloatParam::new("DynEQ 3 Release", 60.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_gain: FloatParam::new("DynEQ 3 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band3_gain: FloatParam::new("DynEQ 3 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_q: FloatParam::new("DynEQ 3 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            dyneq_band3_q: FloatParam::new("DynEQ 3 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_enabled: BoolParam::new("DynEQ 3 On", false),
+            dyneq_band3_enabled: BoolParam::new("DynEQ 3 On", true),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band3_detector_freq: FloatParam::new(
                 "DynEQ 3 Det Freq",
@@ -884,6 +975,8 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band3_mode: EnumParam::new("DynEQ 3 Mode", DynamicMode::CompressDownward),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band3_solo: BoolParam::new("DynEQ 3 Solo", false),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 4 (High) - 8kHz
@@ -900,19 +993,19 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_threshold: FloatParam::new("DynEQ 4 Thresh", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band4_threshold: FloatParam::new("DynEQ 4 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_ratio: FloatParam::new("DynEQ 4 Ratio", 0.5, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01),
+            dyneq_band4_ratio: FloatParam::new("DynEQ 4 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_attack: FloatParam::new("DynEQ 4 Attack", 0.1, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-2.0) }).with_step_size(0.01), // Very fast for highs
+            dyneq_band4_attack: FloatParam::new("DynEQ 4 Attack", 2.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_release: FloatParam::new("DynEQ 4 Release", 0.2, FloatRange::Skewed { min: 0.0, max: 1.0, factor: FloatRange::skew_factor(-1.0) }).with_step_size(0.01), // Fast for highs
+            dyneq_band4_release: FloatParam::new("DynEQ 4 Release", 30.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_gain: FloatParam::new("DynEQ 4 Gain", 0.0, FloatRange::Linear { min: -1.0, max: 1.0 }).with_step_size(0.01),
+            dyneq_band4_gain: FloatParam::new("DynEQ 4 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(0.1),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_q: FloatParam::new("DynEQ 4 Q", 0.5, FloatRange::Linear { min: 0.1, max: 1.0 }).with_step_size(0.01),
+            dyneq_band4_q: FloatParam::new("DynEQ 4 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_enabled: BoolParam::new("DynEQ 4 On", false),
+            dyneq_band4_enabled: BoolParam::new("DynEQ 4 On", true),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band4_detector_freq: FloatParam::new(
                 "DynEQ 4 Det Freq",
@@ -927,8 +1020,8 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band4_mode: EnumParam::new("DynEQ 4 Mode", DynamicMode::CompressDownward),
-            
-            
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band4_solo: BoolParam::new("DynEQ 4 Solo", false),
 
             // Transformer Module Parameters
             transformer_bypass: BoolParam::new("Transformer Bypass", false),
@@ -1124,18 +1217,25 @@ impl Plugin for BusChannelStrip {
 
     // The first audio IO layout is used as the default. The other layouts may be selected either
     // explicitly or automatically by the host or the user depending on the plugin API/backend.
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
-        main_input_channels: NonZeroU32::new(2),
-        main_output_channels: NonZeroU32::new(2),
-
-        aux_input_ports: &[],
-        aux_output_ports: &[],
-
-        // Individual ports and the layout as a whole can be named here. By default, these names
-        // are generated as needed. This layout will be called 'Stereo', while a layout with
-        // only one input and output channel would be called 'Mono'.
-        names: PortNames::const_default(),
-    }];
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        // Default: stereo in/out, no sidechain required (backward-compatible).
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            aux_input_ports: &[],
+            aux_output_ports: &[],
+            names: PortNames::const_default(),
+        },
+        // Optional: stereo main + stereo sidechain for masking analysis.
+        // Select this layout in Reaper via the plugin's I/O panel.
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            aux_input_ports: &[new_nonzero_u32(2)],
+            aux_output_ports: &[],
+            names: PortNames::const_default(),
+        },
+    ];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
@@ -1157,10 +1257,13 @@ impl Plugin for BusChannelStrip {
 
     #[cfg(feature = "gui")]
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        // Create the vizia GUI editor
         editor::create(
             self.params.clone(),
             self.editor_state.clone(),
+            self.spectrum_data.clone(),
+            self.analysis_requested.clone(),
+            self.analysis_result.clone(),
+            self.gr_data.clone(),
         )
     }
 
@@ -1190,10 +1293,38 @@ impl Plugin for BusChannelStrip {
         // Initialize temporary buffers for module reordering
         let max_buffer_size = _buffer_config.max_buffer_size as usize;
         let num_channels = _audio_io_layout.main_output_channels.unwrap().get() as usize;
-        
+
         self.temp_buffer_1 = vec![vec![0.0; max_buffer_size]; num_channels];
         self.temp_buffer_2 = vec![vec![0.0; max_buffer_size]; num_channels];
-        
+
+        // Pre-allocate FFT buffers — must happen here so the audio thread never allocates.
+        #[cfg(feature = "dynamic_eq")]
+        {
+            use realfft::RealFftPlanner;
+            let mut planner = RealFftPlanner::<f32>::new();
+            let fft = planner.plan_fft_forward(spectral::FFT_SIZE);
+            self.fft_input     = fft.make_input_vec();
+            self.fft_output    = fft.make_output_vec();
+            self.fft_scratch   = fft.make_scratch_vec();
+            // Sidechain analysis buffers (same FFT size, separate allocation).
+            self.sc_fft_input  = fft.make_input_vec();
+            self.sc_fft_output = fft.make_output_vec();
+            self.fft_engine    = Some(fft);
+            self.fft_ring      = vec![0.0_f32; spectral::FFT_SIZE];
+            self.fft_ring_pos  = 0;
+            self.sc_ring       = vec![0.0_f32; spectral::FFT_SIZE];
+            self.sc_ring_pos   = 0;
+            self.sample_rate   = sr;
+            // Hann window: w[n] = 0.5 * (1 - cos(2π*n / (N-1)))
+            self.fft_window = (0..spectral::FFT_SIZE)
+                .map(|n| {
+                    0.5 * (1.0 - (std::f32::consts::TAU * n as f32
+                        / (spectral::FFT_SIZE - 1) as f32).cos())
+                })
+                .collect();
+            self.fft_magnitude_smooth = vec![0.0_f32; spectral::SPECTRUM_BINS];
+        }
+
         true
     }
 
@@ -1295,63 +1426,217 @@ impl Plugin for BusChannelStrip {
             }
         }
 
-        // 5) Dynamic EQ Module (disabled for now)
+        // 5) Dynamic EQ Module
         #[cfg(feature = "dynamic_eq")]
         {
+            // ── Sidechain ring accumulation ───────────────────────────────────
+            // Accumulate sidechain mono mix-down into sc_ring (circular, FFT_SIZE).
+            // When no sidechain is connected the ring fills with silence so the
+            // analysis still runs — it just reports zero overlap.
+            if !_aux.inputs.is_empty() {
+                for channel_samples in _aux.inputs[0].iter_samples() {
+                    let mut mono = 0.0_f32;
+                    let mut n = 0_usize;
+                    for s in channel_samples { mono += *s; n += 1; }
+                    if n > 0 { mono /= n as f32; }
+                    self.sc_ring[self.sc_ring_pos] = mono;
+                    self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
+                }
+            } else {
+                for _ in 0..buffer.samples() {
+                    self.sc_ring[self.sc_ring_pos] = 0.0;
+                    self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
+                }
+            }
+
+            // All params now carry real physical units — no normalization mapping needed.
             let dyneq_params = [
                 DynamicBandParams {
                     mode: self.params.dyneq_band1_mode.value(),
                     detector_freq: self.params.dyneq_band1_detector_freq.value(),
                     freq: self.params.dyneq_band1_freq.value(),
-                    q: map_q_param(self.params.dyneq_band1_q.value()),
-                    threshold_db: self.params.dyneq_band1_threshold.value() * 24.0 - 24.0, // Map 0-1 to -24 to 0 dB
-                    ratio: map_ratio_param(self.params.dyneq_band1_ratio.value()),
-                    attack_ms: map_time_param(self.params.dyneq_band1_attack.value(), 1.0, 100.0),
-                    release_ms: map_time_param(self.params.dyneq_band1_release.value(), 10.0, 1000.0),
-                    gain_db: self.params.dyneq_band1_gain.value() * 12.0, // ±12dB
+                    q: self.params.dyneq_band1_q.value(),
+                    threshold_db: self.params.dyneq_band1_threshold.value(),
+                    ratio: self.params.dyneq_band1_ratio.value(),
+                    attack_ms: self.params.dyneq_band1_attack.value(),
+                    release_ms: self.params.dyneq_band1_release.value(),
+                    gain_db: self.params.dyneq_band1_gain.value(),
                     enabled: self.params.dyneq_band1_enabled.value(),
+                    solo: self.params.dyneq_band1_solo.value(),
                 },
                 DynamicBandParams {
                     mode: self.params.dyneq_band2_mode.value(),
                     detector_freq: self.params.dyneq_band2_detector_freq.value(),
                     freq: self.params.dyneq_band2_freq.value(),
-                    q: map_q_param(self.params.dyneq_band2_q.value()),
-                    threshold_db: self.params.dyneq_band2_threshold.value() * 24.0 - 24.0,
-                    ratio: map_ratio_param(self.params.dyneq_band2_ratio.value()),
-                    attack_ms: map_time_param(self.params.dyneq_band2_attack.value(), 1.0, 100.0),
-                    release_ms: map_time_param(self.params.dyneq_band2_release.value(), 10.0, 1000.0),
-                    gain_db: self.params.dyneq_band2_gain.value() * 12.0,
+                    q: self.params.dyneq_band2_q.value(),
+                    threshold_db: self.params.dyneq_band2_threshold.value(),
+                    ratio: self.params.dyneq_band2_ratio.value(),
+                    attack_ms: self.params.dyneq_band2_attack.value(),
+                    release_ms: self.params.dyneq_band2_release.value(),
+                    gain_db: self.params.dyneq_band2_gain.value(),
                     enabled: self.params.dyneq_band2_enabled.value(),
+                    solo: self.params.dyneq_band2_solo.value(),
                 },
                 DynamicBandParams {
                     mode: self.params.dyneq_band3_mode.value(),
                     detector_freq: self.params.dyneq_band3_detector_freq.value(),
                     freq: self.params.dyneq_band3_freq.value(),
-                    q: map_q_param(self.params.dyneq_band3_q.value()),
-                    threshold_db: self.params.dyneq_band3_threshold.value() * 24.0 - 24.0,
-                    ratio: map_ratio_param(self.params.dyneq_band3_ratio.value()),
-                    attack_ms: map_time_param(self.params.dyneq_band3_attack.value(), 0.5, 50.0),
-                    release_ms: map_time_param(self.params.dyneq_band3_release.value(), 5.0, 500.0),
-                    gain_db: self.params.dyneq_band3_gain.value() * 12.0,
+                    q: self.params.dyneq_band3_q.value(),
+                    threshold_db: self.params.dyneq_band3_threshold.value(),
+                    ratio: self.params.dyneq_band3_ratio.value(),
+                    attack_ms: self.params.dyneq_band3_attack.value(),
+                    release_ms: self.params.dyneq_band3_release.value(),
+                    gain_db: self.params.dyneq_band3_gain.value(),
                     enabled: self.params.dyneq_band3_enabled.value(),
+                    solo: self.params.dyneq_band3_solo.value(),
                 },
                 DynamicBandParams {
                     mode: self.params.dyneq_band4_mode.value(),
                     detector_freq: self.params.dyneq_band4_detector_freq.value(),
                     freq: self.params.dyneq_band4_freq.value(),
-                    q: map_q_param(self.params.dyneq_band4_q.value()),
-                    threshold_db: self.params.dyneq_band4_threshold.value() * 24.0 - 24.0,
-                    ratio: map_ratio_param(self.params.dyneq_band4_ratio.value()),
-                    attack_ms: map_time_param(self.params.dyneq_band4_attack.value(), 0.1, 20.0),
-                    release_ms: map_time_param(self.params.dyneq_band4_release.value(), 1.0, 200.0),
-                    gain_db: self.params.dyneq_band4_gain.value() * 12.0,
+                    q: self.params.dyneq_band4_q.value(),
+                    threshold_db: self.params.dyneq_band4_threshold.value(),
+                    ratio: self.params.dyneq_band4_ratio.value(),
+                    attack_ms: self.params.dyneq_band4_attack.value(),
+                    release_ms: self.params.dyneq_band4_release.value(),
+                    gain_db: self.params.dyneq_band4_gain.value(),
                     enabled: self.params.dyneq_band4_enabled.value(),
+                    solo: self.params.dyneq_band4_solo.value(),
                 },
             ];
             self.dynamic_eq.update_parameters(&dyneq_params);
-            
+
             if !self.params.dyneq_bypass.value() {
                 self.dynamic_eq.process(buffer);
+            }
+
+            // Publish per-band gain reduction to the GUI display (Relaxed — display only).
+            {
+                use std::sync::atomic::Ordering;
+                let gr = self.dynamic_eq.get_gain_reduction_db();
+                for (i, &db) in gr.iter().enumerate() {
+                    self.gr_data.bands[i].store(db.to_bits(), Ordering::Relaxed);
+                }
+            }
+
+            // Accumulate post-DynEQ samples into the FFT ring buffer.
+            // All buffers are pre-allocated in initialize() — no audio-thread alloc.
+            for channel_samples in buffer.iter_samples() {
+                let mut mono = 0.0_f32;
+                let mut n = 0_usize;
+                for s in channel_samples {
+                    mono += *s;
+                    n += 1;
+                }
+                if n > 0 { mono /= n as f32; }
+                self.fft_ring[self.fft_ring_pos] = mono;
+                self.fft_ring_pos += 1;
+
+                if self.fft_ring_pos >= spectral::FFT_SIZE {
+                    self.fft_ring_pos = 0;
+                    // Apply Hann window — iterator zip lets LLVM auto-vectorize (AVX).
+                    for (dst, (&src, &win)) in self.fft_input.iter_mut()
+                        .zip(self.fft_ring.iter().zip(self.fft_window.iter()))
+                    {
+                        *dst = src * win;
+                    }
+                    // FFT (no allocation — scratch is pre-allocated).
+                    if let Some(ref fft) = self.fft_engine {
+                        if fft.process_with_scratch(
+                            &mut self.fft_input,
+                            &mut self.fft_output,
+                            &mut self.fft_scratch,
+                        ).is_ok() {
+                            const SMOOTH_ALPHA: f32 = 0.8;
+                            const SMOOTH_BETA: f32 = 1.0 - SMOOTH_ALPHA;
+                            let scale = 2.0 / spectral::FFT_SIZE as f32;
+                            // Exponential smoothing — iterator pattern aids vectorization.
+                            for (smooth, bin) in self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS]
+                                .iter_mut()
+                                .zip(self.fft_output[..spectral::SPECTRUM_BINS].iter())
+                            {
+                                let mag = bin.norm() * scale;
+                                *smooth = *smooth * SMOOTH_ALPHA + mag * SMOOTH_BETA;
+                            }
+                            // Publish lock-free to the GUI thread.
+                            self.spectrum_data.write_from_slice(
+                                &self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS],
+                            );
+
+                            // ── One-shot masking analysis trigger ─────────────
+                            // Triggered by GUI; runs once per FFT frame when requested.
+                            // All buffers are pre-allocated — no audio-thread allocation.
+                            use std::sync::atomic::Ordering;
+                            if self.analysis_requested.swap(false, Ordering::Relaxed) {
+                                // Snapshot sc_ring in chronological order into sc_fft_input.
+                                // sc_ring is circular; sc_ring_pos points to the OLDEST entry.
+                                for i in 0..spectral::FFT_SIZE {
+                                    let ring_idx = (self.sc_ring_pos + i) % spectral::FFT_SIZE;
+                                    self.sc_fft_input[i] =
+                                        self.sc_ring[ring_idx] * self.fft_window[i];
+                                }
+                                if fft.process_with_scratch(
+                                    &mut self.sc_fft_input,
+                                    &mut self.sc_fft_output,
+                                    &mut self.fft_scratch,
+                                ).is_ok() {
+                                    let scale = 2.0 / spectral::FFT_SIZE as f32;
+                                    let mut peak_overlap = 0.0_f32;
+                                    let mut peak_bin = 1_usize; // skip DC
+
+                                    for i in 1..spectral::SPECTRUM_BINS {
+                                        let main_mag = self.fft_output[i].norm() * scale;
+                                        let sc_mag   = self.sc_fft_output[i].norm() * scale;
+                                        let overlap  = main_mag * sc_mag;
+                                        self.analysis_result.overlap_bins[i]
+                                            .store(overlap.to_bits(), Ordering::Relaxed);
+                                        if overlap > peak_overlap {
+                                            peak_overlap = overlap;
+                                            peak_bin = i;
+                                        }
+                                    }
+                                    // Clear DC bin for display.
+                                    self.analysis_result.overlap_bins[0]
+                                        .store(0_u32, Ordering::Relaxed);
+
+                                    // Bin → Hz. sr / FFT_SIZE = bin width.
+                                    let target_freq =
+                                        peak_bin as f32 * self.sample_rate
+                                        / spectral::FFT_SIZE as f32;
+
+                                    // Map frequency to the most appropriate DynEQ band.
+                                    // Bands are ordered by their parameter range centers:
+                                    //   0 (LOW):      20–2000 Hz  → <  500 Hz
+                                    //   1 (LOW MID): 200–5000 Hz  → <  2 kHz
+                                    //   2 (HIGH MID): 1–15 kHz    → <  6 kHz
+                                    //   3 (HIGH):     3–20 kHz    → ≥  6 kHz
+                                    let target_band: u32 =
+                                        if target_freq <  500.0 { 0 }
+                                        else if target_freq < 2000.0 { 1 }
+                                        else if target_freq < 6000.0 { 2 }
+                                        else { 3 };
+
+                                    // Threshold: SC level at peak bin − 6 dB headroom.
+                                    let sc_mag_at_peak =
+                                        self.sc_fft_output[peak_bin].norm() * scale;
+                                    let sc_db = 20.0
+                                        * sc_mag_at_peak.max(f32::MIN_POSITIVE).log10();
+                                    let suggested_threshold = (sc_db - 6.0).clamp(-60.0, 0.0);
+
+                                    self.analysis_result.target_band
+                                        .store(target_band, Ordering::Relaxed);
+                                    self.analysis_result.target_freq
+                                        .store(target_freq.to_bits(), Ordering::Relaxed);
+                                    self.analysis_result.target_threshold_db
+                                        .store(suggested_threshold.to_bits(), Ordering::Relaxed);
+                                    // Release — all stores above visible before this.
+                                    self.analysis_result.ready
+                                        .store(true, Ordering::Release);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1415,19 +1700,3 @@ impl Vst3Plugin for BusChannelStrip {
 nih_export_clap!(BusChannelStrip);
 nih_export_vst3!(BusChannelStrip);
 
-// Helper functions for parameter mapping
-
-/// Map 0-1 ratio parameter to 1:1 to 10:1 compression ratio
-fn map_ratio_param(param: f32) -> f32 {
-    1.0 + param * 9.0  // 1.0 to 10.0
-}
-
-/// Map 0-1 time parameter to milliseconds with min/max range
-fn map_time_param(param: f32, min_ms: f32, max_ms: f32) -> f32 {
-    min_ms + param * (max_ms - min_ms)
-}
-
-/// Map 0-1 Q parameter to 0.5 to 4.0 Q range
-fn map_q_param(param: f32) -> f32 {
-    0.5 + param * 3.5  // 0.5 to 4.0
-}
