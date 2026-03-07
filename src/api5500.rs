@@ -1,10 +1,6 @@
 use crate::shaping::{Filter, FilterType};
 use biquad::Q_BUTTERWORTH_F32;
 use nih_plug::buffer::Buffer;
-use realfft::num_complex::Complex;
-use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
-use std::sync::Arc;
-// use crate::spectral::analyze_spectrum;
 
 pub struct Api5500 {
     sample_rate: f32,
@@ -13,37 +9,17 @@ pub struct Api5500 {
     mf: Filter,
     hmf: Filter,
     hf: Filter,
-    fft_size: usize,
-    fft: Arc<dyn RealToComplex<f32>>,
-    ifft: Arc<dyn ComplexToReal<f32>>,
-    fft_input: Vec<f32>,
-    fft_spectrum: Vec<Complex<f32>>,
-    fft_output: Vec<f32>,
 }
 
 impl Api5500 {
     pub fn new(sample_rate: f32) -> Self {
-        let fft_size = 1024;
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(fft_size);
-        let ifft = planner.plan_fft_inverse(fft_size);
-        let fft_input = vec![0.0; fft_size];
-        let fft_spectrum = fft.make_output_vec();
-        let fft_output = ifft.make_output_vec();
-
         Self {
             sample_rate,
-            lf: Filter::new(sample_rate, FilterType::LowShelf, 20000.0, Q_BUTTERWORTH_F32, 0.0),
-            lmf: Filter::new(sample_rate, FilterType::Bell, 20000.0, Q_BUTTERWORTH_F32, 0.0),
-            mf: Filter::new(sample_rate, FilterType::Bell, 20000.0, Q_BUTTERWORTH_F32, 0.0),
-            hmf: Filter::new(sample_rate, FilterType::Bell, 20000.0, Q_BUTTERWORTH_F32, 0.0),
-            hf: Filter::new(sample_rate, FilterType::HighShelf, 20000.0, Q_BUTTERWORTH_F32, 0.0),
-            fft_size,
-            fft,
-            ifft,
-            fft_input,
-            fft_spectrum,
-            fft_output,
+            lf:  Filter::new(sample_rate, FilterType::LowShelf,  20000.0, Q_BUTTERWORTH_F32, 0.0),
+            lmf: Filter::new(sample_rate, FilterType::Bell,       20000.0, Q_BUTTERWORTH_F32, 0.0),
+            mf:  Filter::new(sample_rate, FilterType::Bell,       20000.0, Q_BUTTERWORTH_F32, 0.0),
+            hmf: Filter::new(sample_rate, FilterType::Bell,       20000.0, Q_BUTTERWORTH_F32, 0.0),
+            hf:  Filter::new(sample_rate, FilterType::HighShelf,  20000.0, Q_BUTTERWORTH_F32, 0.0),
         }
     }
 
@@ -90,14 +66,5 @@ impl Api5500 {
                 *sample = s;
             }
         }
-        // let _spectrum = spectral::analyze_spectrum(
-        //     buffer,
-        //     self.fft_size,
-        //     &self.fft,
-        //     &mut self.fft_input,
-        //     &mut self.fft_spectrum,
-        // );
     }
-
-    
 }
