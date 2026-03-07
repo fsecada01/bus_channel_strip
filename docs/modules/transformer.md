@@ -1,0 +1,122 @@
+# Transformer
+
+<span class="module-xfm">**Vintage transformer coloration with 4 hardware models**</span>
+
+---
+
+## Overview
+
+Transformer coloration is one of the most subtle but powerful aspects of analog hardware character. Input and output transformers in classic consoles impart:
+
+- **Low-frequency weight** from core saturation
+- **High-frequency character** — softening or sparkle depending on the design
+- **Harmonic content** giving recordings a three-dimensional, "alive" quality
+- **Gentle dynamic softening** from loading effects
+
+This module models both input and output transformer stages with four distinct hardware-derived models. Input and output stages are processed independently, allowing simulation of transformer behavior at both the preamplifier and summing amplifier stages.
+
+---
+
+## Controls
+
+### Model Selection
+
+| Model | Low Corner | High Corner | Character |
+|-------|-----------|-------------|-----------|
+| **Vintage** | 80 Hz | 8 kHz | Neve-style: warm, even harmonics, musical saturation |
+| **Modern** | 60 Hz | 15 kHz | API-style: clean, extended HF, subtle odd harmonics |
+| **British** | 100 Hz | 12 kHz | SSL-style: tight, controlled, punchy saturation |
+| **American** | 70 Hz | 10 kHz | Custom: balanced warmth and clarity |
+
+### Input Transformer
+
+| Control | Range | Description |
+|---------|-------|-------------|
+| **Input Drive** | 0.0 – 1.0 | Drive level into the input stage. Models impedance loading — increases harmonic content. |
+| **Input Saturation** | 0.0 – 1.0 | Core saturation at the input stage. Even harmonics at low levels; complex harmonics when pushed. |
+
+### Output Transformer
+
+| Control | Range | Description |
+|---------|-------|-------------|
+| **Output Drive** | 0.0 – 1.0 | Drive into the output stage. Final harmonic coloration. |
+| **Output Saturation** | 0.0 – 1.0 | Output core saturation. Typically set lower than input for realistic console behavior. |
+
+### Frequency Response
+
+| Control | Range | Description |
+|---------|-------|-------------|
+| **Low Response** | −1.0 – +1.0 (±3 dB) | Low-frequency shelving adjustment. Positive adds bass weight (core saturation effect). Corner frequency is model-dependent. |
+| **High Response** | −1.0 – +1.0 (±2 dB) | HF response. Negative = tape-like rolloff; positive = extended sparkle. Corner frequency is model-dependent. |
+| **Compression** | 0.0 – 1.0 | Transformer loading compression. Gentle gain reduction at high levels mimicking core saturation-induced dynamic softening. |
+| **Bypass** | On/Off | Bypasses all processing. |
+
+---
+
+## Saturation Models
+
+=== "Vintage (Neve-style)"
+    Warm, musical saturation with even harmonics. The Neve 1073 transformer character:
+    harmonically rich, adds thickness and presence without harshness.
+
+    ```
+    Driven signal → tanh() + driven² harmonic → wet/dry blend
+    ```
+
+=== "Modern (API-style)"
+    Clean with subtle odd harmonics when pushed. Slight asymmetry creates character
+    without adding warmth in the traditional sense — API transformers are defined by
+    their neutrality and fast transient response.
+
+=== "British (SSL-style)"
+    Tight, controlled saturation via soft-knee polynomial clipping with minimal harmonic
+    addition. SSL transformers are known for "controlled aggression" — tight bottom,
+    fast transients, no bloom.
+
+=== "American (Custom)"
+    Balanced approach between Vintage warmth and Modern clarity. Uses polynomial
+    waveshaping with cubic harmonic content — sits between the two extremes.
+
+---
+
+## Techniques
+
+### Neve 1073 Approximate Setting
+
+| Control | Value |
+|---------|-------|
+| Model | `Vintage` |
+| Input Drive | `0.35` |
+| Input Saturation | `0.30` |
+| Output Drive | `0.20` |
+| Output Saturation | `0.25` |
+| Low Response | `+0.3` |
+| High Response | `+0.1` |
+
+The positive Low Response adds characteristic Neve bass body; gentle High Response extends the top without SSL-style tightness.
+
+### SSL G-Bus Character
+
+| Control | Value |
+|---------|-------|
+| Model | `British` |
+| Input Drive | `0.50` |
+| Input Saturation | `0.45` |
+| Output Drive | `0.35` |
+| Output Saturation | `0.30` |
+| High Response | `+0.3` |
+
+### Subtle Master Bus Warmth
+
+| Control | Value |
+|---------|-------|
+| Model | `Vintage` |
+| Input Drive | `0.12` |
+| Input Saturation | `0.10` |
+| Output Drive | `0.08` |
+| Low Response | `+0.15` |
+
+Very low drive settings add barely perceptible harmonic texture — audible on A/B comparison but not as obvious saturation. Effective on master bus where transparency is required.
+
+!!! tip "Parameter Caching"
+    Frequency response filters are only recomputed when Model or response values actually change — not on every buffer. This means the Transformer adds minimal CPU overhead during playback.

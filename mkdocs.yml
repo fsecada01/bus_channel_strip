@@ -1,0 +1,65 @@
+site_name: Bus Channel Strip
+site_description: Professional 6-module bus channel strip VST3/CLAP plugin — module reference, settings, and genre presets
+site_url: https://fsecada01.github.io/bus_channel_strip/
+repo_url: https://github.com/fsecada01/bus_channel_strip
+repo_name: fsecada01/bus_channel_strip
+edit_uri: ""
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue
+    accent: light blue
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Modules:
+    - modules/index.md
+    - API5500 EQ: modules/api5500.md
+    - ButterComp2: modules/buttercomp2.md
+    - Pultec EQ: modules/pultec.md
+    - Dynamic EQ: modules/dynamic_eq.md
+    - Transformer: modules/transformer.md
+    - Punch: modules/punch.md
+  - Presets & Techniques:
+    - presets/techniques.md
+    - Genre Signal Chains: presets/genres.md
+    - Instrument Buses: presets/buses.md
+  - Installation: install.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
