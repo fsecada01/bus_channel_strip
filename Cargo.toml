@@ -1,6 +1,6 @@
 [package]
 name = "bus_channel_strip"
-version = "0.2.0-prerelease-20251205"
+version = "0.3.0"
 edition = "2021"
 authors = ["Your Name <your@email.com>"]
 license = "GPL-3.0-or-later"
