@@ -7,12 +7,12 @@ set shell := ["cmd", "/c"]
 set dotenv-load := true
 
 # Feature sets
-FEATURES      := "api5500,buttercomp2,pultec,transformer,punch,gui"
-CORE_FEATURES := "api5500,buttercomp2,pultec,transformer,punch"
+FEATURES      := "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui"
+CORE_FEATURES := "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq"
 
-# Plugin install paths (WSL-style when running under bash on Windows)
-VST3_DIR := "/c/Program Files/Common Files/VST3"
-CLAP_DIR := "/c/Program Files/Common Files/CLAP"
+# Plugin install paths (Windows) — backslashes required for CMD if/md/copy
+VST3_DIR := "C:\\Program Files\\Common Files\\VST3"
+CLAP_DIR := "C:\\Program Files\\Common Files\\CLAP"
 
 # System prompt file (auto-included in CLAUDE.md via @ syntax)
 SYSTEM_PROMPT := "docs/SYSTEM_PROMPT.md"
@@ -47,38 +47,33 @@ release:
 
 # Production bundle: VST3 + CLAP with full GUI (recommended)
 bundle:
-    FORCE_SKIA_BINARIES_DOWNLOAD=1 \
-    LLVM_HOME="C:/Program Files/LLVM" \
-    LIBCLANG_PATH="C:/Program Files/LLVM/bin" \
-    cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "{{FEATURES}}"
+    set "LLVM_HOME=C:/Program Files/LLVM" && \
+    set "LIBCLANG_PATH=C:/Program Files/LLVM/bin" && \
+    cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features {{FEATURES}}
 
 # Bundle without GUI (faster, no Skia dependency)
 bundle-core:
-    cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "{{CORE_FEATURES}}"
+    cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features {{CORE_FEATURES}}
 
 # Bundle with debug symbols for profiling
 bundle-profile:
-    FORCE_SKIA_BINARIES_DOWNLOAD=1 \
-    LLVM_HOME="C:/Program Files/LLVM" \
-    LIBCLANG_PATH="C:/Program Files/LLVM/bin" \
-    cargo +nightly run --package xtask -- bundle bus_channel_strip --profile profiling --features "{{FEATURES}}"
+    set "LLVM_HOME=C:/Program Files/LLVM" && \
+    set "LIBCLANG_PATH=C:/Program Files/LLVM/bin" && \
+    cargo +nightly run --package xtask -- bundle bus_channel_strip --profile profiling --features {{FEATURES}}
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
 # Install VST3 to system plugin directory
 install-vst3:
-    cp -r "target/bundled/Bus-Channel-Strip.vst3" "{{VST3_DIR}}/"
-    @echo "Installed VST3 -> {{VST3_DIR}}/Bus-Channel-Strip.vst3"
+    powershell -NoProfile -Command "New-Item -ItemType Directory -Force '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win' | Out-Null; Copy-Item -Force 'target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3' '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3'; Write-Host 'Installed VST3 to {{VST3_DIR}}\Bus-Channel-Strip.vst3'"
 
 # Install CLAP to system plugin directory
 install-clap:
-    cp -r "target/bundled/Bus-Channel-Strip.clap" "{{CLAP_DIR}}/" 2>/dev/null && \
-    echo "Installed CLAP -> {{CLAP_DIR}}/Bus-Channel-Strip.clap" || \
-    echo "CLAP bundle not found (may not have been built)"
+    powershell -NoProfile -Command "if (Test-Path 'target\bundled\Bus-Channel-Strip.clap') { New-Item -ItemType Directory -Force '{{CLAP_DIR}}' | Out-Null; Copy-Item -Force 'target\bundled\Bus-Channel-Strip.clap' '{{CLAP_DIR}}\Bus-Channel-Strip.clap'; Write-Host 'Installed CLAP to {{CLAP_DIR}}' } else { Write-Host 'CLAP bundle not found (may not have been built)' }"
 
 # Install both formats
 install: install-vst3 install-clap
-    @echo "Plugin installed. Rescan in your DAW."
+    @echo Plugin installed. Rescan in your DAW.
 
 # Bundle and install in one step
 deploy: bundle install
@@ -107,32 +102,36 @@ fmt-check:
 
 # Full quality gate: format check + lint + test
 qa: fmt-check lint test
-    @echo "All quality checks passed."
+    @echo All quality checks passed.
 
 # ── Debug & Inspection ────────────────────────────────────────────────────────
 
 # Show bundled artifact sizes
 sizes:
-    @ls -lh target/bundled/ 2>/dev/null || echo "No bundles found. Run 'just bundle' first."
+    @if exist target\bundled ( dir target\bundled ) else ( echo No bundles found. Run 'just bundle' first. )
 
 # List DSP module source files
 modules:
-    @ls -la src/*.rs
+    @dir src\*.rs
 
-# Count parameters by type
+# Count parameters by type (requires findstr)
 params:
-    @echo "=== Parameter counts ===" && \
-    echo "FloatParam:  $(grep -c 'FloatParam' src/lib.rs)" && \
-    echo "BoolParam:   $(grep -c 'BoolParam'  src/lib.rs)" && \
-    echo "IntParam:    $(grep -c 'IntParam'   src/lib.rs)" && \
-    echo "EnumParam:   $(grep -c 'EnumParam'  src/lib.rs)"
+    @echo === Parameter counts ===
+    @echo FloatParam: && findstr /c:"FloatParam" src\lib.rs | find /c /v ""
+    @echo BoolParam:  && findstr /c:"BoolParam"  src\lib.rs | find /c /v ""
+    @echo IntParam:   && findstr /c:"IntParam"   src\lib.rs | find /c /v ""
+    @echo EnumParam:  && findstr /c:"EnumParam"  src\lib.rs | find /c /v ""
 
 # Show current build environment
 env:
-    @echo "Rust:   $(rustup show active-toolchain 2>/dev/null)" && \
-    echo "LLVM:   $(clang --version 2>/dev/null | head -1 || echo 'not found')" && \
-    echo "Ninja:  $(ninja --version 2>/dev/null | head -1 || echo 'not found')" && \
-    echo "Just:   $(just --version 2>/dev/null)"
+    @echo Rust toolchain:
+    @rustup show active-toolchain
+    @echo LLVM/Clang:
+    @clang --version 2>nul || echo   not found
+    @echo Ninja:
+    @ninja --version 2>nul || echo   not found
+    @echo Just:
+    @just --version
 
 # Show dependency tree for core features
 deps:
@@ -164,9 +163,9 @@ diff:
 claude *args="":
     claude --append-system-prompt-file docs/SYSTEM_PROMPT.md {{ args }}
 
-# Start Claude Code with explicit system prompt append (if flag is supported)
+# Start Claude Code with explicit system prompt append
 claude-prompt:
-    claude --append-system-prompt "$(cat {{SYSTEM_PROMPT}})"
+    claude --append-system-prompt-file {{SYSTEM_PROMPT}}
 
 # Start Claude Code in auto-approval mode (skips permission prompts)
 # WARNING: Use only in trusted environments - allows automatic file edits
@@ -175,17 +174,17 @@ claude-auto *args="":
 
 # One-shot Claude query (non-interactive) with project context
 ask PROMPT:
-    claude -p "{{PROMPT}}" --append-system-prompt "$(cat {{SYSTEM_PROMPT}})"
+    claude -p "{{PROMPT}}" --append-system-prompt-file {{SYSTEM_PROMPT}}
 
 # Review recent code changes with Claude
 review:
     claude -p "Review the current git diff for correctness, audio thread safety, and Rust best practices. Focus on lock-free guarantees and DSP accuracy." \
-    --append-system-prompt "$(cat {{SYSTEM_PROMPT}})"
+    --append-system-prompt-file {{SYSTEM_PROMPT}}
 
 # Ask Claude to analyze a specific source file
 analyze FILE:
     claude -p "Analyze src/{{FILE}} for DSP correctness, Rust idioms, potential audio thread issues, and improvement opportunities." \
-    --append-system-prompt "$(cat {{SYSTEM_PROMPT}})"
+    --append-system-prompt-file {{SYSTEM_PROMPT}}
 
 # ── Maintenance ───────────────────────────────────────────────────────────────
 
@@ -199,4 +198,4 @@ update:
 
 # Show outdated dependencies
 outdated:
-    cargo outdated 2>/dev/null || echo "Install cargo-outdated: cargo install cargo-outdated"
+    cargo outdated 2>nul || echo Install cargo-outdated: cargo install cargo-outdated
