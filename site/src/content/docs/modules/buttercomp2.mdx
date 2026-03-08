@@ -9,6 +9,10 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 Chris Johnson's ButterComp2 is described as *"the single richest, lushest glue compressor."* Rather than modeling a traditional VCA or optical circuit, it implements **four independent compressors per channel in a bipolar, interleaved configuration** — producing a complex, harmonically rich gain reduction character that feels more like analog hardware than conventional plugin compressors.
 
+:::tip[Quick Start]
+For transparent mix-bus glue: set Compress to **0.3**, Output to **0.6**, Dry/Wet to **0.35**. The ButterComp2 works best with subtle settings — push Compress past 0.7 only for deliberate NY-style parallel saturation.
+:::
+
 <Aside type="note" title="Airwindows FFI">
 ButterComp2 is compiled from [Chris Johnson's C++ source](https://github.com/airwindows/airwindows) via Rust FFI. Audio processing is called once per buffer (O(1) FFI overhead) for real-time safety.
 </Aside>
@@ -75,3 +79,9 @@ Start with Dry/Wet at **0.25** and slowly increase while listening to the *botto
 | 0.55 – 0.70 | Assertive compression, audible gain reduction, dense character |
 | 0.70 – 0.85 | Heavy compression — use lower Dry/Wet for NY parallel blend |
 | 0.85 – 1.00 | Maximum compression — distortion character at high Dry/Wet values |
+
+## See Also
+
+- [Techniques & Presets](/bus_channel_strip/presets/techniques/) — NY parallel compression presets
+- [Genre Signal Chains](/bus_channel_strip/presets/genres/) — genre-specific ButterComp2 settings
+- [Instrument Buses](/bus_channel_strip/presets/buses/) — bus-specific compression starting points
