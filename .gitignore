@@ -33,6 +33,12 @@ temp_test.pdb
 # Dependencies and caches
 .cargo/
 .versions/
+node_modules/
+
+# Astro/Starlight site build artifacts
+site/node_modules/
+site/dist/
+site/.astro/
 
 # Plugin bundles (optional - you may want to keep these)
 # /target/bundled/*.vst3
