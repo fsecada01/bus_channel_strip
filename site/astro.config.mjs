@@ -8,9 +8,9 @@ export default defineConfig({
     starlight({
       title: 'Bus Channel Strip',
       description: 'Professional 6-module bus processor — VST3 & CLAP',
-      social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/fsecada01/bus_channel_strip' },
-      ],
+      social: {
+        github: 'https://github.com/fsecada01/bus_channel_strip',
+      },
       customCss: ['./src/styles/custom.css'],
       sidebar: [
         { label: 'Overview', link: '/' },
