@@ -1,0 +1,195 @@
+---
+title: Settings & Techniques
+description: Proven settings for specific professional outcomes. ButterComp2 presets, Pultec tricks, Dynamic EQ recipes, Transformer characters.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Proven settings for specific professional outcomes. All values are starting points — trust your ears and adjust to taste.
+
+---
+
+## ButterComp2 — NY Parallel Compression
+
+The "New York compression" technique: heavily compress a copy, blend it under the dry signal to bring up micro-details and room without affecting transients.
+
+<Tabs>
+  <TabItem label="Subtle Glue">
+    | Setting | Value |
+    |---------|-------|
+    | **Compress** | `0.42` |
+    | **Output** | `0.82` |
+    | **Dry/Wet** | `0.55` |
+    | **Character** | Mix cohesion |
+  </TabItem>
+  <TabItem label="NY Drums (Classic)">
+    | Setting | Value |
+    |---------|-------|
+    | **Compress** | `0.78` |
+    | **Output** | `0.90` |
+    | **Dry/Wet** | `0.33` |
+    | **Character** | Room and sustain |
+  </TabItem>
+  <TabItem label="Heavy Electronic">
+    | Setting | Value |
+    |---------|-------|
+    | **Compress** | `0.62` |
+    | **Output** | `0.95` |
+    | **Dry/Wet** | `0.78` |
+    | **Character** | Welded elements |
+  </TabItem>
+</Tabs>
+
+:::tip[Finding the Blend Point]
+Start Dry/Wet at 0.25. Increase while listening to the *bottom* of the mix — the subtle details between main elements. Stop when you hear the mix "fill in." Usually 0.28–0.45 for drum buses.
+:::
+
+---
+
+## Pultec Techniques
+
+### The Pultec Low-End Trick
+
+| Control | Value |
+|---------|-------|
+| LF Boost Freq | `60 Hz` |
+| LF Boost | `0.55` |
+| LF Cut | `0.42` |
+
+Simultaneous boost and cut creates the classic tight-but-extended Pultec low end. The two filters interact to form a curve no single filter can produce: sub presence without low-mid bloom.
+
+### Air and Warmth (Master Bus)
+
+| Control | Value |
+|---------|-------|
+| LF Boost Freq | `30 Hz` |
+| LF Boost | `0.25` |
+| HF Boost Freq | `12 kHz` |
+| HF Boost | `0.38` |
+| Tube Drive | `0.15` |
+
+### Guitar Bus Presence
+
+| Control | Value |
+|---------|-------|
+| HF Boost Freq | `8 kHz` |
+| HF Boost | `0.45` |
+| HF Boost BW | `0.60` |
+| HF Cut Freq | `20 kHz` |
+| HF Cut | `0.20` |
+
+---
+
+## Dynamic EQ Applications
+
+### Sub Control (Kick/Bass Bus)
+
+| Control | Value |
+|---------|-------|
+| Mode | `Compress Down` |
+| Detector / EQ Freq | `60 – 80 Hz` |
+| Q | `1.0` |
+| Threshold | `−18 dBFS` |
+| Ratio | `3:1` |
+| Attack | `5 ms` |
+| Release | `120 ms` |
+
+Tames sub peaks without flattening sub energy — only compresses when things get hot.
+
+### Mud Gate (200 Hz region)
+
+| Control | Value |
+|---------|-------|
+| Mode | `Gate` |
+| Detector / EQ Freq | `220 Hz` |
+| Q | `2.0` |
+| Threshold | `−22 dBFS` |
+| Ratio | `4:1` |
+
+Attenuates the mud zone between drum hits, opening up clarity in the low mids.
+
+### Mastering De-Essing
+
+| Control | Value |
+|---------|-------|
+| Mode | `Compress Down` |
+| Detector Freq | `7000 – 8000 Hz` |
+| EQ Freq | `7000 Hz` |
+| Q | `1.5 – 2.0` |
+| Threshold | `−14 to −10 dBFS` |
+| Ratio | `2:1 – 3:1` |
+| Attack | `3 – 8 ms` |
+| Release | `50 – 100 ms` |
+
+### Dynamic Presence Enhancement
+
+| Control | Value |
+|---------|-------|
+| Mode | `Expand Up` |
+| Detector / EQ Freq | `3000 Hz` |
+| Q | `1.5` |
+| Threshold | `−24 dBFS` |
+| Ratio | `2:1` |
+
+Expands presence on transient peaks — snare and vocals cut through on loud passages.
+
+---
+
+## Transformer Settings
+
+### Neve 1073 Character (Vintage Model)
+
+| Control | Value |
+|---------|-------|
+| Model | `Vintage` |
+| Input Drive | `0.35` |
+| Input Saturation | `0.30` |
+| Output Drive | `0.20` |
+| Output Saturation | `0.25` |
+| Low Response | `+0.3` |
+| High Response | `+0.1` |
+
+### SSL G-Bus Character (British Model)
+
+| Control | Value |
+|---------|-------|
+| Model | `British` |
+| Input Drive | `0.50` |
+| Input Saturation | `0.45` |
+| Output Drive | `0.35` |
+| Output Saturation | `0.30` |
+| High Response | `+0.3` |
+
+### API Console Character (Modern Model)
+
+| Control | Value |
+|---------|-------|
+| Model | `Modern` |
+| Input Drive | `0.30` |
+| Input Saturation | `0.20` |
+| Output Drive | `0.15` |
+| High Response | `+0.4` |
+
+---
+
+## Punch Techniques
+
+### Transparent Loudness Maximization
+
+| Control | Value |
+|---------|-------|
+| Clip Mode | `Soft` or `Cubic` |
+| Ceiling | `−0.3 dBFS` |
+| Oversampling | `4×` |
+| Transient Attack | `0.30 – 0.50` |
+| Mix | `1.0` |
+
+### Parallel Clipping (More Transparent)
+
+| Control | Value |
+|---------|-------|
+| Clip Mode | `Cubic` |
+| Ceiling | `−0.1 dBFS` |
+| Mix | `0.75` |
+
+Blends clipped signal with dry signal. Dry path handles transients; clipped path adds density.

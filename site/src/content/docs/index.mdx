@@ -1,0 +1,82 @@
+---
+title: Bus Channel Strip
+description: Professional 6-module bus processor — VST3 & CLAP plugin for Reaper, Bitwig, Cubase, and more.
+template: splash
+hero:
+  tagline: Six classic processors. One signal chain. Zero compromises.
+  actions:
+    - text: Download v0.3.0
+      link: https://github.com/fsecada01/bus_channel_strip/releases/latest
+      icon: external
+      variant: primary
+    - text: Module Reference
+      link: /bus_channel_strip/modules/
+      icon: right-arrow
+      variant: secondary
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Signal Chain
+
+<div class="signal-chain">
+  <span class="node node-eq">API5500 EQ</span>
+  <span class="arrow">→</span>
+  <span class="node node-comp">ButterComp2</span>
+  <span class="arrow">→</span>
+  <span class="node node-pultec">Pultec EQ</span>
+  <span class="arrow">→</span>
+  <span class="node node-dyneq">Dynamic EQ</span>
+  <span class="arrow">→</span>
+  <span class="node node-xfm">Transformer</span>
+  <span class="arrow">→</span>
+  <span class="node node-punch">Punch</span>
+</div>
+
+Every module is independently bypassable, fully automatable, and reorderable at runtime via the drag-to-swap UI.
+
+## Modules
+
+<div class="module-grid">
+  <div class="module-card card-eq">
+    <h3>API5500 EQ</h3>
+    <p>5-band semi-parametric EQ modeled on the API 5500 console equalizer. HPF, low/high shelf, and two parametric bells.</p>
+  </div>
+  <div class="module-card card-comp">
+    <h3>ButterComp2</h3>
+    <p>Airwindows bipolar interleaved compression. Described as the richest glue compressor available. Built-in NY parallel blend.</p>
+  </div>
+  <div class="module-card card-pultec">
+    <h3>Pultec EQ</h3>
+    <p>EQP-1A style passive equalizer with simultaneous boost/cut low-end shaping. Includes tube saturation stage.</p>
+  </div>
+  <div class="module-card card-dyneq">
+    <h3>Dynamic EQ</h3>
+    <p>4-band frequency-dependent dynamics with Compress, Expand, and Gate modes. Real-time spectral analyzer with GR metering.</p>
+  </div>
+  <div class="module-card card-xfm">
+    <h3>Transformer</h3>
+    <p>Vintage/Modern/British/American transformer coloration. Independent input and output stages. Harmonic saturation and frequency shaping.</p>
+  </div>
+  <div class="module-card card-punch">
+    <h3>Punch</h3>
+    <p>Transparent clipper with Hard/Soft/Cubic modes, up to 8× oversampling, and pre-clip transient shaper for loudness maximization.</p>
+  </div>
+</div>
+
+## Formats & Platforms
+
+| Platform | VST3 | CLAP |
+|----------|------|------|
+| **Windows** | ✓ | ✓ |
+| **macOS Apple Silicon** | ✓ | ✓ |
+| **macOS Intel** | ✓ | ✓ |
+| **Linux** | ✓ | ✓ |
+
+Tested in **Reaper** (primary), **Bitwig Studio**, **Cubase**, **FL Studio**, **Ableton Live**.
+
+## Built With
+
+- **[NIH-Plug](https://github.com/robbert-vdh/nih-plug)** — Rust VST3/CLAP plugin framework
+- **[vizia-plug](https://github.com/vizia/vizia-plug)** — GPU-accelerated GUI (Skia backend)
+- **[Airwindows](https://github.com/airwindows/airwindows)** — C++ DSP algorithms via Rust FFI

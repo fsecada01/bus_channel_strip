@@ -3,7 +3,6 @@ name: Deploy Documentation (GitHub Pages)
 on:
   release:
     types: [published]
-  # Manual trigger
   workflow_dispatch:
 
 permissions:
@@ -22,21 +21,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.x'
+          node-version: '20'
 
-      - name: Install MkDocs Material
-        run: pip install mkdocs-material mkdocs-minify-plugin
+      - name: Install dependencies
+        run: npm install
+        working-directory: site
 
-      - name: Build site
-        run: mkdocs build --strict
+      - name: Build Astro site
+        run: npm run build
+        working-directory: site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site/
+          path: site/dist/
 
   deploy:
     needs: build

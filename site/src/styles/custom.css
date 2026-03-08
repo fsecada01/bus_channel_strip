@@ -1,0 +1,181 @@
+/* ─────────────────────────────────────────────────────────
+   Bus Channel Strip — Starlight theme overrides
+   Dark, professional audio plugin aesthetic
+   ───────────────────────────────────────────────────────── */
+
+/* Accent color: sky-blue matching the spectral analyzer in the plugin */
+:root {
+  --sl-color-accent-low: #0a1929;
+  --sl-color-accent: #0ea5e9;
+  --sl-color-accent-high: #38bdf8;
+}
+
+[data-theme='dark'] {
+  --sl-color-bg: #080d14;
+  --sl-color-bg-nav: #0c1220;
+  --sl-color-bg-sidebar: #0a0f1c;
+  --sl-color-hairline: #1e2d42;
+  --sl-color-text: #cbd5e1;
+  --sl-color-text-accent: #38bdf8;
+  --sl-color-gray-1: #e2e8f0;
+  --sl-color-gray-2: #94a3b8;
+  --sl-color-gray-3: #475569;
+  --sl-color-gray-4: #1e293b;
+  --sl-color-gray-5: #0f172a;
+  --sl-color-gray-6: #050a12;
+}
+
+/* Make headings use a slightly brighter color */
+[data-theme='dark'] h1,
+[data-theme='dark'] h2,
+[data-theme='dark'] h3 {
+  color: #e2e8f0;
+}
+
+/* ─── Signal chain visualization ─────────────────────── */
+.signal-chain {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.25rem;
+  background: #0c1220;
+  border: 1px solid #1e2d42;
+  border-radius: 0.5rem;
+  margin: 1.5rem 0;
+  font-size: 0.8rem;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+}
+
+.signal-chain .arrow {
+  color: #475569;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.signal-chain .node {
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Module-specific node colors */
+.node-eq        { background: #0c2a3b; color: #7dd3fc; border: 1px solid #0369a1; }
+.node-comp      { background: #2a1600; color: #fb923c; border: 1px solid #9a3412; }
+.node-pultec    { background: #271f00; color: #fbbf24; border: 1px solid #92400e; }
+.node-dyneq     { background: #052012; color: #4ade80; border: 1px solid #166534; }
+.node-xfm       { background: #1a1030; color: #c4b5fd; border: 1px solid #6d28d9; }
+.node-punch     { background: #2a0a0a; color: #f87171; border: 1px solid #991b1b; }
+
+/* ─── Module badge on overview pages ──────────────────── */
+.module-badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+
+.badge-eq       { background: #0c2a3b; color: #7dd3fc; border: 1px solid #0369a1; }
+.badge-comp     { background: #2a1600; color: #fb923c; border: 1px solid #9a3412; }
+.badge-pultec   { background: #271f00; color: #fbbf24; border: 1px solid #92400e; }
+.badge-dyneq    { background: #052012; color: #4ade80; border: 1px solid #166534; }
+.badge-xfm      { background: #1a1030; color: #c4b5fd; border: 1px solid #6d28d9; }
+.badge-punch    { background: #2a0a0a; color: #f87171; border: 1px solid #991b1b; }
+
+/* ─── Feature cards on landing page ───────────────────── */
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.module-card {
+  padding: 1.25rem;
+  border-radius: 8px;
+  background: #0c1220;
+  border: 1px solid #1e2d42;
+  transition: border-color 0.15s ease;
+}
+
+.module-card:hover {
+  border-color: #0ea5e9;
+}
+
+.module-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.module-card p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.card-eq    { border-left: 3px solid #0ea5e9; }
+.card-comp  { border-left: 3px solid #f97316; }
+.card-pultec { border-left: 3px solid #f59e0b; }
+.card-dyneq { border-left: 3px solid #22c55e; }
+.card-xfm   { border-left: 3px solid #8b5cf6; }
+.card-punch { border-left: 3px solid #ef4444; }
+
+/* ─── Download button on landing ──────────────────────── */
+.hero-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: #0ea5e9;
+  color: #000 !important;
+  font-weight: 700;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: background 0.15s ease;
+}
+
+.hero-download:hover {
+  background: #38bdf8;
+}
+
+/* ─── Misc ─────────────────────────────────────────────── */
+/* Tighten up tables on the module reference pages */
+[data-theme='dark'] table {
+  font-size: 0.875rem;
+}
+
+[data-theme='dark'] thead th {
+  background: #0c1220;
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+[data-theme='dark'] tr:nth-child(even) td {
+  background: #0a0f1c;
+}
+
+/* Code inline highlight */
+[data-theme='dark'] code:not(pre code) {
+  background: #1e293b;
+  color: #7dd3fc;
+  border: 1px solid #2d3f55;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
