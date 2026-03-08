@@ -13,7 +13,7 @@ use api5500::Api5500;
 #[cfg(feature = "buttercomp2")]
 mod buttercomp2;
 #[cfg(feature = "buttercomp2")]
-use buttercomp2::ButterComp2;
+use buttercomp2::{ButterComp2, ButterComp2Model, FetCompressor, FetRatio, OpticalCompressor, VcaCompressor};
 
 #[cfg(feature = "pultec")]
 mod pultec;
@@ -77,6 +77,15 @@ struct BusChannelStrip {
     /// ButterComp2 compressor module
     #[cfg(feature = "buttercomp2")]
     compressor: ButterComp2,
+    /// 1176-style FET compressor — pure Rust, no FFI
+    #[cfg(feature = "buttercomp2")]
+    fet_compressor: FetCompressor,
+    /// VCA bus compressor — SSL G-Bus style, pure Rust, no FFI
+    #[cfg(feature = "buttercomp2")]
+    vca_compressor: VcaCompressor,
+    /// Optical compressor — LA-2A style, pure Rust, no FFI
+    #[cfg(feature = "buttercomp2")]
+    optical_compressor: OpticalCompressor,
     /// Pultec-style EQ module
     #[cfg(feature = "pultec")]
     pultec: PultecEQ,
@@ -200,6 +209,54 @@ pub struct BusChannelStripParams {
     pub comp_output: FloatParam,
     #[id = "comp_dry_wet"]
     pub comp_dry_wet: FloatParam,
+
+    /// Model selector — always visible; switches the active control surface.
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_model"]
+    pub comp_model: EnumParam<ButterComp2Model>,
+
+    // VCA model parameters
+    #[id = "comp_vca_thresh"]
+    pub vca_thresh: FloatParam,
+    #[id = "comp_vca_ratio"]
+    pub vca_ratio: FloatParam,
+    #[id = "comp_vca_atk"]
+    pub vca_atk: FloatParam,
+    #[id = "comp_vca_rel"]
+    pub vca_rel: FloatParam,
+
+    // Optical model parameters
+    #[id = "comp_opt_thresh"]
+    pub opt_thresh: FloatParam,
+    #[id = "comp_opt_speed"]
+    pub opt_speed: FloatParam,
+    #[id = "comp_opt_char"]
+    pub opt_char: FloatParam,
+
+    // 1176-style FET compressor parameters
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_fet_input"]
+    pub fet_input_db: FloatParam,
+
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_fet_output"]
+    pub fet_output_db: FloatParam,
+
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_fet_atk"]
+    pub fet_attack_ms: FloatParam,
+
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_fet_rel"]
+    pub fet_release_ms: FloatParam,
+
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_fet_ratio"]
+    pub fet_ratio: EnumParam<FetRatio>,
+
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_fet_auto"]
+    pub fet_auto_release: BoolParam,
 
     // Pultec EQ Parameters
     #[id = "pultec_bypass"]
@@ -455,6 +512,12 @@ impl Default for BusChannelStrip {
             eq_api5500: Api5500::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "buttercomp2")]
             compressor: ButterComp2::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "buttercomp2")]
+            fet_compressor: FetCompressor::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "buttercomp2")]
+            vca_compressor: VcaCompressor::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "buttercomp2")]
+            optical_compressor: OpticalCompressor::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "pultec")]
             pultec: PultecEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "dynamic_eq")]
@@ -695,6 +758,115 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
+
+            #[cfg(feature = "buttercomp2")]
+            comp_model: EnumParam::<ButterComp2Model>::new("Model", ButterComp2Model::default()),
+
+            // VCA model parameters
+            vca_thresh: FloatParam::new(
+                "VCA Threshold",
+                -18.0,
+                FloatRange::Linear { min: -60.0, max: 0.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            vca_ratio: FloatParam::new(
+                "VCA Ratio",
+                4.0,
+                FloatRange::Linear { min: 1.0, max: 20.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            vca_atk: FloatParam::new(
+                "VCA Attack",
+                10.0,
+                FloatRange::Linear { min: 0.1, max: 100.0 },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            vca_rel: FloatParam::new(
+                "VCA Release",
+                100.0,
+                FloatRange::Linear { min: 10.0, max: 1000.0 },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            // Optical model parameters
+            opt_thresh: FloatParam::new(
+                "Opt Threshold",
+                -12.0,
+                FloatRange::Linear { min: -60.0, max: 0.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            opt_speed: FloatParam::new(
+                "Opt Speed",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            opt_char: FloatParam::new(
+                "Opt Character",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            // 1176-style FET compressor parameters
+            #[cfg(feature = "buttercomp2")]
+            fet_input_db: FloatParam::new(
+                "FET Input",
+                0.0,
+                FloatRange::Linear { min: -20.0, max: 40.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            #[cfg(feature = "buttercomp2")]
+            fet_output_db: FloatParam::new(
+                "FET Output",
+                0.0,
+                FloatRange::Linear { min: -20.0, max: 20.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            #[cfg(feature = "buttercomp2")]
+            fet_attack_ms: FloatParam::new(
+                "FET Attack",
+                0.2,
+                FloatRange::Skewed {
+                    min: 0.02,
+                    max: 0.8,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            #[cfg(feature = "buttercomp2")]
+            fet_release_ms: FloatParam::new(
+                "FET Release",
+                250.0,
+                FloatRange::Skewed {
+                    min: 50.0,
+                    max: 1100.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            #[cfg(feature = "buttercomp2")]
+            fet_ratio: EnumParam::<FetRatio>::new("FET Ratio", FetRatio::R4),
+
+            #[cfg(feature = "buttercomp2")]
+            fet_auto_release: BoolParam::new("FET Auto Release", false),
 
             // Pultec EQ Parameters
             pultec_bypass: BoolParam::new("Pultec Bypass", false),
@@ -1281,6 +1453,12 @@ impl Plugin for BusChannelStrip {
         { self.eq_api5500 = Api5500::new(sr); }
         #[cfg(feature = "buttercomp2")]
         { self.compressor = ButterComp2::new(sr); }
+        #[cfg(feature = "buttercomp2")]
+        { self.fet_compressor = FetCompressor::new(sr); }
+        #[cfg(feature = "buttercomp2")]
+        { self.vca_compressor = VcaCompressor::new(sr); }
+        #[cfg(feature = "buttercomp2")]
+        { self.optical_compressor = OpticalCompressor::new(sr); }
         #[cfg(feature = "pultec")]
         { self.pultec = PultecEQ::new(sr); }
         #[cfg(feature = "dynamic_eq")]
@@ -1333,6 +1511,12 @@ impl Plugin for BusChannelStrip {
         // allocate. You can remove this function if you do not need it.
         #[cfg(feature = "buttercomp2")]
         { self.compressor.reset(); }
+        #[cfg(feature = "buttercomp2")]
+        { self.fet_compressor.reset(); }
+        #[cfg(feature = "buttercomp2")]
+        { self.vca_compressor.reset(); }
+        #[cfg(feature = "buttercomp2")]
+        { self.optical_compressor.reset(); }
         #[cfg(feature = "dynamic_eq")]
         { self.dynamic_eq.reset(); }
         #[cfg(feature = "transformer")]
@@ -1376,14 +1560,51 @@ impl Plugin for BusChannelStrip {
         // 2) ButterComp2 Compressor Module
         #[cfg(feature = "buttercomp2")]
         {
-            self.compressor.update_parameters(
-                self.params.comp_compress.value(),
-                self.params.comp_output.value(),
-                self.params.comp_dry_wet.value(),
-            );
-            
             if !self.params.comp_bypass.value() {
-                self.compressor.process(buffer);
+                match self.params.comp_model.value() {
+                    ButterComp2Model::Classic => {
+                        // Classic Airwindows ButterComp2 algorithm.
+                        self.compressor.update_parameters(
+                            self.params.comp_compress.value(),
+                            self.params.comp_output.value(),
+                            self.params.comp_dry_wet.value(),
+                        );
+                        self.compressor.process(buffer);
+                    }
+                    ButterComp2Model::Vca => {
+                        // VCA bus compressor — SSL G-Bus style RMS/soft-knee.
+                        self.vca_compressor.update_parameters(
+                            self.params.vca_thresh.smoothed.next(),
+                            self.params.vca_ratio.smoothed.next(),
+                            self.params.vca_atk.smoothed.next(),
+                            self.params.vca_rel.smoothed.next(),
+                        );
+                        self.vca_compressor.process(buffer);
+                    }
+                    ButterComp2Model::Optical => {
+                        // Optical compressor — LA-2A style opto-cell model.
+                        let thresh = self.params.opt_thresh.smoothed.next();
+                        let speed  = self.params.opt_speed.smoothed.next();
+                        let char_v = self.params.opt_char.smoothed.next();
+                        self.optical_compressor.update_parameters(thresh, speed, char_v);
+                        self.optical_compressor.process(buffer, thresh);
+                    }
+                    ButterComp2Model::Fet => {
+                        // 1176-style FET compressor — pure Rust, no FFI.
+                        // update_parameters() is called once per buffer; it only recomputes
+                        // coefficients when values change, so the per-buffer .value()/.smoothed calls
+                        // are the intended usage pattern here.
+                        self.fet_compressor.update_parameters(
+                            self.params.fet_input_db.smoothed.next(),
+                            self.params.fet_output_db.smoothed.next(),
+                            self.params.fet_attack_ms.smoothed.next(),
+                            self.params.fet_release_ms.smoothed.next(),
+                            self.params.fet_ratio.value(),
+                            self.params.fet_auto_release.value(),
+                        );
+                        self.fet_compressor.process(buffer);
+                    }
+                }
             }
         }
 

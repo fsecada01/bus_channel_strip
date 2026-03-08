@@ -29,6 +29,8 @@ pub enum AppEvent {
     OpenDynEq,
     /// Return from DynEQ back view to the strip front view.
     CloseDynEq,
+    /// Toggle the expand/collapse state of a DynEQ band (0–3). GUI-only state.
+    ToggleDynEQBand(usize),
     /// Request a one-shot sidechain masking analysis from the audio thread.
     #[cfg(feature = "dynamic_eq")]
     RequestAnalysis,
@@ -48,6 +50,10 @@ pub struct Data {
     pub drag_slot: Option<usize>,
     /// When true, the DynEQ back view is shown instead of the strip.
     pub dyneq_open: bool,
+    /// GUI-only expand state for each of the 4 DynEQ bands. Never accessed from audio thread.
+    pub dyneq_band_expand: Arc<[AtomicBool; 4]>,
+    /// Incremented on every ToggleDynEQBand — used as lens target to trigger .display() re-evaluation.
+    pub dyneq_expand_gen: u32,
     /// Shared with the audio thread — GUI sets true to trigger a masking analysis.
     pub analysis_requested: Arc<AtomicBool>,
     /// Shared with the audio thread — read after analysis completes.
@@ -59,6 +65,15 @@ impl Model for Data {
         event.map(|e: &AppEvent, _| match e {
             AppEvent::OpenDynEq  => { self.dyneq_open = true;  }
             AppEvent::CloseDynEq => { self.dyneq_open = false; }
+
+            AppEvent::ToggleDynEQBand(band) => {
+                let band = *band;
+                if band < 4 {
+                    let current = self.dyneq_band_expand[band].load(Ordering::Relaxed);
+                    self.dyneq_band_expand[band].store(!current, Ordering::Relaxed);
+                    self.dyneq_expand_gen = self.dyneq_expand_gen.wrapping_add(1);
+                }
+            }
 
             #[cfg(feature = "dynamic_eq")]
             AppEvent::RequestAnalysis => {
@@ -259,6 +274,13 @@ pub(crate) fn create(
             params: params.clone(),
             drag_slot: None,
             dyneq_open: false,
+            dyneq_band_expand: Arc::new([
+                AtomicBool::new(false),
+                AtomicBool::new(false),
+                AtomicBool::new(false),
+                AtomicBool::new(false),
+            ]),
+            dyneq_expand_gen: 0,
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
         }
@@ -496,9 +518,99 @@ fn build_api5500_controls(cx: &mut Context) {
 
 fn build_buttercomp2_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // Model selector — always visible above the reactive control surface.
+        #[cfg(feature = "buttercomp2")]
+        components::create_param_slider(cx, "MODEL", Data::params, |p| &p.comp_model);
+
+        // Reactive control surface — rebuilds when model enum changes.
+        // Map the EnumParam value to usize so Binding gets a `Data`-implementing target.
+        #[cfg(feature = "buttercomp2")]
+        Binding::new(
+            cx,
+            Data::params.map(|p| p.comp_model.value() as usize),
+            |cx, model_lens| {
+                let model_idx = model_lens.get(cx);
+                match model_idx {
+                    1 => build_optical_controls(cx), // ButterComp2Model::Optical as usize == 1
+                    2 => build_vca_controls(cx),     // ButterComp2Model::Vca    as usize == 2
+                    3 => build_fet_controls(cx),     // ButterComp2Model::Fet    as usize == 3
+                    _ => build_classic_controls(cx), // 0 = Classic; also safe fallback
+                }
+            },
+        );
+
+        // Fallback when buttercomp2 feature is disabled — render classic controls directly.
+        #[cfg(not(feature = "buttercomp2"))]
+        build_classic_controls(cx);
+    })
+    .gap(Pixels(6.0))
+    .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// Classic ButterComp2 control surface — Compress, Output, Dry/Wet.
+/// Height: Auto — 3 sliders + spacer row with 6px gaps.
+fn build_classic_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
         components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
         components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.comp_output);
         components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
+        // Spacer to match 4-slider VCA height.
+        Element::new(cx).height(Pixels(46.0));
+    })
+    .gap(Pixels(6.0))
+    .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// VCA model control surface — Threshold, Ratio, Attack, Release.
+/// Height: Auto — 4 sliders with 6px gaps.
+fn build_vca_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_param_slider(cx, "VCA THRESH", Data::params, |p| &p.vca_thresh);
+        components::create_ratio_slider(cx, "VCA RATIO", Data::params, |p| &p.vca_ratio);
+        components::create_param_slider(cx, "VCA ATTACK", Data::params, |p| &p.vca_atk);
+        components::create_param_slider(cx, "VCA RELEASE", Data::params, |p| &p.vca_rel);
+    })
+    .gap(Pixels(6.0))
+    .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// Optical model control surface — Threshold, Speed, Character.
+/// Height: 3 sliders × ~40px + gaps + spacer ≈ 196px (equal to VCA surface).
+fn build_optical_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_param_slider(cx, "OPT THRESH", Data::params, |p| &p.opt_thresh);
+        components::create_param_slider(cx, "OPT SPEED", Data::params, |p| &p.opt_speed);
+        components::create_param_slider(cx, "OPT CHARACTER", Data::params, |p| &p.opt_char);
+        // Spacer to match 4-slider VCA height and prevent slot resize on model switch.
+        Element::new(cx).height(Pixels(46.0));
+    })
+    .gap(Pixels(6.0))
+    .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// 1176-style FET compressor control surface — Input, Output, Attack, Release, Ratio, Auto-Release.
+/// Height: Auto — 6 rows (5 sliders + 1 enum row) with 6px gaps.
+#[cfg(feature = "buttercomp2")]
+fn build_fet_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_gain_slider(cx, "INPUT", Data::params, |p| &p.fet_input_db);
+        components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.fet_output_db);
+        components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.fet_attack_ms);
+        components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.fet_release_ms);
+        components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
+        components::create_param_slider(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -831,29 +943,68 @@ macro_rules! dyneq_band_col {
     ($cx:expr, $title:literal,
      $enabled:ident, $solo:ident,
      $freq:ident, $thresh:ident, $ratio:ident,
-     $q:ident, $mode:ident, $atk:ident, $rel:ident, $gain:ident) => {
+     $q:ident, $mode:ident, $atk:ident, $rel:ident, $gain:ident,
+     $band_idx:literal) => {
         VStack::new($cx, |cx| {
-            Label::new(cx, $title)
-                .class("dyneq-band-title")
-                .height(Pixels(14.0))
-                .width(Stretch(1.0))
-                // Title participates in stretch distribution like the sliders.
-                .top(Stretch(1.0))
-                .bottom(Pixels(0.0));
-            components::module_row(cx, |cx| {
+            // Band header: title + ON/SOLO buttons + chevron expand toggle
+            HStack::new(cx, |cx| {
+                Label::new(cx, $title)
+                    .class("dyneq-band-title")
+                    .height(Pixels(14.0))
+                    .width(Stretch(1.0))
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
                 components::create_on_button(cx, |p| &p.$enabled);
                 components::create_bypass_button(cx, "SOLO", |p| &p.$solo);
+                // Chevron toggle button — reactive label via dyneq_expand_gen lens
+                {
+                    let expand_arc_chevron = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
+                    Button::new(
+                        cx,
+                        |cx| Label::new(cx, Data::dyneq_expand_gen.map(move |_| {
+                            if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) { "▼" } else { "▶" }
+                        })),
+                    )
+                    .on_press(|cx| cx.emit(AppEvent::ToggleDynEQBand($band_idx)))
+                    .class("dyneq-chevron")
+                    .width(Pixels(24.0))
+                    .height(Auto)
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
+                }
             })
             .top(Stretch(1.0))
-            .bottom(Pixels(0.0));
+            .bottom(Pixels(0.0))
+            .width(Stretch(1.0))
+            .height(Auto);
+
+            // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
+            dyneq_slider!(cx, "MODE",   |p| &p.$mode);
             dyneq_slider!(cx, "FREQ",   |p| &p.$freq);
             dyneq_slider!(cx, "THRESH", |p| &p.$thresh);
-            dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
-            dyneq_slider!(cx, "Q",      |p| &p.$q);
-            dyneq_slider!(cx, "MODE",   |p| &p.$mode);
-            dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
-            dyneq_slider!(cx, "REL ms", |p| &p.$rel);
             dyneq_slider!(cx, "GAIN",   |p| &p.$gain);
+
+            // Tier 2 — hidden by default; revealed when band is expanded
+            {
+                let expand_arc_tier2 = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
+                VStack::new(cx, |cx| {
+                    dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
+                    dyneq_slider!(cx, "Q",      |p| &p.$q);
+                    dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
+                    dyneq_slider!(cx, "REL ms", |p| &p.$rel);
+                })
+                .width(Stretch(1.0))
+                .height(Auto)
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0))
+                .display(Data::dyneq_expand_gen.map(move |_| {
+                    if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    }
+                }));
+            }
         })
         .class("dyneq-band-col")
         // Stretch(1.0): band column fills remaining height after header + spectrum.
@@ -973,25 +1124,29 @@ fn build_dyneq_back_view(
                 dyneq_band1_enabled, dyneq_band1_solo,
                 dyneq_band1_freq, dyneq_band1_threshold, dyneq_band1_ratio,
                 dyneq_band1_q, dyneq_band1_mode, dyneq_band1_attack,
-                dyneq_band1_release, dyneq_band1_gain);
+                dyneq_band1_release, dyneq_band1_gain,
+                0);
 
             dyneq_band_col!(cx, "BAND 2 — LOW MID",
                 dyneq_band2_enabled, dyneq_band2_solo,
                 dyneq_band2_freq, dyneq_band2_threshold, dyneq_band2_ratio,
                 dyneq_band2_q, dyneq_band2_mode, dyneq_band2_attack,
-                dyneq_band2_release, dyneq_band2_gain);
+                dyneq_band2_release, dyneq_band2_gain,
+                1);
 
             dyneq_band_col!(cx, "BAND 3 — HIGH MID",
                 dyneq_band3_enabled, dyneq_band3_solo,
                 dyneq_band3_freq, dyneq_band3_threshold, dyneq_band3_ratio,
                 dyneq_band3_q, dyneq_band3_mode, dyneq_band3_attack,
-                dyneq_band3_release, dyneq_band3_gain);
+                dyneq_band3_release, dyneq_band3_gain,
+                2);
 
             dyneq_band_col!(cx, "BAND 4 — HIGH",
                 dyneq_band4_enabled, dyneq_band4_solo,
                 dyneq_band4_freq, dyneq_band4_threshold, dyneq_band4_ratio,
                 dyneq_band4_q, dyneq_band4_mode, dyneq_band4_attack,
-                dyneq_band4_release, dyneq_band4_gain);
+                dyneq_band4_release, dyneq_band4_gain,
+                3);
         })
         .height(Stretch(1.0))
         .width(Stretch(1.0))
