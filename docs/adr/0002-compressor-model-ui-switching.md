@@ -1,6 +1,8 @@
 # ADR-0002: Compressor Model UI — Binding-Based Control Switching
 
-**Status**: Accepted
+**Status**: Implemented
+
+**Implemented**: 2026-03-08 — FET (1176-style) added as fourth model
 **Date**: 2026-03-08
 **Deciders**: Project (Claude Code orchestration session)
 

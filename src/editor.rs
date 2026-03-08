@@ -529,10 +529,11 @@ fn build_buttercomp2_controls(cx: &mut Context) {
             cx,
             Data::params.map(|p| p.comp_model.value() as usize),
             |cx, model_lens| {
-                let model_idx = *model_lens.get(cx);
+                let model_idx = model_lens.get(cx);
                 match model_idx {
                     1 => build_optical_controls(cx), // ButterComp2Model::Optical as usize == 1
                     2 => build_vca_controls(cx),     // ButterComp2Model::Vca    as usize == 2
+                    3 => build_fet_controls(cx),     // ButterComp2Model::Fet    as usize == 3
                     _ => build_classic_controls(cx), // 0 = Classic; also safe fallback
                 }
             },
@@ -550,7 +551,7 @@ fn build_buttercomp2_controls(cx: &mut Context) {
 }
 
 /// Classic ButterComp2 control surface — Compress, Output, Dry/Wet.
-/// Height: 3 sliders × ~40px + gaps ≈ 136px (matches vca and optical with spacer).
+/// Height: Auto — 3 sliders + spacer row with 6px gaps.
 fn build_classic_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
@@ -560,14 +561,14 @@ fn build_classic_controls(cx: &mut Context) {
         Element::new(cx).height(Pixels(46.0));
     })
     .gap(Pixels(6.0))
-    .height(Pixels(196.0))
+    .height(Auto)
     .width(Stretch(1.0))
     .top(Pixels(0.0))
     .bottom(Pixels(0.0));
 }
 
 /// VCA model control surface — Threshold, Ratio, Attack, Release.
-/// Height: 4 sliders × ~40px + gaps ≈ 196px.
+/// Height: Auto — 4 sliders with 6px gaps.
 fn build_vca_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::create_param_slider(cx, "VCA THRESH", Data::params, |p| &p.vca_thresh);
@@ -576,7 +577,7 @@ fn build_vca_controls(cx: &mut Context) {
         components::create_param_slider(cx, "VCA RELEASE", Data::params, |p| &p.vca_rel);
     })
     .gap(Pixels(6.0))
-    .height(Pixels(196.0))
+    .height(Auto)
     .width(Stretch(1.0))
     .top(Pixels(0.0))
     .bottom(Pixels(0.0));
@@ -593,7 +594,26 @@ fn build_optical_controls(cx: &mut Context) {
         Element::new(cx).height(Pixels(46.0));
     })
     .gap(Pixels(6.0))
-    .height(Pixels(196.0))
+    .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// 1176-style FET compressor control surface — Input, Output, Attack, Release, Ratio, Auto-Release.
+/// Height: Auto — 6 rows (5 sliders + 1 enum row) with 6px gaps.
+#[cfg(feature = "buttercomp2")]
+fn build_fet_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_gain_slider(cx, "INPUT", Data::params, |p| &p.fet_input_db);
+        components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.fet_output_db);
+        components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.fet_attack_ms);
+        components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.fet_release_ms);
+        components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
+        components::create_param_slider(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
+    })
+    .gap(Pixels(6.0))
+    .height(Auto)
     .width(Stretch(1.0))
     .top(Pixels(0.0))
     .bottom(Pixels(0.0));
