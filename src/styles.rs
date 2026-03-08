@@ -686,6 +686,17 @@ scrollbar .thumb:hover {
     margin-bottom: 4px;
 }
 
+/* DynEQ per-band expand/collapse chevron button */
+.dyneq-chevron {
+    background-color: transparent;
+    border-width: 0px;
+    color: #8899aa;
+}
+
+.dyneq-chevron:hover {
+    color: #ffffff;
+}
+
 /* Responsive adjustments */
 @media (max-width: 1200px) {
     .param-control {

@@ -29,6 +29,8 @@ pub enum AppEvent {
     OpenDynEq,
     /// Return from DynEQ back view to the strip front view.
     CloseDynEq,
+    /// Toggle the expand/collapse state of a DynEQ band (0–3). GUI-only state.
+    ToggleDynEQBand(usize),
     /// Request a one-shot sidechain masking analysis from the audio thread.
     #[cfg(feature = "dynamic_eq")]
     RequestAnalysis,
@@ -48,6 +50,10 @@ pub struct Data {
     pub drag_slot: Option<usize>,
     /// When true, the DynEQ back view is shown instead of the strip.
     pub dyneq_open: bool,
+    /// GUI-only expand state for each of the 4 DynEQ bands. Never accessed from audio thread.
+    pub dyneq_band_expand: Arc<[AtomicBool; 4]>,
+    /// Incremented on every ToggleDynEQBand — used as lens target to trigger .display() re-evaluation.
+    pub dyneq_expand_gen: u32,
     /// Shared with the audio thread — GUI sets true to trigger a masking analysis.
     pub analysis_requested: Arc<AtomicBool>,
     /// Shared with the audio thread — read after analysis completes.
@@ -59,6 +65,15 @@ impl Model for Data {
         event.map(|e: &AppEvent, _| match e {
             AppEvent::OpenDynEq  => { self.dyneq_open = true;  }
             AppEvent::CloseDynEq => { self.dyneq_open = false; }
+
+            AppEvent::ToggleDynEQBand(band) => {
+                let band = *band;
+                if band < 4 {
+                    let current = self.dyneq_band_expand[band].load(Ordering::Relaxed);
+                    self.dyneq_band_expand[band].store(!current, Ordering::Relaxed);
+                    self.dyneq_expand_gen = self.dyneq_expand_gen.wrapping_add(1);
+                }
+            }
 
             #[cfg(feature = "dynamic_eq")]
             AppEvent::RequestAnalysis => {
@@ -259,6 +274,13 @@ pub(crate) fn create(
             params: params.clone(),
             drag_slot: None,
             dyneq_open: false,
+            dyneq_band_expand: Arc::new([
+                AtomicBool::new(false),
+                AtomicBool::new(false),
+                AtomicBool::new(false),
+                AtomicBool::new(false),
+            ]),
+            dyneq_expand_gen: 0,
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
         }
@@ -901,29 +923,68 @@ macro_rules! dyneq_band_col {
     ($cx:expr, $title:literal,
      $enabled:ident, $solo:ident,
      $freq:ident, $thresh:ident, $ratio:ident,
-     $q:ident, $mode:ident, $atk:ident, $rel:ident, $gain:ident) => {
+     $q:ident, $mode:ident, $atk:ident, $rel:ident, $gain:ident,
+     $band_idx:literal) => {
         VStack::new($cx, |cx| {
-            Label::new(cx, $title)
-                .class("dyneq-band-title")
-                .height(Pixels(14.0))
-                .width(Stretch(1.0))
-                // Title participates in stretch distribution like the sliders.
-                .top(Stretch(1.0))
-                .bottom(Pixels(0.0));
-            components::module_row(cx, |cx| {
+            // Band header: title + ON/SOLO buttons + chevron expand toggle
+            HStack::new(cx, |cx| {
+                Label::new(cx, $title)
+                    .class("dyneq-band-title")
+                    .height(Pixels(14.0))
+                    .width(Stretch(1.0))
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
                 components::create_on_button(cx, |p| &p.$enabled);
                 components::create_bypass_button(cx, "SOLO", |p| &p.$solo);
+                // Chevron toggle button — reactive label via dyneq_expand_gen lens
+                {
+                    let expand_arc_chevron = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
+                    Button::new(
+                        cx,
+                        |cx| Label::new(cx, Data::dyneq_expand_gen.map(move |_| {
+                            if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) { "▼" } else { "▶" }
+                        })),
+                    )
+                    .on_press(|cx| cx.emit(AppEvent::ToggleDynEQBand($band_idx)))
+                    .class("dyneq-chevron")
+                    .width(Pixels(24.0))
+                    .height(Auto)
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
+                }
             })
             .top(Stretch(1.0))
-            .bottom(Pixels(0.0));
+            .bottom(Pixels(0.0))
+            .width(Stretch(1.0))
+            .height(Auto);
+
+            // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
+            dyneq_slider!(cx, "MODE",   |p| &p.$mode);
             dyneq_slider!(cx, "FREQ",   |p| &p.$freq);
             dyneq_slider!(cx, "THRESH", |p| &p.$thresh);
-            dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
-            dyneq_slider!(cx, "Q",      |p| &p.$q);
-            dyneq_slider!(cx, "MODE",   |p| &p.$mode);
-            dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
-            dyneq_slider!(cx, "REL ms", |p| &p.$rel);
             dyneq_slider!(cx, "GAIN",   |p| &p.$gain);
+
+            // Tier 2 — hidden by default; revealed when band is expanded
+            {
+                let expand_arc_tier2 = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
+                VStack::new(cx, |cx| {
+                    dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
+                    dyneq_slider!(cx, "Q",      |p| &p.$q);
+                    dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
+                    dyneq_slider!(cx, "REL ms", |p| &p.$rel);
+                })
+                .width(Stretch(1.0))
+                .height(Auto)
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0))
+                .display(Data::dyneq_expand_gen.map(move |_| {
+                    if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    }
+                }));
+            }
         })
         .class("dyneq-band-col")
         // Stretch(1.0): band column fills remaining height after header + spectrum.
@@ -1043,25 +1104,29 @@ fn build_dyneq_back_view(
                 dyneq_band1_enabled, dyneq_band1_solo,
                 dyneq_band1_freq, dyneq_band1_threshold, dyneq_band1_ratio,
                 dyneq_band1_q, dyneq_band1_mode, dyneq_band1_attack,
-                dyneq_band1_release, dyneq_band1_gain);
+                dyneq_band1_release, dyneq_band1_gain,
+                0);
 
             dyneq_band_col!(cx, "BAND 2 — LOW MID",
                 dyneq_band2_enabled, dyneq_band2_solo,
                 dyneq_band2_freq, dyneq_band2_threshold, dyneq_band2_ratio,
                 dyneq_band2_q, dyneq_band2_mode, dyneq_band2_attack,
-                dyneq_band2_release, dyneq_band2_gain);
+                dyneq_band2_release, dyneq_band2_gain,
+                1);
 
             dyneq_band_col!(cx, "BAND 3 — HIGH MID",
                 dyneq_band3_enabled, dyneq_band3_solo,
                 dyneq_band3_freq, dyneq_band3_threshold, dyneq_band3_ratio,
                 dyneq_band3_q, dyneq_band3_mode, dyneq_band3_attack,
-                dyneq_band3_release, dyneq_band3_gain);
+                dyneq_band3_release, dyneq_band3_gain,
+                2);
 
             dyneq_band_col!(cx, "BAND 4 — HIGH",
                 dyneq_band4_enabled, dyneq_band4_solo,
                 dyneq_band4_freq, dyneq_band4_threshold, dyneq_band4_ratio,
                 dyneq_band4_q, dyneq_band4_mode, dyneq_band4_attack,
-                dyneq_band4_release, dyneq_band4_gain);
+                dyneq_band4_release, dyneq_band4_gain,
+                3);
         })
         .height(Stretch(1.0))
         .width(Stretch(1.0))
