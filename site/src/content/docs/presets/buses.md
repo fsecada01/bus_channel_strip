@@ -5,6 +5,10 @@ description: Optimized starting configurations for Drum, Bass, Guitar, Vocal, Sy
 
 Optimized starting configurations for common stem/bus processing scenarios. Each bus has different goals — use these as starting points and adjust to suit your mix.
 
+:::note[Module Reference]
+Each technique below links to the full module reference. See [API5500 EQ](/bus_channel_strip/modules/api5500/), [ButterComp2](/bus_channel_strip/modules/buttercomp2/), [Pultec EQ](/bus_channel_strip/modules/pultec/), [Dynamic EQ](/bus_channel_strip/modules/dynamic_eq/), [Transformer](/bus_channel_strip/modules/transformer/), and [Punch](/bus_channel_strip/modules/punch/) for parameter details and Quick Start settings.
+:::
+
 ---
 
 ## Drum Bus

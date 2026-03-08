@@ -12,6 +12,11 @@ export default defineConfig({
         github: 'https://github.com/fsecada01/bus_channel_strip',
       },
       customCss: ['./src/styles/custom.css'],
+      editLink: {
+        baseUrl: 'https://github.com/fsecada01/bus_channel_strip/edit/main/site/',
+      },
+      lastUpdated: true,
+      favicon: '/bus_channel_strip/favicon.svg',
       sidebar: [
         { label: 'Overview', link: '/' },
         { label: 'Installation', link: '/install/' },
@@ -35,6 +40,10 @@ export default defineConfig({
             { label: 'Instrument Buses', link: '/presets/buses/' },
           ],
         },
+        { label: 'Contributing', link: '/contributing/' },
+        { label: 'Architecture', link: '/architecture/' },
+        { label: 'Changelog', link: '/changelog/' },
+        { label: 'Parameter Reference', link: '/parameters/' },
       ],
     }),
   ],

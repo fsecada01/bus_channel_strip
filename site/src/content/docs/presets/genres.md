@@ -5,6 +5,10 @@ description: Complete mix bus processing chains for Modern Pop, Hip-Hop/Trap, Ro
 
 Complete mix bus processing chains for specific genres. Settings assume the default module order. Reorder modules as needed for your workflow.
 
+:::note[Module Reference]
+Each technique below links to the full module reference. See [API5500 EQ](/bus_channel_strip/modules/api5500/), [ButterComp2](/bus_channel_strip/modules/buttercomp2/), [Pultec EQ](/bus_channel_strip/modules/pultec/), [Dynamic EQ](/bus_channel_strip/modules/dynamic_eq/), [Transformer](/bus_channel_strip/modules/transformer/), and [Punch](/bus_channel_strip/modules/punch/) for parameter details and Quick Start settings.
+:::
+
 ---
 
 ## Modern Pop / R&B

@@ -7,6 +7,10 @@ description: 4-band frequency-dependent dynamics with Compress, Expand, and Gate
 
 Dynamic EQ combines parametric EQ precision with dynamics reactivity. Each band operates as an **envelope-follower-driven peaking filter** — it only applies equalization when the sidechain level crosses the threshold, proportional to the overage and ratio. The result is EQ that responds to the music rather than being static.
 
+:::tip[Quick Start]
+For mix-bus de-muddying: enable Band 1 (200 Hz) in **Compress Down** mode, Threshold −18 dB, Ratio 3:1, Attack 15 ms, Release 120 ms. Leave Bands 2–4 at unity until you identify a specific problem frequency.
+:::
+
 ## Modes
 
 | Mode | Behavior |
@@ -112,3 +116,9 @@ Increase upper-mid presence on transient peaks — snare and vocals cut through 
 - Sidechain detection uses a +6 dB peaking filter at the detector frequency
 - 0.05 dB gain hysteresis prevents redundant coefficient recomputation during stable envelope periods
 - Gain reduction displayed via lock-free `AtomicU32` per band, updated from audio thread with Relaxed ordering
+
+## See Also
+
+- [Techniques & Presets](/bus_channel_strip/presets/techniques/) — Dynamic EQ applications (de-essing, sub control, mud gate)
+- [Genre Signal Chains](/bus_channel_strip/presets/genres/) — Dynamic EQ role per genre
+- [Instrument Buses](/bus_channel_strip/presets/buses/) — frequency-dependent control per bus

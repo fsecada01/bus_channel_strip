@@ -1,6 +1,12 @@
 name: Deploy Documentation (GitHub Pages)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - 'README.md'
   release:
     types: [published]
   workflow_dispatch:

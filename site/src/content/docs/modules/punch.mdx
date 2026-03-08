@@ -14,6 +14,10 @@ Punch is a two-stage loudness processor:
 
 The key design decision: **transient shaping runs pre-clip**. Post-clip shaping would create time-varying gain modulation that sounds like pumping on every note attack. Pre-clip shaping lets the clipper naturally limit the enhanced peaks.
 
+:::tip[Quick Start]
+For loudness maximization with preserved punch: Clip Mode **Soft**, Threshold **−1.0 dB**, Softness **0.4**, Oversampling **8x**. Attack shaper at **+0.2**, Sustain at **0.0**. This clips peaks cleanly while the transient shaper keeps attack feel intact.
+:::
+
 <Aside type="caution" title="Default Oversampling">
 The default is **4× oversampling**. This balances CPU usage with aliasing rejection for most use cases. Use 8× for critical mastering work where maximum transparency is required.
 </Aside>
@@ -120,3 +124,9 @@ Set ceiling to **−1.0 dBFS** if the final delivery format is mp3 or AAC. Lossy
 - Downsampling: simple average + very light IIR (pole = 0.05) — the low pole prevents the downsampler from contributing to pumping
 - Transient detector uses the native sample rate, not the oversampled rate, to avoid detection artifacts
 - Maximum oversampling factor: 16× | Maximum block size: 8192 samples
+
+## See Also
+
+- [Techniques & Presets](/bus_channel_strip/presets/techniques/) — Punch clipping modes and loudness techniques
+- [Genre Signal Chains](/bus_channel_strip/presets/genres/) — how to use Punch per genre and target loudness
+- [Architecture](/bus_channel_strip/architecture/) — oversampling design and pumping-free transient shaper

@@ -9,6 +9,10 @@ The **Pultec EQP-1A** is one of the most revered equalizers in recording history
 
 Original hardware units from the 1950s sell for tens of thousands of dollars. This module models the passive EQ behavior including boost/cut interaction, stepped frequency selections, and tube saturation coloration.
 
+:::tip[Quick Start]
+For the classic Pultec low-end trick: set LF Boost Freq to **60 Hz**, LF Boost to **0.4**, and LF Atten to **0.2** simultaneously. This carves a tight, punchy low end that cuts through a dense mix.
+:::
+
 ---
 
 ## Controls
@@ -87,3 +91,9 @@ Presence boost with a gentle ultra-HF rolloff. Tames fizz while adding cut-throu
 :::tip[After Compression]
 Place Pultec *after* ButterComp2. Tonal shaping after compression means you're shaping the already-glued signal rather than pre-compression material. The Pultec LF boost after compression sounds more controlled than before.
 :::
+
+## See Also
+
+- [Techniques & Presets](/bus_channel_strip/presets/techniques/) — Pultec trick and tonal shaping recipes
+- [Genre Signal Chains](/bus_channel_strip/presets/genres/) — how to use the Pultec per genre
+- [Instrument Buses](/bus_channel_strip/presets/buses/) — per-bus Pultec settings
