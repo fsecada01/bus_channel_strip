@@ -203,6 +203,8 @@ jobs:
   create-release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     # Only create releases for release/feature branches and version tags, NOT main
     if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -210,85 +212,59 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get version and branch info
+      - name: Get version and release info
         id: get_version
         run: |
           VERSION=$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-          # Determine if this is a prerelease based on branch
           if [[ "$GITHUB_REF" == refs/heads/feature/* ]]; then
+            SUFFIX="-$(echo $GITHUB_REF | sed 's|refs/heads/feature/||')"
             echo "PRERELEASE=true" >> $GITHUB_OUTPUT
-            echo "BRANCH_SUFFIX=-$(echo $GITHUB_REF | sed 's|refs/heads/feature/||')" >> $GITHUB_OUTPUT
+            echo "TAG=v${VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
+            echo "TITLE=Bus Channel Strip v${VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
           elif [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
             echo "PRERELEASE=false" >> $GITHUB_OUTPUT
-            echo "BRANCH_SUFFIX=" >> $GITHUB_OUTPUT
+            echo "TAG=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "TITLE=Bus Channel Strip v${VERSION}" >> $GITHUB_OUTPUT
           elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
             echo "PRERELEASE=false" >> $GITHUB_OUTPUT
-            echo "BRANCH_SUFFIX=" >> $GITHUB_OUTPUT
-          else
-            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
-            echo "BRANCH_SUFFIX=-dev" >> $GITHUB_OUTPUT
+            echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+            echo "TITLE=Bus Channel Strip ${TAG}" >> $GITHUB_OUTPUT
           fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "=== Downloaded artifacts ==="
-          ls -la artifacts/
-          find artifacts/ -type f
+          PRERELEASE_FLAG=""
+          if [[ "${{ steps.get_version.outputs.PRERELEASE }}" == "true" ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "${{ steps.get_version.outputs.TAG }}" \
+            --title "${{ steps.get_version.outputs.TITLE }}" \
+            --notes "## Bus Channel Strip ${{ steps.get_version.outputs.TAG }}
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ steps.get_version.outputs.VERSION }}${{ steps.get_version.outputs.BRANCH_SUFFIX }}
-          release_name: Bus Channel Strip v${{ steps.get_version.outputs.VERSION }}${{ steps.get_version.outputs.BRANCH_SUFFIX }}
-          draft: false
-          prerelease: ${{ steps.get_version.outputs.PRERELEASE }}
+          Professional 6-module bus channel strip VST3/CLAP plugin.
 
-      - name: Upload Linux release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-linux.tar.gz/Bus-Channel-Strip-linux.tar.gz
-          asset_name: Bus-Channel-Strip-linux.tar.gz
-          asset_content_type: application/gzip
+          **Signal chain:** API5500 EQ → ButterComp2 → Pultec EQ → Dynamic EQ → Transformer → Punch
 
-      - name: Upload Windows release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-windows.zip/Bus-Channel-Strip-windows.zip
-          asset_name: Bus-Channel-Strip-windows.zip
-          asset_content_type: application/zip
+          ### Platform notes
+          - **Windows** — full GUI
+          - **macOS Apple Silicon (ARM64)** — full GUI
+          - **macOS Intel (x86_64)** — headless (no GUI); GUI available via local source build
+          - **Linux** — full GUI
 
-      - name: Upload macOS Intel release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-macos-intel.tar.gz/Bus-Channel-Strip-macos-intel.tar.gz
-          asset_name: Bus-Channel-Strip-macos-intel.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload macOS ARM64 release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/Bus-Channel-Strip-macos-arm64.tar.gz/Bus-Channel-Strip-macos-arm64.tar.gz
-          asset_name: Bus-Channel-Strip-macos-arm64.tar.gz
-          asset_content_type: application/gzip
+          See the [documentation](https://fsecada01.github.io/bus_channel_strip/) for installation and usage." \
+            $PRERELEASE_FLAG \
+            artifacts/*.zip artifacts/*.tar.gz
