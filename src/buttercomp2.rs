@@ -290,6 +290,409 @@ impl FetCompressor {
     }
 }
 
+// ============================================================================
+// VcaCompressor — RMS-detecting, soft-knee, feed-forward bus compressor
+// SSL G-Bus style: linked stereo detection, configurable threshold/ratio/A/R
+// ============================================================================
+
+/// RMS window used for level detection (10 ms is a standard ballistic choice).
+const VCA_RMS_WINDOW_S: f32 = 0.010;
+/// Soft-knee width in dB — transitions from linear to compressed region over 6 dB.
+const VCA_KNEE_WIDTH_DB: f32 = 6.0;
+/// Denormal guard for the squared RMS accumulator — prevents CPU load spikes.
+const VCA_DENORMAL_FLOOR: f32 = 1e-15;
+/// Minimum RMS level before log conversion — avoids -inf dB.
+const VCA_MIN_RMS_LINEAR: f32 = 1e-6;
+/// Minimum linear GR multiplier — prevents complete signal extinction.
+const VCA_GR_MIN_LINEAR: f32 = 0.001;
+
+/// RMS-detecting, soft-knee, feed-forward VCA bus compressor.
+///
+/// All mutable state is pre-allocated in struct fields — no heap allocation in
+/// `process_sample()`. Linked stereo detection produces a single shared envelope.
+pub struct VcaCompressor {
+    sample_rate: f32,
+    /// Linked stereo RMS accumulator (mean-square, pre-sqrt).
+    rms_sq: f32,
+    coeff_rms: f32,
+    /// Shared gain-reduction envelope, linear multiplier (init 1.0 = no GR).
+    env_gr: f32,
+    /// Cached ballistic coefficients — recomputed only on parameter change.
+    coeff_atk: f32,
+    coeff_rel: f32,
+    /// Dirty-check cache — avoids exp() on every buffer call.
+    cached_thresh: f32,
+    cached_ratio: f32,
+    cached_atk_ms: f32,
+    cached_rel_ms: f32,
+}
+
+impl VcaCompressor {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut s = Self {
+            sample_rate,
+            rms_sq: 0.0,
+            coeff_rms: 0.0,
+            env_gr: 1.0,
+            coeff_atk: 0.0,
+            coeff_rel: 0.0,
+            // NaN sentinel forces coefficient computation on first update_parameters() call.
+            cached_thresh: f32::NAN,
+            cached_ratio: f32::NAN,
+            cached_atk_ms: f32::NAN,
+            cached_rel_ms: f32::NAN,
+        };
+        s.recompute_coefficients(10.0, 100.0);
+        s
+    }
+
+    fn recompute_coefficients(&mut self, atk_ms: f32, rel_ms: f32) {
+        self.coeff_rms = (-1.0 / (VCA_RMS_WINDOW_S * self.sample_rate)).exp();
+        self.coeff_atk = (-1.0 / (atk_ms * 0.001 * self.sample_rate)).exp();
+        self.coeff_rel = (-1.0 / (rel_ms * 0.001 * self.sample_rate)).exp();
+    }
+
+    /// Update parameters — call once per buffer, not per sample.
+    /// Coefficient recomputation only happens when values change beyond a threshold.
+    pub fn update_parameters(
+        &mut self,
+        thresh_db: f32,
+        ratio: f32,
+        atk_ms: f32,
+        rel_ms: f32,
+    ) {
+        let thresh_changed = (thresh_db - self.cached_thresh).abs() > 0.001;
+        let ratio_changed  = (ratio    - self.cached_ratio  ).abs() > 0.001;
+        let atk_changed    = (atk_ms   - self.cached_atk_ms ).abs() > 0.01;
+        let rel_changed    = (rel_ms   - self.cached_rel_ms ).abs() > 0.01;
+        if thresh_changed { self.cached_thresh = thresh_db; }
+        if ratio_changed  { self.cached_ratio  = ratio; }
+        if atk_changed || rel_changed {
+            self.cached_atk_ms = atk_ms;
+            self.cached_rel_ms = rel_ms;
+            self.recompute_coefficients(atk_ms, rel_ms);
+        }
+    }
+
+    /// Process one stereo sample pair with linked RMS detection.
+    ///
+    /// No allocation, no locking, no panics — safe for the audio thread.
+    #[inline]
+    pub fn process_sample(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
+        // Stage 1 — Linked RMS accumulation (max-abs side-chain, mean-square IIR).
+        let x_sq = in_l.abs().max(in_r.abs()).powi(2);
+        self.rms_sq = self.coeff_rms * self.rms_sq + (1.0 - self.coeff_rms) * x_sq;
+        // Denormal guard: clamp to a small positive floor before sqrt.
+        self.rms_sq = self.rms_sq.max(VCA_DENORMAL_FLOOR);
+        let rms = self.rms_sq.sqrt();
+
+        // Stage 2 — Level to dB.
+        let x_db = if rms < VCA_MIN_RMS_LINEAR {
+            -120.0_f32
+        } else {
+            20.0 * rms.log10()
+        };
+
+        // Stage 3 — Soft-knee gain computer.
+        let t = self.cached_thresh;
+        let r = self.cached_ratio;
+        let w = VCA_KNEE_WIDTH_DB;
+        let over = x_db - t;
+        let gr_db = if x_db < t - w * 0.5 {
+            0.0_f32
+        } else if x_db > t + w * 0.5 {
+            over * (1.0 / r - 1.0)
+        } else {
+            let frac = (over + w * 0.5) / w; // 0..1 inside knee
+            frac * frac * over * (1.0 / r - 1.0)
+        };
+        // gr_db ≤ 0; convert to linear and clamp to prevent full extinction.
+        let gr_linear_target = 10.0_f32.powf(gr_db / 20.0).clamp(VCA_GR_MIN_LINEAR, 1.0);
+
+        // Stage 4 — Attack/release envelope on the linear GR multiplier.
+        if gr_linear_target < self.env_gr {
+            // More GR needed — attack phase.
+            self.env_gr = self.coeff_atk * self.env_gr
+                + (1.0 - self.coeff_atk) * gr_linear_target;
+        } else {
+            // Less GR needed — release phase.
+            self.env_gr = self.coeff_rel * self.env_gr
+                + (1.0 - self.coeff_rel) * gr_linear_target;
+        }
+        self.env_gr = self.env_gr.clamp(VCA_GR_MIN_LINEAR, 1.0);
+
+        // Stage 5 — Apply shared GR to both channels.
+        (in_l * self.env_gr, in_r * self.env_gr)
+    }
+
+    /// Process a full stereo buffer in place.
+    ///
+    /// # Safety invariant
+    /// Caller must ensure the buffer has exactly 2 channels (guaranteed by the plugin's
+    /// `AUDIO_IO_LAYOUTS` declaration which specifies a stereo main output).
+    pub fn process(&mut self, buffer: &mut Buffer) {
+        for mut frame in buffer.iter_samples() {
+            let mut iter = frame.iter_mut();
+            // SAFETY: Stereo bus — 2 channels guaranteed by plugin layout declaration.
+            if let (Some(l), Some(r)) = (iter.next(), iter.next()) {
+                let (out_l, out_r) = self.process_sample(*l, *r);
+                *l = out_l;
+                *r = out_r;
+            }
+        }
+    }
+
+    /// Reset all envelope and accumulator state. Safe to call from audio thread.
+    pub fn reset(&mut self) {
+        self.env_gr = 1.0;
+        self.rms_sq = 0.0;
+    }
+}
+
+// ============================================================================
+// OpticalCompressor — LA-2A style opto-cell model
+// Dual-integrator (fast envelope + slow memory), log-law gain curve,
+// speed/character parameters, per-channel processing.
+// ============================================================================
+
+/// Fixed compression ratio for the optical model (3:1 like the LA-2A programme dependent mode).
+const OPT_RATIO: f32 = 3.0;
+/// Log-law shaping coefficient — higher values make the curve more non-linear.
+const OPT_LOG_SHAPE_K: f32 = 4.0;
+/// Denormal guard added to absolute signal level before log conversion.
+const OPT_DENORM_GUARD: f32 = 1e-9;
+/// Minimum signal level in dB (floor for peak pre-filter and level computations).
+const OPT_MIN_LEVEL_DB: f32 = -90.0;
+/// Maximum gain reduction in dB — prevents runaway compression.
+const OPT_MAX_GR_DB: f32 = 40.0;
+/// Maximum value of the slow memory integrator in dB.
+const OPT_ENV_SLOW_MAX: f32 = 30.0;
+/// GR threshold (dB) above which the slow integrator tracks (opto "memory" engages).
+const OPT_ENV_SLOW_THRESHOLD: f32 = 0.5;
+/// Slow memory decay multiplier applied to the memory_ms time constant.
+const OPT_MEMORY_DECAY_FACTOR: f32 = 4.0;
+/// Attack time for the peak pre-filter (ms) — fast enough to catch transients.
+const OPT_PEAK_HOLD_ATK_MS: f32 = 0.5;
+/// Release time for the peak pre-filter (ms).
+const OPT_PEAK_HOLD_REL_MS: f32 = 5.0;
+
+/// LA-2A style optical compressor with program-dependent release.
+///
+/// Per-channel processing to model independent opto-cell behaviour per channel.
+/// All mutable state pre-allocated — no heap allocation in any processing method.
+pub struct OpticalCompressor {
+    sample_rate: f32,
+    /// Fast ballistics integrator, per channel (GR dB, init 0.0).
+    env_fast_l: f32,
+    env_fast_r: f32,
+    /// Slow memory integrator, per channel (GR dB, init 0.0).
+    env_slow_l: f32,
+    env_slow_r: f32,
+    /// Peak pre-filter state, per channel (dB, init OPT_MIN_LEVEL_DB).
+    peak_hold_l: f32,
+    peak_hold_r: f32,
+    /// Cached ballistic coefficients — same for both channels.
+    attack_coeff: f32,
+    release_coeff: f32,
+    memory_coeff: f32,
+    memory_decay_coeff: f32,
+    peak_atk_coeff: f32,
+    peak_rel_coeff: f32,
+    memory_weight: f32,
+    knee_db: f32,
+    /// Dirty-check cache — avoids exp() on every buffer call.
+    cached_thresh: f32,
+    cached_speed: f32,
+    cached_char: f32,
+}
+
+impl OpticalCompressor {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut s = Self {
+            sample_rate,
+            env_fast_l: 0.0,
+            env_fast_r: 0.0,
+            env_slow_l: 0.0,
+            env_slow_r: 0.0,
+            peak_hold_l: OPT_MIN_LEVEL_DB,
+            peak_hold_r: OPT_MIN_LEVEL_DB,
+            attack_coeff: 0.0,
+            release_coeff: 0.0,
+            memory_coeff: 0.0,
+            memory_decay_coeff: 0.0,
+            peak_atk_coeff: 0.0,
+            peak_rel_coeff: 0.0,
+            memory_weight: 0.0,
+            knee_db: 0.0,
+            // NaN sentinel forces coefficient computation on first update_parameters() call.
+            cached_thresh: f32::NAN,
+            cached_speed: f32::NAN,
+            cached_char: f32::NAN,
+        };
+        s.recompute_coefficients(0.5, 0.5);
+        s
+    }
+
+    fn recompute_coefficients(&mut self, speed: f32, char_val: f32) {
+        // Log-space interpolation for perceptually uniform sweeping of time constants.
+        let attack_ms  = (50.0_f32.ln() * (1.0 - speed) + 3.0_f32.ln()    * speed).exp();
+        let release_ms = (3000.0_f32.ln() * (1.0 - speed) + 80.0_f32.ln() * speed).exp();
+        let memory_ms  = (6000.0_f32.ln() * (1.0 - speed) + 500.0_f32.ln()* speed).exp();
+
+        self.attack_coeff        = (-1.0 / (attack_ms  * 0.001 * self.sample_rate)).exp();
+        self.release_coeff       = (-1.0 / (release_ms * 0.001 * self.sample_rate)).exp();
+        self.memory_coeff        = (-1.0 / (memory_ms  * 0.001 * self.sample_rate)).exp();
+        self.memory_decay_coeff  = (-1.0 / (memory_ms * OPT_MEMORY_DECAY_FACTOR * 0.001 * self.sample_rate)).exp();
+
+        self.peak_atk_coeff = (-1.0 / (OPT_PEAK_HOLD_ATK_MS * 0.001 * self.sample_rate)).exp();
+        self.peak_rel_coeff = (-1.0 / (OPT_PEAK_HOLD_REL_MS * 0.001 * self.sample_rate)).exp();
+
+        // character sweeps memory_weight 0.3..0.9 and knee 12..3 dB.
+        self.memory_weight = 0.3 + char_val * 0.6;
+        self.knee_db       = 12.0 - char_val * 9.0;
+    }
+
+    /// Update parameters — call once per buffer, not per sample.
+    /// Coefficient recomputation only happens when values change beyond a threshold.
+    pub fn update_parameters(&mut self, thresh_db: f32, speed: f32, char_val: f32) {
+        let thresh_changed = (thresh_db - self.cached_thresh).abs() > 0.001;
+        let speed_changed  = (speed     - self.cached_speed ).abs() > 0.005;
+        let char_changed   = (char_val  - self.cached_char  ).abs() > 0.005;
+        if thresh_changed { self.cached_thresh = thresh_db; }
+        if speed_changed || char_changed {
+            self.cached_speed = speed;
+            self.cached_char  = char_val;
+            self.recompute_coefficients(speed, char_val);
+        }
+    }
+
+    /// Compute log-law shaped gain reduction (in dB, positive = amount of GR to apply).
+    ///
+    /// Uses a soft-knee around `thresh_db` then applies a non-linear log curve to
+    /// model the response of an opto-cell element.
+    #[inline]
+    fn gain_computer(&self, x_db: f32, thresh_db: f32) -> f32 {
+        let over = x_db - thresh_db;
+        let half_knee = self.knee_db * 0.5;
+        let gr_target = if over <= -half_knee {
+            0.0_f32
+        } else if over >= half_knee {
+            over * (1.0 - 1.0 / OPT_RATIO)
+        } else {
+            // Quadratic interpolation through the knee region.
+            (over + half_knee) * (over + half_knee)
+                / (2.0 * self.knee_db)
+                * (1.0 - 1.0 / OPT_RATIO)
+        };
+        // Log-law shaping: emulates the non-linear response of an opto-cell.
+        let shaped = if gr_target > 0.0 {
+            gr_target * (1.0 + gr_target * OPT_LOG_SHAPE_K).ln()
+                / (1.0 + OPT_LOG_SHAPE_K).ln()
+        } else {
+            0.0
+        };
+        shaped.clamp(0.0, OPT_MAX_GR_DB)
+    }
+
+    /// Single-channel processing kernel — takes and returns state by value to avoid
+    /// borrow checker conflicts when calling from `process_sample`.
+    ///
+    /// Returns `(output_sample, new_env_fast, new_env_slow, new_peak_hold)`.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn process_sample_channel(
+        &self,
+        x: f32,
+        env_fast: f32,
+        env_slow: f32,
+        peak_hold: f32,
+        thresh_db: f32,
+    ) -> (f32, f32, f32, f32) {
+        // Stage 1 — Peak pre-filter (smooth peak tracking to reduce inter-sample clicks).
+        let x_abs    = x.abs() + OPT_DENORM_GUARD;
+        let x_db_raw = 20.0 * x_abs.log10();
+        let x_db     = x_db_raw.max(OPT_MIN_LEVEL_DB);
+        let new_peak = if x_db > peak_hold {
+            self.peak_atk_coeff * peak_hold + (1.0 - self.peak_atk_coeff) * x_db
+        } else {
+            self.peak_rel_coeff * peak_hold + (1.0 - self.peak_rel_coeff) * x_db
+        };
+        let new_peak = new_peak.max(OPT_MIN_LEVEL_DB);
+
+        // Stage 2 — Gain computer.
+        let gr_shaped = self.gain_computer(new_peak, thresh_db);
+
+        // Stage 3 — Fast envelope with program-dependent release.
+        let env_slow_norm = (env_slow / OPT_ENV_SLOW_MAX).clamp(0.0, 1.0);
+        let new_env_fast = if gr_shaped > env_fast {
+            // Attack phase.
+            self.attack_coeff * env_fast + (1.0 - self.attack_coeff) * gr_shaped
+        } else {
+            // Program-dependent release: memory integrator blends toward slower release.
+            let coeff_mod = (self.release_coeff
+                + self.memory_weight * (self.memory_coeff - self.release_coeff) * env_slow_norm)
+                .clamp(self.release_coeff, self.memory_coeff);
+            coeff_mod * env_fast + (1.0 - coeff_mod) * gr_shaped
+        };
+        let new_env_fast = new_env_fast.clamp(0.0, OPT_MAX_GR_DB);
+
+        // Stage 4 — Slow memory integrator (opto "memory" / tube warm-up effect).
+        let new_env_slow = if gr_shaped > OPT_ENV_SLOW_THRESHOLD {
+            self.memory_coeff * env_slow + (1.0 - self.memory_coeff) * gr_shaped
+        } else {
+            self.memory_decay_coeff * env_slow
+        };
+        let new_env_slow = new_env_slow.clamp(0.0, OPT_ENV_SLOW_MAX);
+
+        // Stage 5 — Convert GR from dB to linear and apply.
+        let gr_linear = 10.0_f32.powf(-new_env_fast / 20.0);
+        let output = x * gr_linear;
+
+        (output, new_env_fast, new_env_slow, new_peak)
+    }
+
+    /// Process one stereo sample pair with independent per-channel detection.
+    ///
+    /// No allocation, no locking, no panics — safe for the audio thread.
+    #[inline]
+    pub fn process_sample(&mut self, in_l: f32, in_r: f32, thresh_db: f32) -> (f32, f32) {
+        let (out_l, ef_l, es_l, ph_l) =
+            self.process_sample_channel(in_l, self.env_fast_l, self.env_slow_l, self.peak_hold_l, thresh_db);
+        let (out_r, ef_r, es_r, ph_r) =
+            self.process_sample_channel(in_r, self.env_fast_r, self.env_slow_r, self.peak_hold_r, thresh_db);
+        self.env_fast_l = ef_l; self.env_slow_l = es_l; self.peak_hold_l = ph_l;
+        self.env_fast_r = ef_r; self.env_slow_r = es_r; self.peak_hold_r = ph_r;
+        (out_l, out_r)
+    }
+
+    /// Process a full stereo buffer in place.
+    ///
+    /// # Safety invariant
+    /// Caller must ensure the buffer has exactly 2 channels (guaranteed by the plugin's
+    /// `AUDIO_IO_LAYOUTS` declaration which specifies a stereo main output).
+    pub fn process(&mut self, buffer: &mut Buffer, thresh_db: f32) {
+        for mut frame in buffer.iter_samples() {
+            let mut iter = frame.iter_mut();
+            // SAFETY: Stereo bus — 2 channels guaranteed by plugin layout declaration.
+            if let (Some(l), Some(r)) = (iter.next(), iter.next()) {
+                let (out_l, out_r) = self.process_sample(*l, *r, thresh_db);
+                *l = out_l;
+                *r = out_r;
+            }
+        }
+    }
+
+    /// Reset all envelope and pre-filter state. Safe to call from audio thread.
+    pub fn reset(&mut self) {
+        self.env_fast_l = 0.0;
+        self.env_fast_r = 0.0;
+        self.env_slow_l = 0.0;
+        self.env_slow_r = 0.0;
+        self.peak_hold_l = OPT_MIN_LEVEL_DB;
+        self.peak_hold_r = OPT_MIN_LEVEL_DB;
+    }
+}
+
 // ButterComp2 FFI bindings
 #[repr(C)]
 pub struct ButterComp2StateOpaque {
