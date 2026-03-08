@@ -1,5 +1,24 @@
 use nih_plug::buffer::Buffer;
+use nih_plug::prelude::Enum;
 
+// ============================================================================
+// ButterComp2 Model Enum
+// ============================================================================
+
+/// Selectable compressor personality for the ButterComp2 slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum ButterComp2Model {
+    #[name = "Classic"]
+    Classic,
+    #[name = "Optical"]
+    Optical,
+    #[name = "VCA"]
+    Vca,
+}
+
+impl Default for ButterComp2Model {
+    fn default() -> Self { ButterComp2Model::Classic }
+}
 
 // ButterComp2 FFI bindings
 #[repr(C)]

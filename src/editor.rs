@@ -496,12 +496,82 @@ fn build_api5500_controls(cx: &mut Context) {
 
 fn build_buttercomp2_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
-        components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.comp_output);
-        components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
+        // Model selector — always visible above the reactive control surface.
+        #[cfg(feature = "buttercomp2")]
+        components::create_param_slider(cx, "MODEL", Data::params, |p| &p.comp_model);
+
+        // Reactive control surface — rebuilds when model enum changes.
+        // Map the EnumParam value to usize so Binding gets a `Data`-implementing target.
+        #[cfg(feature = "buttercomp2")]
+        Binding::new(
+            cx,
+            Data::params.map(|p| p.comp_model.value() as usize),
+            |cx, model_lens| {
+                let model_idx = *model_lens.get(cx);
+                match model_idx {
+                    1 => build_optical_controls(cx), // ButterComp2Model::Optical as usize == 1
+                    2 => build_vca_controls(cx),     // ButterComp2Model::Vca    as usize == 2
+                    _ => build_classic_controls(cx), // 0 = Classic; also safe fallback
+                }
+            },
+        );
+
+        // Fallback when buttercomp2 feature is disabled — render classic controls directly.
+        #[cfg(not(feature = "buttercomp2"))]
+        build_classic_controls(cx);
     })
     .gap(Pixels(6.0))
     .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// Classic ButterComp2 control surface — Compress, Output, Dry/Wet.
+/// Height: 3 sliders × ~40px + gaps ≈ 136px (matches vca and optical with spacer).
+fn build_classic_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
+        components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.comp_output);
+        components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
+        // Spacer to match 4-slider VCA height.
+        Element::new(cx).height(Pixels(46.0));
+    })
+    .gap(Pixels(6.0))
+    .height(Pixels(196.0))
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// VCA model control surface — Threshold, Ratio, Attack, Release.
+/// Height: 4 sliders × ~40px + gaps ≈ 196px.
+fn build_vca_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_param_slider(cx, "VCA THRESH", Data::params, |p| &p.vca_thresh);
+        components::create_ratio_slider(cx, "VCA RATIO", Data::params, |p| &p.vca_ratio);
+        components::create_param_slider(cx, "VCA ATTACK", Data::params, |p| &p.vca_atk);
+        components::create_param_slider(cx, "VCA RELEASE", Data::params, |p| &p.vca_rel);
+    })
+    .gap(Pixels(6.0))
+    .height(Pixels(196.0))
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+/// Optical model control surface — Threshold, Speed, Character.
+/// Height: 3 sliders × ~40px + gaps + spacer ≈ 196px (equal to VCA surface).
+fn build_optical_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        components::create_param_slider(cx, "OPT THRESH", Data::params, |p| &p.opt_thresh);
+        components::create_param_slider(cx, "OPT SPEED", Data::params, |p| &p.opt_speed);
+        components::create_param_slider(cx, "OPT CHARACTER", Data::params, |p| &p.opt_char);
+        // Spacer to match 4-slider VCA height and prevent slot resize on model switch.
+        Element::new(cx).height(Pixels(46.0));
+    })
+    .gap(Pixels(6.0))
+    .height(Pixels(196.0))
     .width(Stretch(1.0))
     .top(Pixels(0.0))
     .bottom(Pixels(0.0));

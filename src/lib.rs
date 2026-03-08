@@ -13,7 +13,7 @@ use api5500::Api5500;
 #[cfg(feature = "buttercomp2")]
 mod buttercomp2;
 #[cfg(feature = "buttercomp2")]
-use buttercomp2::ButterComp2;
+use buttercomp2::{ButterComp2, ButterComp2Model};
 
 #[cfg(feature = "pultec")]
 mod pultec;
@@ -200,6 +200,29 @@ pub struct BusChannelStripParams {
     pub comp_output: FloatParam,
     #[id = "comp_dry_wet"]
     pub comp_dry_wet: FloatParam,
+
+    /// Model selector — always visible; switches the active control surface.
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_model"]
+    pub comp_model: EnumParam<ButterComp2Model>,
+
+    // VCA model parameters
+    #[id = "comp_vca_thresh"]
+    pub vca_thresh: FloatParam,
+    #[id = "comp_vca_ratio"]
+    pub vca_ratio: FloatParam,
+    #[id = "comp_vca_atk"]
+    pub vca_atk: FloatParam,
+    #[id = "comp_vca_rel"]
+    pub vca_rel: FloatParam,
+
+    // Optical model parameters
+    #[id = "comp_opt_thresh"]
+    pub opt_thresh: FloatParam,
+    #[id = "comp_opt_speed"]
+    pub opt_speed: FloatParam,
+    #[id = "comp_opt_char"]
+    pub opt_char: FloatParam,
 
     // Pultec EQ Parameters
     #[id = "pultec_bypass"]
@@ -695,6 +718,64 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
+
+            #[cfg(feature = "buttercomp2")]
+            comp_model: EnumParam::<ButterComp2Model>::new("Model", ButterComp2Model::default()),
+
+            // VCA model parameters
+            vca_thresh: FloatParam::new(
+                "VCA Threshold",
+                -18.0,
+                FloatRange::Linear { min: -60.0, max: 0.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            vca_ratio: FloatParam::new(
+                "VCA Ratio",
+                4.0,
+                FloatRange::Linear { min: 1.0, max: 20.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            vca_atk: FloatParam::new(
+                "VCA Attack",
+                10.0,
+                FloatRange::Linear { min: 0.1, max: 100.0 },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            vca_rel: FloatParam::new(
+                "VCA Release",
+                100.0,
+                FloatRange::Linear { min: 10.0, max: 1000.0 },
+            )
+            .with_unit(" ms")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            // Optical model parameters
+            opt_thresh: FloatParam::new(
+                "Opt Threshold",
+                -12.0,
+                FloatRange::Linear { min: -60.0, max: 0.0 },
+            )
+            .with_unit(" dB")
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            opt_speed: FloatParam::new(
+                "Opt Speed",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0)),
+
+            opt_char: FloatParam::new(
+                "Opt Character",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0)),
 
             // Pultec EQ Parameters
             pultec_bypass: BoolParam::new("Pultec Bypass", false),
@@ -1376,14 +1457,26 @@ impl Plugin for BusChannelStrip {
         // 2) ButterComp2 Compressor Module
         #[cfg(feature = "buttercomp2")]
         {
-            self.compressor.update_parameters(
-                self.params.comp_compress.value(),
-                self.params.comp_output.value(),
-                self.params.comp_dry_wet.value(),
-            );
-            
             if !self.params.comp_bypass.value() {
-                self.compressor.process(buffer);
+                match self.params.comp_model.value() {
+                    ButterComp2Model::Classic => {
+                        // Classic Airwindows ButterComp2 algorithm.
+                        self.compressor.update_parameters(
+                            self.params.comp_compress.value(),
+                            self.params.comp_output.value(),
+                            self.params.comp_dry_wet.value(),
+                        );
+                        self.compressor.process(buffer);
+                    }
+                    ButterComp2Model::Vca => {
+                        // TODO: VCA/Optical DSP not yet implemented — passes through.
+                        // Audio passes unmodified; no allocation, no locks.
+                    }
+                    ButterComp2Model::Optical => {
+                        // TODO: VCA/Optical DSP not yet implemented — passes through.
+                        // Audio passes unmodified; no allocation, no locks.
+                    }
+                }
             }
         }
 
