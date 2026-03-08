@@ -11,7 +11,7 @@
 
 *Built with [NIH-Plug](https://github.com/robbert-vdh/nih-plug), [Airwindows DSP](https://github.com/airwindows/airwindows), and [vizia](https://vizia.dev/)*
 
-**[Documentation & Presets Site](https://YOUR_USERNAME.github.io/bus_channel_strip/)** | **[Download Latest](../../releases/latest)**
+**[Documentation & Presets Site](https://fsecada01.github.io/bus_channel_strip/)** | **[Download Latest](../../releases/latest)**
 
 </div>
 
@@ -142,7 +142,7 @@ All `process()` paths are:
 
 Full control reference, settings examples, genre signal chains, and instrument bus presets:
 
-**[docs.site/bus_channel_strip](https://YOUR_USERNAME.github.io/bus_channel_strip/)**
+**[fsecada01.github.io/bus_channel_strip](https://fsecada01.github.io/bus_channel_strip/)**
 
 Internal docs in `docs/`:
 - `GUI_DESIGN.md` — UI specifications and layout

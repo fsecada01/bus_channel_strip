@@ -4,7 +4,7 @@ version = "0.3.0"
 edition = "2021"
 authors = ["Your Name <your@email.com>"]
 license = "GPL-3.0-or-later"
-homepage = "https://youtu.be/dQw4w9WgXcQ"
+homepage = "https://fsecada01.github.io/bus_channel_strip/"
 description = "Professional 6-module bus channel strip with Punch (clipper + transient shaper)"
 
 [workspace]
