@@ -186,6 +186,20 @@ analyze FILE:
     claude -p "Analyze src/{{FILE}} for DSP correctness, Rust idioms, potential audio thread issues, and improvement opportunities." \
     --append-system-prompt-file {{SYSTEM_PROMPT}}
 
+# ── Documentation ────────────────────────────────────────────────────────────
+
+# Start local docs dev server (hot-reload)
+docs-dev:
+    cd site && npm run dev
+
+# Build docs site for production
+docs-build:
+    cd site && npm install && npm run build
+
+# Preview the production docs build locally
+docs-preview:
+    cd site && npm run preview
+
 # ── Maintenance ───────────────────────────────────────────────────────────────
 
 # Clean build artifacts (preserves registry cache)
