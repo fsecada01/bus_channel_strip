@@ -633,10 +633,10 @@ fn build_vca_controls(cx: &mut Context) {
             components::create_ratio_slider(cx, "RATIO", Data::params, |p| &p.vca_ratio);
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.comp_attack_ms);
-            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.comp_release_ms);
+            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.vca_atk);
+            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.vca_rel);
         });
-        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_mix);
+        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -652,11 +652,8 @@ fn build_optical_controls(cx: &mut Context) {
             components::create_param_slider(cx, "THRESH", Data::params, |p| &p.opt_thresh);
             components::create_param_slider(cx, "CHAR %", Data::params, |p| &p.opt_char);
         });
-        components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.comp_attack_ms);
-            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.comp_release_ms);
-        });
-        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_mix);
+        components::create_param_slider(cx, "SPEED", Data::params, |p| &p.opt_speed);
+        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -674,14 +671,14 @@ fn build_fet_controls(cx: &mut Context) {
             components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.fet_output_db);
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.comp_attack_ms);
-            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.comp_release_ms);
+            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.fet_attack_ms);
+            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.fet_release_ms);
         });
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
             components::create_bool_button(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
         });
-        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_mix);
+        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
     })
     .gap(Pixels(6.0))
     .height(Auto)

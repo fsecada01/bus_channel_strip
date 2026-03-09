@@ -140,6 +140,35 @@ pub fn create_on_button<F>(
         .bottom(Pixels(0.0));
 }
 
+/// Inline labeled toggle button for BoolParam controls inside a module's control surface.
+/// Renders a label above a full-width button, matching the slider layout so heights
+/// stay consistent when mixed with param sliders in the same row.
+pub fn create_bool_button<L, F>(
+    cx: &mut Context,
+    label: &str,
+    lens: L,
+    param_map: F,
+) where
+    L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
+    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
+{
+    VStack::new(cx, |cx| {
+        Label::new(cx, label)
+            .class("param-label")
+            .height(Pixels(PARAM_LABEL_H))
+            .width(Stretch(1.0));
+        ParamButton::new(cx, lens, param_map)
+            .class("bool-button")
+            .height(Pixels(20.0))
+            .width(Stretch(1.0));
+    })
+    .class("param-control")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
 // Specialized components for common parameter types
 
 pub fn create_frequency_slider<L, F>(
