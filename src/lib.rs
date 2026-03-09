@@ -42,6 +42,26 @@ mod components;
 #[cfg(feature = "gui")]
 mod styles;
 
+/// Compute RMS across all channels from a slice-of-slices buffer view.
+/// Allocation-free; safe to call on the audio thread.
+fn rms_linear(channels: &[&mut [f32]]) -> f32 {
+    let mut sum_sq = 0.0_f32;
+    let mut n = 0_u32;
+    for ch in channels.iter() {
+        for &s in ch.iter() {
+            sum_sq += s * s;
+            n += 1;
+        }
+    }
+    if n == 0 { 0.0 } else { (sum_sq / n as f32).sqrt() }
+}
+
+/// Smoothing coefficient for auto-gain: ~5-second time constant at 86 buffers/sec.
+const AUTO_GAIN_SMOOTH: f32 = 0.9975;
+/// Maximum auto-gain correction: ±18 dB in linear.
+const AUTO_GAIN_MAX: f32 = 8.0;   // +18.06 dB
+const AUTO_GAIN_MIN: f32 = 0.125; // −18.06 dB
+
 /// Module identifiers for reordering
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Enum)]
 pub enum ModuleType {
@@ -146,6 +166,10 @@ struct BusChannelStrip {
     /// audio → GUI: per-band gain reduction for the DynEQ spectrum display.
     gr_data: Arc<spectral::GainReductionData>,
 
+    /// Smoothed auto-gain correction factor (linear, 1.0 = unity).
+    /// Updated per buffer; reset to 1.0 when auto-gain is disabled.
+    auto_gain_correction: f32,
+
     /// GUI state
     #[cfg(feature = "gui")]
     editor_state: Arc<ViziaState>,
@@ -157,6 +181,14 @@ pub struct BusChannelStripParams {
     /// these IDs remain constant, you can rename and reorder these fields as you wish. The
     /// parameters are exposed to the host in the same order they were defined. In this case, this
     /// gain parameter is stored as linear gain while the values are displayed in decibels.
+    /// Global bypass — passes audio through without touching any module.
+    #[id = "global_bypass"]
+    pub global_bypass: BoolParam,
+
+    /// Global auto-gain — compensates for loudness changes introduced by the chain.
+    #[id = "global_auto_gain"]
+    pub global_auto_gain: BoolParam,
+
     #[id = "gain"]
     pub gain: FloatParam,
 
@@ -558,6 +590,7 @@ impl Default for BusChannelStrip {
             analysis_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             analysis_result: Arc::new(spectral::AnalysisResult::new()),
             gr_data: Arc::new(spectral::GainReductionData::new()),
+            auto_gain_correction: 1.0,
             #[cfg(feature = "gui")]
             editor_state: editor::default_state(),
         }
@@ -567,6 +600,9 @@ impl Default for BusChannelStrip {
 impl Default for BusChannelStripParams {
     fn default() -> Self {
         Self {
+            global_bypass: BoolParam::new("Bypass", false),
+            global_auto_gain: BoolParam::new("Auto Gain", false),
+
             // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
             // to treat these kinds of parameters as if we were dealing with decibels. Storing this
             // as decibels is easier to work with, but requires a conversion for every sample.
@@ -1551,8 +1587,21 @@ impl Plugin for BusChannelStrip {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        // Global bypass — pass audio through untouched.
+        if self.params.global_bypass.value() {
+            return ProcessStatus::Normal;
+        }
+
+        // Auto-gain: capture input RMS before any processing.
+        let auto_gain_enabled = self.params.global_auto_gain.value();
+        let pre_rms = if auto_gain_enabled {
+            rms_linear(buffer.as_slice())
+        } else {
+            0.0
+        };
+
         // Process enabled modules based on feature flags
-        
+
         // 1) API5500 EQ Module
         #[cfg(feature = "api5500")]
         {
@@ -1904,7 +1953,26 @@ impl Plugin for BusChannelStrip {
             }
         }
 
-        // 7) Output gain
+        // 7) Auto-gain compensation (before master trim so it doesn't fight the user's gain knob).
+        if auto_gain_enabled {
+            let post_rms = rms_linear(buffer.as_slice());
+            if post_rms > 1e-6 {
+                let target = (pre_rms / post_rms).clamp(AUTO_GAIN_MIN, AUTO_GAIN_MAX);
+                self.auto_gain_correction = self.auto_gain_correction * AUTO_GAIN_SMOOTH
+                    + target * (1.0 - AUTO_GAIN_SMOOTH);
+            }
+            // Apply smoothed correction.
+            for ch in buffer.as_slice() {
+                for s in ch.iter_mut() {
+                    *s *= self.auto_gain_correction;
+                }
+            }
+        } else {
+            // Reset to unity so re-enabling starts smoothly from 1.0.
+            self.auto_gain_correction = 1.0;
+        }
+
+        // 8) Master output trim (intentional user gain, always last).
         for channel_samples in buffer.iter_samples() {
             let gain = self.params.gain.smoothed.next();
             for sample in channel_samples {
