@@ -338,6 +338,23 @@ pub(crate) fn create(
 
 fn create_master_section(cx: &mut Context) {
     HStack::new(cx, |cx| {
+        // Global bypass — prominently placed so it's always reachable.
+        VStack::new(cx, |cx| {
+            Label::new(cx, "BYPASS")
+                .class("param-label")
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
+            components::create_bypass_button(cx, "BYPASS", |p| &p.global_bypass);
+        })
+        .height(Auto)
+        .width(Pixels(80.0))
+        .gap(Pixels(4.0))
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+
+        // Auto-gain compensation toggle.
+        components::create_bool_button(cx, "AUTO GAIN", Data::params, |p| &p.global_auto_gain);
+
         Label::new(cx, "MASTER")
             .class("master-label");
         components::create_gain_slider(cx, "Gain", Data::params, |p| &p.gain);
@@ -495,21 +512,62 @@ fn build_controls_for_type(cx: &mut Context, mt: ModuleType) {
 
 fn build_api5500_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // ── Shelf bands: LF and HF side-by-side ──────────────────────────────
+        HStack::new(cx, |cx| {
+            // Left: LF low shelf
+            VStack::new(cx, |cx| {
+                Label::new(cx, "LF SHELF")
+                    .class("section-label")
+                    .height(Pixels(16.0))
+                    .width(Stretch(1.0));
+                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.lf_freq);
+                components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.lf_gain);
+            })
+            .gap(Pixels(4.0))
+            .height(Auto)
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
+
+            // Right: HF high shelf
+            VStack::new(cx, |cx| {
+                Label::new(cx, "HF SHELF")
+                    .class("section-label")
+                    .height(Pixels(16.0))
+                    .width(Stretch(1.0));
+                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.hf_freq);
+                components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.hf_gain);
+            })
+            .gap(Pixels(4.0))
+            .height(Auto)
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
+        })
+        .gap(Pixels(8.0))
+        .height(Auto)
+        .width(Stretch(1.0))
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+
+        // ── Parametric bands: LMF → MF → HMF (low to high) ──────────────────
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "HF", Data::params, |p| &p.hf_freq);
-            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.hf_gain);
-        });
-        components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "MF", Data::params, |p| &p.lmf_freq);
+            components::create_frequency_slider(cx, "LMF", Data::params, |p| &p.lmf_freq);
             components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.lmf_gain);
             components::create_param_slider(cx, "Q", Data::params, |p| &p.lmf_q);
         });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "LF", Data::params, |p| &p.lf_freq);
-            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.lf_gain);
+            components::create_frequency_slider(cx, "MF", Data::params, |p| &p.mf_freq);
+            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.mf_gain);
+            components::create_param_slider(cx, "Q", Data::params, |p| &p.mf_q);
+        });
+        components::module_row(cx, |cx| {
+            components::create_frequency_slider(cx, "HMF", Data::params, |p| &p.hmf_freq);
+            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.hmf_gain);
+            components::create_param_slider(cx, "Q", Data::params, |p| &p.hmf_q);
         });
     })
-    .gap(Pixels(4.0))
+    .gap(Pixels(6.0))
     .height(Auto)
     .width(Stretch(1.0))
     .top(Pixels(0.0))
@@ -567,14 +625,18 @@ fn build_classic_controls(cx: &mut Context) {
     .bottom(Pixels(0.0));
 }
 
-/// VCA model control surface — Threshold, Ratio, Attack, Release.
-/// Height: Auto — 4 sliders with 6px gaps.
+/// VCA model control surface — Threshold, Ratio, Attack, Release, Mix.
 fn build_vca_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        components::create_param_slider(cx, "VCA THRESH", Data::params, |p| &p.vca_thresh);
-        components::create_ratio_slider(cx, "VCA RATIO", Data::params, |p| &p.vca_ratio);
-        components::create_param_slider(cx, "VCA ATTACK", Data::params, |p| &p.vca_atk);
-        components::create_param_slider(cx, "VCA RELEASE", Data::params, |p| &p.vca_rel);
+        components::module_row(cx, |cx| {
+            components::create_param_slider(cx, "THRESH", Data::params, |p| &p.vca_thresh);
+            components::create_ratio_slider(cx, "RATIO", Data::params, |p| &p.vca_ratio);
+        });
+        components::module_row(cx, |cx| {
+            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.comp_attack_ms);
+            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.comp_release_ms);
+        });
+        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_mix);
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -583,15 +645,18 @@ fn build_vca_controls(cx: &mut Context) {
     .bottom(Pixels(0.0));
 }
 
-/// Optical model control surface — Threshold, Speed, Character.
-/// Height: 3 sliders × ~40px + gaps + spacer ≈ 196px (equal to VCA surface).
+/// Optical model control surface — Threshold, Character, Attack, Release, Mix.
 fn build_optical_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        components::create_param_slider(cx, "OPT THRESH", Data::params, |p| &p.opt_thresh);
-        components::create_param_slider(cx, "OPT SPEED", Data::params, |p| &p.opt_speed);
-        components::create_param_slider(cx, "OPT CHARACTER", Data::params, |p| &p.opt_char);
-        // Spacer to match 4-slider VCA height and prevent slot resize on model switch.
-        Element::new(cx).height(Pixels(46.0));
+        components::module_row(cx, |cx| {
+            components::create_param_slider(cx, "THRESH", Data::params, |p| &p.opt_thresh);
+            components::create_param_slider(cx, "CHAR %", Data::params, |p| &p.opt_char);
+        });
+        components::module_row(cx, |cx| {
+            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.comp_attack_ms);
+            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.comp_release_ms);
+        });
+        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_mix);
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -600,17 +665,23 @@ fn build_optical_controls(cx: &mut Context) {
     .bottom(Pixels(0.0));
 }
 
-/// 1176-style FET compressor control surface — Input, Output, Attack, Release, Ratio, Auto-Release.
-/// Height: Auto — 6 rows (5 sliders + 1 enum row) with 6px gaps.
+/// 1176-style FET compressor control surface — Input, Output, Attack, Release, Ratio, Auto-Release, Mix.
 #[cfg(feature = "buttercomp2")]
 fn build_fet_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        components::create_gain_slider(cx, "INPUT", Data::params, |p| &p.fet_input_db);
-        components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.fet_output_db);
-        components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.fet_attack_ms);
-        components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.fet_release_ms);
-        components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
-        components::create_param_slider(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
+        components::module_row(cx, |cx| {
+            components::create_gain_slider(cx, "INPUT", Data::params, |p| &p.fet_input_db);
+            components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.fet_output_db);
+        });
+        components::module_row(cx, |cx| {
+            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.comp_attack_ms);
+            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.comp_release_ms);
+        });
+        components::module_row(cx, |cx| {
+            components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
+            components::create_bool_button(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
+        });
+        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_mix);
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -621,19 +692,29 @@ fn build_fet_controls(cx: &mut Context) {
 
 fn build_pultec_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // LOW FREQUENCY: boost freq + gain side-by-side, attenuation below
         components::module_section(cx, "LOW FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "BOOST", Data::params, |p| &p.pultec_lf_boost_freq);
-                components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.pultec_lf_boost_gain);
+                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.pultec_lf_boost_freq);
+                components::create_gain_slider(cx, "BOOST", Data::params, |p| &p.pultec_lf_boost_gain);
+                components::create_gain_slider(cx, "ATTEN", Data::params, |p| &p.pultec_lf_cut_gain);
             });
-            components::create_gain_slider(cx, "ATTEN", Data::params, |p| &p.pultec_lf_cut_gain);
         });
+        // HIGH FREQUENCY: boost and cut each on their own row (freq + gain/bw)
         components::module_section(cx, "HIGH FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "BOOST", Data::params, |p| &p.pultec_hf_boost_freq);
-                components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.pultec_hf_boost_gain);
+                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.pultec_hf_boost_freq);
+                components::create_gain_slider(cx, "BOOST", Data::params, |p| &p.pultec_hf_boost_gain);
+                components::create_param_slider(cx, "BW", Data::params, |p| &p.pultec_hf_boost_bandwidth);
             });
-            components::create_param_slider(cx, "TUBE", Data::params, |p| &p.pultec_tube_drive);
+            components::module_row(cx, |cx| {
+                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| &p.pultec_hf_cut_freq);
+                components::create_gain_slider(cx, "ATTEN", Data::params, |p| &p.pultec_hf_cut_gain);
+            });
+        });
+        // OUTPUT: tube drive separate from the EQ bands
+        components::module_section(cx, "OUTPUT", |cx| {
+            components::create_param_slider(cx, "TUBE DRIVE", Data::params, |p| &p.pultec_tube_drive);
         });
     })
     .gap(Pixels(4.0))
@@ -655,12 +736,15 @@ fn build_dynamic_eq_controls(cx: &mut Context) {
             .class("dyneq-card-desc")
             .height(Auto)
             .width(Stretch(1.0));
-        // OPEN button — flips to the full DynEQ back view
-        VStack::new(cx, |cx| {
+        // OPEN button — flips to the full DynEQ back view.
+        // Uses Button::new (not VStack) so the full 40px hit area is reliably clickable;
+        // VStack + on_press can have dead zones where child labels shadow parent events.
+        Button::new(cx, |cx| {
             Label::new(cx, "OPEN EDITOR  \u{25B6}")
                 .class("dyneq-open-label")
-                .height(Pixels(18.0))
-                .width(Stretch(1.0));
+                .width(Stretch(1.0))
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0))
         })
         .class("dyneq-open-btn")
         .on_press(|cx| cx.emit(AppEvent::OpenDynEq))
@@ -718,11 +802,20 @@ impl View for SpectrumCanvas {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         use vizia_plug::vizia::vg;
 
-        // Pull latest audio-thread data (lock-free: AtomicU32 bins, Acquire on dirty flag).
-        {
-            let mut bins = self.display_bins.borrow_mut();
-            self.spectrum_data.read_into_slice(&mut bins);
+        // Early-out when the canvas is hidden (display:none gives zero bounds).
+        // Without this guard, cx.needs_redraw() at the end would spin the render loop
+        // at 60 fps even when the DynEQ view is closed, competing with event processing
+        // for all other interactions (model switching, drag handles, etc.).
+        let bounds = cx.bounds();
+        if bounds.w < 1.0 || bounds.h < 1.0 {
+            return;
         }
+
+        // Pull latest audio-thread data. Returns true if new bins arrived this frame.
+        let has_new_data = {
+            let mut bins = self.display_bins.borrow_mut();
+            self.spectrum_data.read_into_slice(&mut bins)
+        };
         // Pull overlap bins from the last analysis (Relaxed — display-only, staleness is fine).
         {
             let mut overlap = self.display_overlap.borrow_mut();
@@ -736,7 +829,6 @@ impl View for SpectrumCanvas {
 
         let bins    = self.display_bins.borrow();
         let overlap = self.display_overlap.borrow();
-        let bounds  = cx.bounds();
 
         // ── Background ──────────────────────────────────────────────────────
         let bg_rect = vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h);
@@ -747,6 +839,7 @@ impl View for SpectrumCanvas {
 
         let n = bins.len();
         if n == 0 {
+            // No data yet — request one more frame in case audio starts soon.
             cx.needs_redraw();
             return;
         }
@@ -886,7 +979,12 @@ impl View for SpectrumCanvas {
         stroke_paint.set_anti_alias(true);
         canvas.draw_path(&line, &stroke_paint);
 
-        // Continuous redraw — keep the spectrum animated at the GUI frame rate.
+        // Always request the next frame when visible. The bounds guard above prevents
+        // redraws when hidden. The has_new_data flag only tells us if the audio thread
+        // wrote this frame — but skipping redraws on false would permanently stall the
+        // spectrum if the GUI polls faster than the audio thread writes (which happens
+        // regularly at 60fps vs ~86 buffers/sec with variable timing).
+        let _ = has_new_data;
         cx.needs_redraw();
     }
 }
@@ -984,26 +1082,27 @@ macro_rules! dyneq_band_col {
             dyneq_slider!(cx, "THRESH", |p| &p.$thresh);
             dyneq_slider!(cx, "GAIN",   |p| &p.$gain);
 
-            // Tier 2 — hidden by default; revealed when band is expanded
+            // Tier 2 — conditionally built when band is expanded.
+            // Uses Binding::new rather than .display() because .display(lens.map(...))
+            // reliably shows elements but does not reliably re-hide them in vizia 0.3.
+            // Binding destroys and rebuilds its subtree on every gen change, guaranteeing
+            // the correct show/hide state in both directions.
             {
                 let expand_arc_tier2 = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
-                VStack::new(cx, |cx| {
-                    dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
-                    dyneq_slider!(cx, "Q",      |p| &p.$q);
-                    dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
-                    dyneq_slider!(cx, "REL ms", |p| &p.$rel);
-                })
-                .width(Stretch(1.0))
-                .height(Auto)
-                .top(Pixels(0.0))
-                .bottom(Pixels(0.0))
-                .display(Data::dyneq_expand_gen.map(move |_| {
+                Binding::new(cx, Data::dyneq_expand_gen, move |cx, _gen| {
                     if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
-                        Display::Flex
-                    } else {
-                        Display::None
+                        VStack::new(cx, |cx| {
+                            dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
+                            dyneq_slider!(cx, "Q",      |p| &p.$q);
+                            dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
+                            dyneq_slider!(cx, "REL ms", |p| &p.$rel);
+                        })
+                        .width(Stretch(1.0))
+                        .height(Auto)
+                        .top(Pixels(0.0))
+                        .bottom(Pixels(0.0));
                     }
-                }));
+                });
             }
         })
         .class("dyneq-band-col")
@@ -1167,19 +1266,28 @@ fn build_dyneq_back_view(
 
 fn build_transformer_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // Model + compression on one row
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "MODEL", Data::params, |p| &p.transformer_model);
             components::create_ratio_slider(cx, "COMP", Data::params, |p| &p.transformer_compression);
         });
-        components::module_section(cx, "DRIVE", |cx| {
+        // Input stage: drive + saturation paired
+        components::module_section(cx, "INPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "INPUT", Data::params, |p| &p.transformer_input_drive);
-                components::create_param_slider(cx, "OUTPUT", Data::params, |p| &p.transformer_output_drive);
+                components::create_param_slider(cx, "DRIVE", Data::params, |p| &p.transformer_input_drive);
+                components::create_param_slider(cx, "SAT", Data::params, |p| &p.transformer_input_saturation);
             });
         });
-        components::module_section(cx, "CHARACTER", |cx| {
+        // Output stage: drive + saturation paired
+        components::module_section(cx, "OUTPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "SAT", Data::params, |p| &p.transformer_input_saturation);
+                components::create_param_slider(cx, "DRIVE", Data::params, |p| &p.transformer_output_drive);
+                components::create_param_slider(cx, "SAT", Data::params, |p| &p.transformer_output_saturation);
+            });
+        });
+        // Tone shaping: low/high response
+        components::module_section(cx, "TONE", |cx| {
+            components::module_row(cx, |cx| {
                 components::create_param_slider(cx, "LOW", Data::params, |p| &p.transformer_low_response);
                 components::create_param_slider(cx, "HIGH", Data::params, |p| &p.transformer_high_response);
             });
