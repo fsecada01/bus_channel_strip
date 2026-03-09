@@ -14,8 +14,8 @@ For full release notes, binaries, and platform-specific archives, see the [GitHu
 Three new compressor models join the original Airwindows Classic algorithm. Select the model from the dropdown at the top of the ButterComp2 module panel; the controls below update to match.
 
 - **VCA** — Hard-knee voltage-controlled amplifier compression. Fast, precise transient response. Threshold (dB), Ratio (1–20), Attack (ms), Release (ms), Character % (0–100, controls 1176-style color), Mix. Use on drum buses and any source where you want predictable, controllable gain reduction.
-- **Optical (Opt)** — Soft-knee program-dependent compression. Threshold (dB), Character % (0–100, controls program-dependent release behavior and tube warmth), Attack (ms), Release (ms), Mix. Use on vocals, acoustic instruments, and bass.
-- **FET** — Field-effect transistor compression driven by an input gain stage rather than a threshold control. Input (dB), Output (dB), Ratio (1–20), Attack (ms), Release (ms), Auto Release (toggle — enables program-dependent release), Mix. Use on snares, room mics, and any bus where you want forward, saturated character.
+- **Optical (Opt)** — Soft-knee program-dependent compression. Threshold (dB), Character % (0–100, controls program-dependent release behavior and tube warmth), Attack (ms), Release (ms), Mix. Use on vocal, acoustic instrument, and bass stems.
+- **FET** — Field-effect transistor compression driven by an input gain stage rather than a threshold control. Input (dB), Output (dB), Ratio (1–20), Attack (ms), Release (ms), Auto Release (toggle — enables program-dependent release), Mix. Use on drum buses and any stem where you want a forward, saturated character.
 - **Classic** — Airwindows ButterComp2 (original, unchanged). Bipolar interleaved compression with Compress, Output, and Dry/Wet. VCA, Optical, and FET are native Rust implementations; Classic compiles from Airwindows C++ via Rust FFI.
 
 ### Parameter display — integer formatting

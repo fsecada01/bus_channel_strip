@@ -19,10 +19,10 @@ Select the model from the dropdown at the top of the module panel. The controls 
 |-------|----------|-----------|
 | **Classic** | Mix bus glue, subtle cohesion | Rich, complex, harmonically dense — "the lushest glue compressor" |
 | **VCA** | Drum buses, fast transients, punch | Transparent-to-colored; hard knee; fast and precise |
-| **Optical** | Vocals, acoustic instruments, bass | Soft knee, program-dependent release, warm and musical |
-| **FET** | Snare, room mics, aggressive buss | Forward, punchy, saturated; behaves like a pushed 1176 |
+| **Optical** | Vocal bus, acoustic instrument bus, bass bus | Soft knee, program-dependent release, warm and musical |
+| **FET** | Drum bus, any stem needing forward saturated character | Forward, punchy, saturated; behaves like a pushed 1176 |
 
-**Classic** is the right starting point if you want compression you barely notice but always miss when it's bypassed. **VCA** excels when you need a quick, controllable transient response. **Optical** smooths out expressive performances without clamping down unnaturally. **FET** adds the kind of forward character that makes individual buses cut through.
+**Classic** is the right starting point if you want compression you barely notice but always miss when it's bypassed. **VCA** excels when you need a quick, controllable transient response. **Optical** smooths out expressive stems without clamping down unnaturally. **FET** adds the kind of forward character that makes a bus cut through the mix.
 
 ---
 
@@ -185,7 +185,7 @@ The Character control adjusts the optical element's response curve — how much 
 
     Very musical response on instruments with complex transient structures. Long attack preserves pick attack and hammer-on character.
   </TabItem>
-  <TabItem label="Bass DI Smoothing">
+  <TabItem label="Bass Bus">
     | Control | Value |
     |---------|-------|
     | Threshold | `-14` dB |
@@ -194,7 +194,7 @@ The Character control adjusts the optical element's response curve — how much 
     | Release | `180` ms |
     | Mix | `1.0` |
 
-    Evens out note-to-note level variation common in fingerstyle and slap bass. Character adds warmth that complements direct-recorded bass tone.
+    Glues the bass stem together — DI, amp mic, room mic, and any sub or sample layers summed into a coherent low-end foundation. Character adds warmth that helps the different sources blend into a single instrument.
   </TabItem>
 </Tabs>
 
@@ -230,7 +230,7 @@ Field-effect transistor compression is associated with fast, aggressive, forward
     | Auto Release | Off |
     | Mix | `0.70` |
 
-    Short attack grabs the snap; moderate release lets the snare ring naturally. Compensate output to match bypass level, then increase Mix until the snare sits forward in the mix.
+    Fast attack unifies the transient across top mic, bottom mic, room mics, and overhead bleed — all the sources on the snare bus hit as one. Moderate release allows the combined sustain to decay naturally. Compensate output to match bypass level, then increase Mix until the snare bus sits forward in the mix.
   </TabItem>
   <TabItem label="Room Mic Crush">
     | Control | Value |

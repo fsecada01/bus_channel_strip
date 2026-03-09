@@ -99,7 +99,7 @@ Eliminate low-mid buildup between drum hits or guitar chords:
 
 ### Dynamic Presence Enhancement
 
-Increase upper-mid presence on transient peaks — snare and vocals cut through on loud passages:
+Increase upper-mid presence on transient peaks — when the bus gets loud, the targeted frequency range opens up, adding definition to the collective sound:
 
 | Control | Band 3 |
 |---------|--------|

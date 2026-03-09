@@ -70,7 +70,7 @@ Each technique below links to the full module reference. See [API5500 EQ](/bus_c
 
 ## Vocal Bus
 
-**Goal:** Polished, even, present; de-essed; forward in the mix
+**Goal:** Polished, even, present; de-essed; all vocal layers — lead, doubles, harmonies, ad-libs, and BV returns — forward as one cohesive element
 
 | Module | Settings |
 |--------|----------|
@@ -83,7 +83,7 @@ Each technique below links to the full module reference. See [API5500 EQ](/bus_c
 
 - Use the Dynamic EQ Band 3 de-essing approach rather than a separate de-esser — it integrates into the gain staging chain and lets you set a precise frequency-dependent threshold
 - Vintage Transformer at very low drive adds barely perceptible harmonics that give vocals that "recorded through analog hardware" quality
-- Punch at Mix 0.70 allows transient variation in the vocal delivery to come through — fully wet limiter on vocals can make them sound mechanical
+- Punch at Mix 0.70 allows the natural transient variation across the vocal stem to come through — a fully wet limiter on a vocal bus can make the sum sound mechanical and homogenized
 
 ---
 
