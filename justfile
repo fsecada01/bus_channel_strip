@@ -63,17 +63,9 @@ bundle-profile:
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
-# Install VST3 to system plugin directory
-install-vst3:
-    powershell -NoProfile -Command "if(-not([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){Write-Host 'ERROR: admin rights required - re-run from an elevated terminal (Run as Administrator)';exit 1}; if(-not(Test-Path 'target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3')){Write-Host 'ERROR: bundle not found - run just bundle first';exit 1}; New-Item -ItemType Directory -Force '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win'|Out-Null; Copy-Item -Force 'target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3' '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3'; if(Test-Path '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3'){Write-Host ('  [OK] VST3 installed (' + [math]::Round((Get-Item '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3').Length/1MB,1) + ' MB) -> {{VST3_DIR}}\Bus-Channel-Strip.vst3')}else{Write-Host 'ERROR: copy failed - check permissions';exit 1}"
-
-# Install CLAP to system plugin directory
-install-clap:
-    powershell -NoProfile -Command "if(-not([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){Write-Host 'ERROR: admin rights required - re-run from an elevated terminal (Run as Administrator)';exit 1}; if(-not(Test-Path 'target\bundled\Bus-Channel-Strip.clap')){Write-Host 'ERROR: bundle not found - run just bundle first';exit 1}; New-Item -ItemType Directory -Force '{{CLAP_DIR}}'|Out-Null; Copy-Item -Force 'target\bundled\Bus-Channel-Strip.clap' '{{CLAP_DIR}}\Bus-Channel-Strip.clap'; if(Test-Path '{{CLAP_DIR}}\Bus-Channel-Strip.clap'){Write-Host ('  [OK] CLAP installed (' + [math]::Round((Get-Item '{{CLAP_DIR}}\Bus-Channel-Strip.clap').Length/1MB,1) + ' MB) -> {{CLAP_DIR}}\Bus-Channel-Strip.clap')}else{Write-Host 'ERROR: copy failed - check permissions';exit 1}"
-
-# Install both formats
-install: install-vst3 install-clap
-    @echo   Done. Rescan plugins in your DAW.
+# Install VST3 + CLAP to system plugin directories (requires admin)
+install:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -Vst3Dir "{{VST3_DIR}}" -ClapDir "{{CLAP_DIR}}"
 
 # Bundle and install in one step
 deploy: bundle install
