@@ -7,7 +7,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Bus Channel Strip',
-      description: 'Professional 6-module bus processor — VST3 & CLAP',
+      description: 'Six classic processors. One signal chain. Mix, compress, shape, and maximize — with analog transformer character.',
       social: {
         github: 'https://github.com/fsecada01/bus_channel_strip',
       },
@@ -19,7 +19,7 @@ export default defineConfig({
       favicon: '/bus_channel_strip/favicon.svg',
       sidebar: [
         { label: 'Overview', link: '/' },
-        { label: 'Installation', link: '/install/' },
+        { label: 'Getting Started', link: '/install/' },
         {
           label: 'Modules',
           items: [
@@ -33,17 +33,28 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Presets & Techniques',
+          label: 'Techniques & Presets',
           items: [
             { label: 'Settings & Techniques', link: '/presets/techniques/' },
             { label: 'Genre Signal Chains', link: '/presets/genres/' },
             { label: 'Instrument Buses', link: '/presets/buses/' },
           ],
         },
-        { label: 'Contributing', link: '/contributing/' },
-        { label: 'Architecture', link: '/architecture/' },
-        { label: 'Changelog', link: '/changelog/' },
-        { label: 'Parameter Reference', link: '/parameters/' },
+        {
+          label: 'Developer Reference',
+          collapsed: true,
+          items: [
+            { label: 'Architecture', link: '/architecture/' },
+            { label: 'Parameter Reference', link: '/parameters/' },
+            { label: 'Contributing', link: '/contributing/' },
+          ],
+        },
+        {
+          label: 'Release Notes',
+          items: [
+            { label: 'Changelog', link: '/changelog/' },
+          ],
+        },
       ],
     }),
   ],

@@ -5,7 +5,7 @@ template: splash
 hero:
   tagline: Six classic processors. One signal chain. Zero compromises.
   actions:
-    - text: Download v0.3.0
+    - text: Download v0.4.0
       link: https://github.com/fsecada01/bus_channel_strip/releases/latest
       icon: external
       variant: primary
@@ -16,6 +16,14 @@ hero:
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<Card title="New in v0.4.0">
+**ButterComp2 now ships with four compression models.** Choose from the original Airwindows Classic bipolar glue, a hard-knee VCA with 1176-style character, a soft-knee Optical with program-dependent release, or an aggressive FET driven by input gain. Every model includes a parallel Mix control for NY-style blending without aux routing.
+
+Also in this release: global bypass with zero processing overhead, global Auto Gain compensation, and integer display for all threshold, ratio, EQ gain, and timing parameters — no more long decimals in automation lanes.
+
+[See the full changelog](/bus_channel_strip/changelog/)
+</Card>
 
 ## Signal Chain
 
@@ -40,27 +48,27 @@ Every module is independently bypassable, fully automatable, and reorderable at 
 <div class="module-grid">
   <div class="module-card card-eq">
     <h3>API5500 EQ</h3>
-    <p>5-band semi-parametric EQ modeled on the API 5500 console equalizer. HPF, low/high shelf, and two parametric bells.</p>
+    <p>5-band semi-parametric EQ modeled on the API 5500 console equalizer. LF/HF shelves, and three parametric bands (LMF, MF, HMF) ordered low to high.</p>
   </div>
   <div class="module-card card-comp">
     <h3>ButterComp2</h3>
-    <p>Airwindows bipolar interleaved compression. Described as the richest glue compressor available. Built-in NY parallel blend.</p>
+    <p>Four compression models in one module: Classic Airwindows bipolar glue, VCA (1176-style character), Optical (program-dependent release), and FET (aggressive drive). Built-in NY parallel Mix on every model.</p>
   </div>
   <div class="module-card card-pultec">
     <h3>Pultec EQ</h3>
-    <p>EQP-1A style passive equalizer with simultaneous boost/cut low-end shaping. Includes tube saturation stage.</p>
+    <p>EQP-1A style passive equalizer with simultaneous boost/cut low-end shaping. HF boost bandwidth and HF cut controls visible. Includes tube saturation stage.</p>
   </div>
   <div class="module-card card-dyneq">
     <h3>Dynamic EQ</h3>
-    <p>4-band frequency-dependent dynamics with Compress, Expand, and Gate modes. Real-time spectral analyzer with GR metering.</p>
+    <p>4-band frequency-dependent dynamics with Compress, Expand, and Gate modes. Real-time spectral analyzer with GR metering. Optional sidechain masking analysis.</p>
   </div>
   <div class="module-card card-xfm">
     <h3>Transformer</h3>
-    <p>Vintage/Modern/British/American transformer coloration. Independent input and output stages. Harmonic saturation and frequency shaping.</p>
+    <p>Vintage/Modern/British/American transformer coloration. Structured INPUT / OUTPUT / TONE sections with independent saturation and frequency shaping at each stage.</p>
   </div>
   <div class="module-card card-punch">
     <h3>Punch</h3>
-    <p>Transparent clipper with Hard/Soft/Cubic modes, up to 8× oversampling, and pre-clip transient shaper for loudness maximization.</p>
+    <p>Transparent clipper with Hard/Soft/Cubic modes, up to 8x oversampling, and pre-clip transient shaper for loudness maximization without pumping.</p>
   </div>
 </div>
 

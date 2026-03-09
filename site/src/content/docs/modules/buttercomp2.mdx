@@ -1,48 +1,58 @@
 ---
 title: ButterComp2
-description: Airwindows bipolar interleaved compression system. Controls, NY parallel technique, and tone character.
+description: Four-model compression system — Classic Airwindows bipolar glue, VCA, Optical, and FET character. NY parallel blend on every model.
 ---
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 <span class="module-badge badge-comp">Compressor — Position 2</span>
 
-Chris Johnson's ButterComp2 is described as *"the single richest, lushest glue compressor."* Rather than modeling a traditional VCA or optical circuit, it implements **four independent compressors per channel in a bipolar, interleaved configuration** — producing a complex, harmonically rich gain reduction character that feels more like analog hardware than conventional plugin compressors.
+ButterComp2 offers four distinct compression models in a single module. Each model captures a different circuit philosophy — from the unique bipolar interleaved character of the original Airwindows algorithm to the fast transient snap of a FET design. All four share the same NY parallel blend approach: you always retain full control over how much compressed signal mixes with the dry input.
 
-:::tip[Quick Start]
-For transparent mix-bus glue: set Compress to **0.3**, Output to **0.6**, Dry/Wet to **0.35**. The ButterComp2 works best with subtle settings — push Compress past 0.7 only for deliberate NY-style parallel saturation.
-:::
-
-<Aside type="note" title="Airwindows FFI">
-ButterComp2 is compiled from [Chris Johnson's C++ source](https://github.com/airwindows/airwindows) via Rust FFI. Audio processing is called once per buffer (O(1) FFI overhead) for real-time safety.
-</Aside>
+Select the model from the dropdown at the top of the module panel. The controls below the selector update to match the chosen model.
 
 ---
 
-## Controls
+## Choosing a Model
+
+| Model | Best For | Character |
+|-------|----------|-----------|
+| **Classic** | Mix bus glue, subtle cohesion | Rich, complex, harmonically dense — "the lushest glue compressor" |
+| **VCA** | Drum buses, fast transients, punch | Transparent-to-colored; hard knee; fast and precise |
+| **Optical** | Vocals, acoustic instruments, bass | Soft knee, program-dependent release, warm and musical |
+| **FET** | Snare, room mics, aggressive buss | Forward, punchy, saturated; behaves like a pushed 1176 |
+
+**Classic** is the right starting point if you want compression you barely notice but always miss when it's bypassed. **VCA** excels when you need a quick, controllable transient response. **Optical** smooths out expressive performances without clamping down unnaturally. **FET** adds the kind of forward character that makes individual buses cut through.
+
+---
+
+## Classic (Airwindows ButterComp2)
+
+Chris Johnson's original ButterComp2 implements **four independent compressors per channel in a bipolar, interleaved configuration** — producing a complex, harmonically rich gain reduction character that feels more like analog hardware than conventional plugin compressors.
+
+<Aside type="note" title="Airwindows FFI">
+The Classic model is compiled from [Chris Johnson's C++ source](https://github.com/airwindows/airwindows) via Rust FFI. Audio processing is called once per buffer — O(1) FFI overhead — for real-time safety. VCA, Optical, and FET are native Rust implementations.
+</Aside>
+
+### Controls
 
 | Control | Range | Description |
 |---------|-------|-------------|
 | **Compress** | 0.0 – 1.0 | Overall compression depth. Values above 0.6 become aggressive. Sweet spot: 0.30–0.55 for glue, 0.65–0.82 for NY parallel. |
 | **Output** | 0.0 – 1.0 | Post-compression makeup gain. Start at 0.75–0.85 and trim to match bypass level. |
-| **Dry/Wet** | 0.0 – 1.0 | Built-in parallel blend. `0` = fully dry, `1` = fully wet. This is the NY parallel blend control. |
-| **Bypass** | On/Off | Bypasses all processing. |
+| **Dry/Wet** | 0.0 – 1.0 | Parallel blend. `0.0` = fully dry, `1.0` = fully wet. This is the NY parallel blend control. |
 
----
-
-## NY-Style Parallel Compression
-
-The **New York compression** technique blends a heavily-compressed copy underneath the dry signal. The compressed signal brings up room ambience, subtle details, and low-level sustain without affecting transients (which come from the dry path).
+### Quick-Start Settings
 
 <Tabs>
-  <TabItem label="Subtle Glue (Mix Bus)">
+  <TabItem label="Subtle Mix Bus Glue">
     | Control | Value |
     |---------|-------|
     | Compress | `0.42` |
     | Output | `0.82` |
     | Dry/Wet | `0.55` |
 
-    Gentle cohesion that makes elements feel related without obvious compression artifacts.
+    Gentle cohesion that makes elements feel related without obvious compression artifacts. A good starting point for any genre where the mix bus is already balanced and just needs to breathe together.
   </TabItem>
   <TabItem label="NY Drums (Classic)">
     | Control | Value |
@@ -51,37 +61,221 @@ The **New York compression** technique blends a heavily-compressed copy undernea
     | Output | `0.90` |
     | Dry/Wet | `0.33` |
 
-    Aggressive compression blended sparingly — brings up room, snare rattle, hi-hat bleed. The dry signal handles transients.
+    Aggressive compression blended sparingly beneath the dry signal. Brings up room ambience, snare rattle, and hi-hat bleed. Transients ride through untouched on the dry path.
   </TabItem>
-  <TabItem label="Heavy Glue (Electronic)">
+  <TabItem label="Heavy Electronic Glue">
     | Control | Value |
     |---------|-------|
     | Compress | `0.62` |
     | Output | `0.95` |
     | Dry/Wet | `0.78` |
 
-    All elements welded together. Suitable for electronic music where density > dynamics.
+    All elements welded into a single mass. Appropriate for electronic music where density and loudness take priority over preserved dynamics.
   </TabItem>
 </Tabs>
 
-<Aside type="tip" title="Finding the NY Blend Point">
-Start with Dry/Wet at **0.25** and slowly increase while listening to the *bottom* of your mix — the subtle details between main elements. Stop when you hear the sustain and room character "fill in." Usually this is 0.28–0.45 for drum buses.
-</Aside>
+### Tone Character by Compress Value
 
----
-
-## Tone Character
-
-| Compress value | Character |
-|----------------|-----------|
-| 0.20 – 0.35 | Transparent, barely perceptible gain reduction, mainly adds harmonic glue |
+| Compress | Character |
+|----------|-----------|
+| 0.20 – 0.35 | Transparent — barely perceptible gain reduction, mainly adds harmonic glue |
 | 0.35 – 0.55 | Musical glue, sustain enhancement, gel between elements |
 | 0.55 – 0.70 | Assertive compression, audible gain reduction, dense character |
 | 0.70 – 0.85 | Heavy compression — use lower Dry/Wet for NY parallel blend |
 | 0.85 – 1.00 | Maximum compression — distortion character at high Dry/Wet values |
 
+---
+
+## VCA
+
+Hard-knee voltage-controlled amplifier compression. The fastest and most controllable of the four models. Behaves like a precision gain-reduction element — what you set is what you get, with minimal program dependency. Add Character to introduce 1176-style harmonic coloration as the circuit is pushed.
+
+### Controls
+
+| Control | Range | Description |
+|---------|-------|-------------|
+| **Threshold** | -60 – 0 dB | Level at which gain reduction begins. Displayed as an integer dB value. |
+| **Ratio** | 1 – 20 | Compression ratio above threshold. 2–4 for gentle control, 8+ for limiting behavior. |
+| **Attack** | ms (integer) | Time for gain reduction to engage after the signal crosses threshold. Shorter values preserve less transient. |
+| **Release** | ms (integer) | Time for gain reduction to recover after the signal falls below threshold. |
+| **Character %** | 0 – 100 | Controls VCA circuit flavor and harmonic color. At 0, the model is clean and transparent. Higher values introduce 1176-style saturation and forward character. |
+| **Mix** | 0.0 – 1.0 | Parallel blend between dry input and compressed signal. NY parallel control. |
+
+### Quick-Start Settings
+
+<Tabs>
+  <TabItem label="Drum Bus Punch">
+    | Control | Value |
+    |---------|-------|
+    | Threshold | `-18` dB |
+    | Ratio | `4` |
+    | Attack | `5` ms |
+    | Release | `80` ms |
+    | Character % | `30` |
+    | Mix | `0.60` |
+
+    Catches peaks quickly while leaving enough attack for kick and snare to cut. Character adds presence without obvious coloration.
+  </TabItem>
+  <TabItem label="Aggressive Parallel (1176-Style)">
+    | Control | Value |
+    |---------|-------|
+    | Threshold | `-24` dB |
+    | Ratio | `12` |
+    | Attack | `1` ms |
+    | Release | `50` ms |
+    | Character % | `75` |
+    | Mix | `0.35` |
+
+    Heavily compressed signal blended in for energy and forward presence. The dry signal preserves transient attack; the compressed signal adds density and color.
+  </TabItem>
+  <TabItem label="Mix Bus Control">
+    | Control | Value |
+    |---------|-------|
+    | Threshold | `-6` dB |
+    | Ratio | `2` |
+    | Attack | `20` ms |
+    | Release | `200` ms |
+    | Character % | `15` |
+    | Mix | `0.80` |
+
+    Light ratio and slow timing for transparent mix bus control. Character kept low to preserve the work done in individual tracks and buses.
+  </TabItem>
+</Tabs>
+
+---
+
+## Optical (Opt)
+
+Optical compression uses a light-dependent resistor or equivalent photocell circuit to control gain reduction, producing a soft-knee response that follows the program material. Release time is program-dependent: it shortens during sustained loud passages and relaxes during quiet sections. This makes it forgiving on expressive, dynamic performances that would cause pumping or distortion with a VCA.
+
+The Character control adjusts the optical element's response curve — how much the release behavior tracks program dynamics and how much tonal color is introduced.
+
+### Controls
+
+| Control | Range | Description |
+|---------|-------|-------------|
+| **Threshold** | -60 – 0 dB | Level at which gain reduction begins. Displayed as an integer dB value. |
+| **Character %** | 0 – 100 | Controls program-dependent release behavior and optical tube coloration. Higher values increase both the program dependency of release and the warmth of the tonal character. |
+| **Attack** | ms (integer) | Initial gain reduction engagement time. Optical circuits are inherently slower than VCA — very short attack values may produce click artifacts on transient-heavy material. |
+| **Release** | ms (integer) | Base release time. Actual release varies with program content when Character is above 0. |
+| **Mix** | 0.0 – 1.0 | Parallel blend. NY parallel control. |
+
+### Quick-Start Settings
+
+<Tabs>
+  <TabItem label="Lead Vocal Bus">
+    | Control | Value |
+    |---------|-------|
+    | Threshold | `-16` dB |
+    | Character % | `50` |
+    | Attack | `15` ms |
+    | Release | `250` ms |
+    | Mix | `0.85` |
+
+    Soft knee keeps the compression invisible on most phrases. Program-dependent release lets the compressor breathe naturally between words and lines.
+  </TabItem>
+  <TabItem label="Acoustic Guitar / Piano Bus">
+    | Control | Value |
+    |---------|-------|
+    | Threshold | `-20` dB |
+    | Character % | `40` |
+    | Attack | `30` ms |
+    | Release | `350` ms |
+    | Mix | `0.90` |
+
+    Very musical response on instruments with complex transient structures. Long attack preserves pick attack and hammer-on character.
+  </TabItem>
+  <TabItem label="Bass DI Smoothing">
+    | Control | Value |
+    |---------|-------|
+    | Threshold | `-14` dB |
+    | Character % | `60` |
+    | Attack | `10` ms |
+    | Release | `180` ms |
+    | Mix | `1.0` |
+
+    Evens out note-to-note level variation common in fingerstyle and slap bass. Character adds warmth that complements direct-recorded bass tone.
+  </TabItem>
+</Tabs>
+
+---
+
+## FET
+
+Field-effect transistor compression is associated with fast, aggressive, forward-sounding character. The FET model is driven by an input gain stage rather than a threshold control, which means you push the compressor by increasing the input level — the same approach used by the original hardware units this style emulates. A high ratio crushes transients and creates the characteristic FET density. Auto Release enables program-dependent release behavior even in a model that is fundamentally fast and assertive.
+
+### Controls
+
+| Control | Range | Description |
+|---------|-------|-------------|
+| **Input** | dB (integer) | Drive level into the compressor stage. Higher values increase gain reduction and harmonic character. |
+| **Output** | dB (integer) | Makeup gain after compression. Compensate for the level reduction caused by high Input settings. |
+| **Ratio** | 1 – 20 | Compression ratio. At maximum (20:1), behaves as a limiter. |
+| **Attack** | ms (integer) | Gain reduction engagement time. Very fast attacks (1–3 ms) produce the signature FET "all buttons in" density. |
+| **Release** | ms (integer) | Base release time. Overridden by program content when Auto Release is enabled. |
+| **Auto Release** | Toggle | Enables program-dependent release. The release time shortens on sustained loud signals and relaxes on quieter passages, reducing pumping at aggressive settings. |
+| **Mix** | 0.0 – 1.0 | Parallel blend. NY parallel control. |
+
+### Quick-Start Settings
+
+<Tabs>
+  <TabItem label="Snare Bus">
+    | Control | Value |
+    |---------|-------|
+    | Input | `+6` dB |
+    | Output | `-4` dB |
+    | Ratio | `8` |
+    | Attack | `2` ms |
+    | Release | `45` ms |
+    | Auto Release | Off |
+    | Mix | `0.70` |
+
+    Short attack grabs the snap; moderate release lets the snare ring naturally. Compensate output to match bypass level, then increase Mix until the snare sits forward in the mix.
+  </TabItem>
+  <TabItem label="Room Mic Crush">
+    | Control | Value |
+    |---------|-------|
+    | Input | `+12` dB |
+    | Output | `-8` dB |
+    | Ratio | `20` |
+    | Attack | `5` ms |
+    | Release | `120` ms |
+    | Auto Release | On |
+    | Mix | `0.45` |
+
+    Extreme compression on room mics blended in parallel for the exaggerated ambient character common in alternative and rock production.
+  </TabItem>
+  <TabItem label="Bus Density">
+    | Control | Value |
+    |---------|-------|
+    | Input | `+4` dB |
+    | Output | `-2` dB |
+    | Ratio | `4` |
+    | Attack | `8` ms |
+    | Release | `150` ms |
+    | Auto Release | On |
+    | Mix | `0.80` |
+
+    Moderate drive with Auto Release keeps the mix breathing while adding the forward, present character that separates FET from cleaner compressor styles.
+  </TabItem>
+</Tabs>
+
+---
+
+## NY-Style Parallel Compression
+
+The **Mix** control on every model (and Dry/Wet on Classic) implements parallel compression directly in the module — no aux routing required. The compressed signal is mixed beneath the dry signal, bringing up room ambience, sustain, and low-level detail without affecting transient attack, which comes through on the dry path.
+
+<Aside type="tip" title="Finding the Blend Point">
+Start Mix (or Dry/Wet) at **0.25** and slowly increase while listening to the subtle space between main elements — room reverb tails, string noise, breathing. Stop when you hear those details "fill in." For drum buses this is typically 0.30–0.50. For mix buses, 0.50–0.75. For sources you want fully processed (e.g., a vocal bus), run Mix at 1.0 and adjust the compressor parameters directly.
+</Aside>
+
+The technique works with all four models because the underlying principle is circuit-agnostic: a compressed copy adds density and sustain without forcing those qualities onto the transients. The model choice determines the *character* of that compressed copy — from the harmonically rich Classic to the forward, colored FET.
+
+---
+
 ## See Also
 
-- [Techniques & Presets](/bus_channel_strip/presets/techniques/) — NY parallel compression presets
+- [Techniques and Presets](/bus_channel_strip/presets/techniques/) — NY parallel compression presets
 - [Genre Signal Chains](/bus_channel_strip/presets/genres/) — genre-specific ButterComp2 settings
 - [Instrument Buses](/bus_channel_strip/presets/buses/) — bus-specific compression starting points

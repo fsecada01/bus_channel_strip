@@ -109,6 +109,7 @@
 
 .module-card:hover {
   border-color: #0ea5e9;
+  transform: translateY(-1px);
 }
 
 .module-card h3 {
@@ -178,4 +179,100 @@
   border-radius: 3px;
   padding: 0.1em 0.35em;
   font-size: 0.85em;
+}
+
+/* ─── Light-mode support for signal chain & module cards ── */
+[data-theme='light'] .signal-chain {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #1e293b;
+}
+
+[data-theme='light'] .signal-chain .arrow {
+  color: #94a3b8;
+}
+
+[data-theme='light'] .module-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme='light'] .module-card p {
+  color: #475569;
+}
+
+/* ─── NEW badge — inline pill for new features ─────────── */
+.new-badge {
+  display: inline-block;
+  padding: 0.1em 0.45em;
+  border-radius: 9999px;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  line-height: 1.6;
+  margin-left: 0.35em;
+}
+
+/* ─── Model selector demo (ButterComp2 docs) ───────────── */
+.model-selector-demo {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.model-selector-demo .model-tab {
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid #1e2d42;
+  background: #0c1220;
+  color: #94a3b8;
+}
+
+.model-selector-demo .model-tab.active {
+  background: #0ea5e9;
+  color: #000;
+  border-color: #0ea5e9;
+}
+
+[data-theme='light'] .model-selector-demo .model-tab {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+[data-theme='light'] .model-selector-demo .model-tab.active {
+  background: #0ea5e9;
+  color: #fff;
+  border-color: #0ea5e9;
+}
+
+/* ─── Highlight box — important callout ────────────────── */
+.highlight-box {
+  padding: 0.85rem 1.1rem;
+  border-left: 3px solid #0ea5e9;
+  border-radius: 0 6px 6px 0;
+  margin: 1.25rem 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+[data-theme='dark'] .highlight-box {
+  background: #071828;
+  color: #cbd5e1;
+}
+
+[data-theme='light'] .highlight-box {
+  background: #f0f9ff;
+  color: #1e293b;
 }

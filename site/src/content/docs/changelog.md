@@ -7,6 +7,60 @@ For full release notes, binaries, and platform-specific archives, see the [GitHu
 
 ---
 
+## v0.4.0 — 2026-03
+
+### ButterComp2 — new compression models
+
+Three new compressor models join the original Airwindows Classic algorithm. Select the model from the dropdown at the top of the ButterComp2 module panel; the controls below update to match.
+
+- **VCA** — Hard-knee voltage-controlled amplifier compression. Fast, precise transient response. Threshold (dB), Ratio (1–20), Attack (ms), Release (ms), Character % (0–100, controls 1176-style color), Mix. Use on drum buses and any source where you want predictable, controllable gain reduction.
+- **Optical (Opt)** — Soft-knee program-dependent compression. Threshold (dB), Character % (0–100, controls program-dependent release behavior and tube warmth), Attack (ms), Release (ms), Mix. Use on vocals, acoustic instruments, and bass.
+- **FET** — Field-effect transistor compression driven by an input gain stage rather than a threshold control. Input (dB), Output (dB), Ratio (1–20), Attack (ms), Release (ms), Auto Release (toggle — enables program-dependent release), Mix. Use on snares, room mics, and any bus where you want forward, saturated character.
+- **Classic** — Airwindows ButterComp2 (original, unchanged). Bipolar interleaved compression with Compress, Output, and Dry/Wet. VCA, Optical, and FET are native Rust implementations; Classic compiles from Airwindows C++ via Rust FFI.
+
+### Parameter display — integer formatting
+
+All non-percentage float parameters now display as integers throughout the UI, automation lanes, and parameter tooltips. This eliminates long decimal strings on thresholds, ratios, EQ gains, and timing values. Existing automation data is unaffected — the underlying parameter ranges are unchanged.
+
+### UI — API5500 EQ layout
+
+- LF and HF shelves moved to a two-column layout, freeing vertical space in the module slot
+- Parametric bands now ordered low-to-high: LMF, MF, HMF
+
+### UI — Pultec EQ
+
+- HF boost bandwidth control now visible in the panel
+- HF cut frequency and gain controls now visible
+
+### UI — Transformer
+
+- Output saturation control exposed
+- Panel sections structured as INPUT / OUTPUT / TONE for clarity
+
+### UI — ButterComp2 model panel
+
+- Model selector dropdown at top of module
+- Per-model control panel updates via `Binding::new` pattern — controls swap without resizing the module slot
+- Fixed-height panel prevents adjacent modules from shifting when switching models
+
+### DSP — global bypass
+
+- Global bypass now passes audio through with zero processing overhead via early return from `process()`
+- Previously, bypass still evaluated the module order dispatch loop
+
+### DSP — global auto gain
+
+- New global Auto Gain compensation: RMS level measured pre- and post-processing chain
+- ~5-second smoothing time constant; ±18 dB correction range
+- Compensates for level changes introduced by heavy compression or EQ boost without manual output trimming
+
+### Fix — NaN sentinel values
+
+- Replaced NaN-based dirty-check sentinels in the compressor model switching logic
+- Previously, switching models could leave NaN values in internal state, causing audio silence until the plugin was reset
+
+---
+
 ## v0.3.0 — 2026-03
 
 ### Documentation site
