@@ -613,7 +613,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -15.0, max: 15.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             // Low Mid-Frequency (LMF) - Parametric at 200Hz
             lmf_freq: FloatParam::new(
@@ -634,7 +635,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -15.0, max: 15.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             
             lmf_q: FloatParam::new(
                 "LMF Q",
@@ -666,7 +668,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -15.0, max: 15.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             
             mf_q: FloatParam::new(
                 "MF Q",
@@ -698,7 +701,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -15.0, max: 15.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             
             hmf_q: FloatParam::new(
                 "HMF Q",
@@ -730,7 +734,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -15.0, max: 15.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             // ButterComp2 Compressor Parameters
             comp_bypass: BoolParam::new("Comp Bypass", false),
@@ -769,6 +774,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -60.0, max: 0.0 },
             )
             .with_unit(" dB")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             vca_ratio: FloatParam::new(
@@ -776,6 +783,8 @@ impl Default for BusChannelStripParams {
                 4.0,
                 FloatRange::Linear { min: 1.0, max: 20.0 },
             )
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             vca_atk: FloatParam::new(
@@ -801,6 +810,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -60.0, max: 0.0 },
             )
             .with_unit(" dB")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             opt_speed: FloatParam::new(
@@ -825,6 +836,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -20.0, max: 40.0 },
             )
             .with_unit(" dB")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             #[cfg(feature = "buttercomp2")]
@@ -834,6 +847,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -20.0, max: 20.0 },
             )
             .with_unit(" dB")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             #[cfg(feature = "buttercomp2")]
@@ -976,7 +991,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -60.0, max: 0.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_ratio: FloatParam::new(
@@ -988,7 +1004,8 @@ impl Default for BusChannelStripParams {
                     factor: FloatRange::skew_factor(-1.5),
                 },
             )
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_attack: FloatParam::new(
@@ -1001,7 +1018,8 @@ impl Default for BusChannelStripParams {
                 },
             )
             .with_unit(" ms")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_release: FloatParam::new(
@@ -1014,7 +1032,8 @@ impl Default for BusChannelStripParams {
                 },
             )
             .with_unit(" ms")
-            .with_step_size(1.0),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_gain: FloatParam::new(
@@ -1023,7 +1042,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: -18.0, max: 18.0 },
             )
             .with_unit(" dB")
-            .with_step_size(0.1),
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_q: FloatParam::new(
@@ -1073,15 +1093,15 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_threshold: FloatParam::new("DynEQ 2 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(0.1),
+            dyneq_band2_threshold: FloatParam::new("DynEQ 2 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_ratio: FloatParam::new("DynEQ 2 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(0.1),
+            dyneq_band2_ratio: FloatParam::new("DynEQ 2 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_attack: FloatParam::new("DynEQ 2 Attack", 10.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(0.1),
+            dyneq_band2_attack: FloatParam::new("DynEQ 2 Attack", 10.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_release: FloatParam::new("DynEQ 2 Release", 100.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0),
+            dyneq_band2_release: FloatParam::new("DynEQ 2 Release", 100.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band2_gain: FloatParam::new("DynEQ 2 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(0.1),
+            dyneq_band2_gain: FloatParam::new("DynEQ 2 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band2_q: FloatParam::new("DynEQ 2 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
@@ -1120,15 +1140,15 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_threshold: FloatParam::new("DynEQ 3 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(0.1),
+            dyneq_band3_threshold: FloatParam::new("DynEQ 3 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_ratio: FloatParam::new("DynEQ 3 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(0.1),
+            dyneq_band3_ratio: FloatParam::new("DynEQ 3 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_attack: FloatParam::new("DynEQ 3 Attack", 5.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(0.1),
+            dyneq_band3_attack: FloatParam::new("DynEQ 3 Attack", 5.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_release: FloatParam::new("DynEQ 3 Release", 60.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0),
+            dyneq_band3_release: FloatParam::new("DynEQ 3 Release", 60.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band3_gain: FloatParam::new("DynEQ 3 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(0.1),
+            dyneq_band3_gain: FloatParam::new("DynEQ 3 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band3_q: FloatParam::new("DynEQ 3 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
@@ -1165,15 +1185,15 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_threshold: FloatParam::new("DynEQ 4 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(0.1),
+            dyneq_band4_threshold: FloatParam::new("DynEQ 4 Thresh", -18.0, FloatRange::Linear { min: -60.0, max: 0.0 }).with_unit(" dB").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_ratio: FloatParam::new("DynEQ 4 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(0.1),
+            dyneq_band4_ratio: FloatParam::new("DynEQ 4 Ratio", 4.0, FloatRange::Skewed { min: 1.0, max: 20.0, factor: FloatRange::skew_factor(-1.5) }).with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_attack: FloatParam::new("DynEQ 4 Attack", 2.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(0.1),
+            dyneq_band4_attack: FloatParam::new("DynEQ 4 Attack", 2.0, FloatRange::Skewed { min: 0.1, max: 200.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_release: FloatParam::new("DynEQ 4 Release", 30.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0),
+            dyneq_band4_release: FloatParam::new("DynEQ 4 Release", 30.0, FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) }).with_unit(" ms").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
-            dyneq_band4_gain: FloatParam::new("DynEQ 4 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(0.1),
+            dyneq_band4_gain: FloatParam::new("DynEQ 4 Gain", 0.0, FloatRange::Linear { min: -18.0, max: 18.0 }).with_unit(" dB").with_step_size(1.0).with_value_to_string(formatters::v2s_f32_rounded(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band4_q: FloatParam::new("DynEQ 4 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
