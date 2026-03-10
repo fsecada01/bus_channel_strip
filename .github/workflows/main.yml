@@ -184,7 +184,7 @@ jobs:
         run: |
           cd target/bundled
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            zip -r Bus-Channel-Strip-${{ matrix.name }}.zip Bus-Channel-Strip.vst3 Bus-Channel-Strip.clap
+            powershell -Command "Compress-Archive -Path 'Bus-Channel-Strip.vst3','Bus-Channel-Strip.clap' -DestinationPath 'Bus-Channel-Strip-${{ matrix.name }}.zip' -Force"
           else
             tar -czf Bus-Channel-Strip-${{ matrix.name }}.tar.gz Bus-Channel-Strip.vst3 Bus-Channel-Strip.clap
           fi
