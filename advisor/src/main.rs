@@ -9,8 +9,10 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use tower::ServiceBuilder;
 use models::{Profile, ProfilesFile};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::normalize_path::NormalizePathLayer;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -78,9 +80,13 @@ async fn main() -> Result<()> {
         .route("/suggest",      post(routes::suggest::suggest))
         .route("/health",       get(health))
         .with_state(state)
-        .layer(cors);
+        .layer(
+            ServiceBuilder::new()
+                .layer(NormalizePathLayer::trim_trailing_slash())
+                .layer(cors),
+        );
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("BCS Mix Advisor listening on http://{addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

@@ -1,0 +1,123 @@
+desc: BCS Spectrum Reader
+// Writes 4-band RMS energy to gmem so the BCS Advisor ReaScript can
+// include spectral context in Claude API requests.
+//
+// Usage: Insert AFTER Bus Channel Strip on your bus track.
+//   slider1 = gmem offset (default 0, must match gmem_base in panel.lua)
+//
+// Band mapping:
+//   gmem[offset+0] = Sub/Low     (< 500 Hz)
+//   gmem[offset+1] = Low-Mid     (500 Hz – 2 kHz)
+//   gmem[offset+2] = Hi-Mid      (2 kHz – 6 kHz)
+//   gmem[offset+3] = High        (> 6 kHz)
+//
+// Audio thread safe: no allocation, no locks, no I/O.
+
+slider1:gmem_offset=0<0,1024,1>GMem Offset
+
+in_pin:left input
+in_pin:right input
+out_pin:left output
+out_pin:right output
+
+@init
+  FFT_SIZE   = 1024;
+  HALF_FFT   = FFT_SIZE / 2;
+  buf        = 0;          // circular input buffer  [0 .. FFT_SIZE-1]
+  fft_buf    = FFT_SIZE;   // FFT work buffer       [FFT_SIZE .. 2*FFT_SIZE-1]
+  write_pos  = 0;
+  hop        = FFT_SIZE / 2;
+  hop_ctr    = 0;
+
+  // Band edge bin indices (at 44100 Hz, bin_k = freq * FFT_SIZE / srate)
+  // These are approximate — recomputed in @block when srate is known
+  band0_end  = 12;  // ~500 Hz
+  band1_end  = 46;  // ~2000 Hz
+  band2_end  = 139; // ~6000 Hz
+  // band3 = band2_end .. HALF_FFT
+
+  // Smoothed output (one-pole IIR, τ ≈ 50 ms)
+  s0 = 0; s1 = 0; s2 = 0; s3 = 0;
+  smooth = 0.85;  // pole for ~50ms at 44.1kHz/1024 hop
+
+@block
+  // Recompute band edges from actual samplerate
+  band0_end  = max(1, floor(500  * FFT_SIZE / srate));
+  band1_end  = max(band0_end+1, floor(2000 * FFT_SIZE / srate));
+  band2_end  = max(band1_end+1, floor(6000 * FFT_SIZE / srate));
+  band2_end  = min(band2_end, HALF_FFT - 1);
+
+@sample
+  // Mix to mono and store in circular buffer
+  buf[write_pos] = (spl0 + spl1) * 0.5;
+  write_pos = (write_pos + 1) % FFT_SIZE;
+
+  // Pass through unchanged
+  spl0 = spl0;
+  spl1 = spl1;
+
+  // Trigger analysis every hop samples
+  hop_ctr += 1;
+  hop_ctr < hop ? (
+    0  // not yet
+  ) : (
+    hop_ctr = 0;
+
+    // Copy circular buffer into fft_buf in chronological order
+    i = 0;
+    while (i < FFT_SIZE) (
+      ri = (write_pos + i) % FFT_SIZE;
+      fft_buf[i*2]   = buf[ri];   // real
+      fft_buf[i*2+1] = 0;         // imag
+      i += 1;
+    );
+
+    // In-place complex FFT (Reaper built-in)
+    fft(fft_buf, FFT_SIZE);
+
+    // Accumulate magnitude-squared per band
+    rms0 = 0; rms1 = 0; rms2 = 0; rms3 = 0;
+    cnt0 = 0; cnt1 = 0; cnt2 = 0; cnt3 = 0;
+
+    k = 1;  // skip DC (k=0)
+    while (k < HALF_FFT) (
+      re = fft_buf[k*2];
+      im = fft_buf[k*2+1];
+      mag2 = re*re + im*im;
+
+      k < band0_end ? (
+        rms0 += mag2; cnt0 += 1;
+      ) : k < band1_end ? (
+        rms1 += mag2; cnt1 += 1;
+      ) : k < band2_end ? (
+        rms2 += mag2; cnt2 += 1;
+      ) : (
+        rms3 += mag2; cnt3 += 1;
+      );
+
+      k += 1;
+    );
+
+    // RMS normalize per band, scale to 0..1 range
+    cnt0 > 0 ? rms0 = sqrt(rms0 / cnt0) / FFT_SIZE : rms0 = 0;
+    cnt1 > 0 ? rms1 = sqrt(rms1 / cnt1) / FFT_SIZE : rms1 = 0;
+    cnt2 > 0 ? rms2 = sqrt(rms2 / cnt2) / FFT_SIZE : rms2 = 0;
+    cnt3 > 0 ? rms3 = sqrt(rms3 / cnt3) / FFT_SIZE : rms3 = 0;
+
+    // Clamp to [0, 1]
+    rms0 = min(1, rms0); rms1 = min(1, rms1);
+    rms2 = min(1, rms2); rms3 = min(1, rms3);
+
+    // One-pole smoothing
+    s0 = s0 * smooth + rms0 * (1 - smooth);
+    s1 = s1 * smooth + rms1 * (1 - smooth);
+    s2 = s2 * smooth + rms2 * (1 - smooth);
+    s3 = s3 * smooth + rms3 * (1 - smooth);
+
+    // Write to gmem (shared with ReaScript)
+    off = gmem_offset;
+    gmem[off]   = s0;
+    gmem[off+1] = s1;
+    gmem[off+2] = s2;
+    gmem[off+3] = s3;
+  );
