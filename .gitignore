@@ -77,4 +77,4 @@ depot_tools_clean/
 memo.txt
 *.txt
 
-*.env
+*.envadvisor/.env

@@ -186,6 +186,29 @@ analyze FILE:
     claude -p "Analyze src/{{FILE}} for DSP correctness, Rust idioms, potential audio thread issues, and improvement opportunities." \
     --append-system-prompt-file {{SYSTEM_PROMPT}}
 
+# ── Mix Advisor Service ───────────────────────────────────────────────────────
+
+# Run the advisor in development mode (auto-reloads with cargo-watch if available)
+# Requires: ANTHROPIC_API_KEY environment variable
+advisor-dev:
+    cargo run --package bcs-advisor
+
+# Build advisor release binary
+advisor-build:
+    cargo build --release --package bcs-advisor
+
+# Run the advisor release binary
+advisor:
+    target\release\bcs-advisor.exe
+
+# Check advisor compiles (fast, no Claude calls)
+advisor-check:
+    cargo check --package bcs-advisor
+
+# Run advisor with verbose logging
+advisor-verbose:
+    set "RUST_LOG=debug" && cargo run --package bcs-advisor
+
 # ── Documentation ────────────────────────────────────────────────────────────
 
 # Start local docs dev server (hot-reload)

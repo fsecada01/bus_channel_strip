@@ -8,7 +8,7 @@ homepage = "https://fsecada01.github.io/bus_channel_strip/"
 description = "Professional 6-module bus channel strip with Punch (clipper + transient shaper)"
 
 [workspace]
-members = ["xtask"]
+members = ["xtask", "advisor"]
 
 [lib]
 crate-type = ["cdylib"]
