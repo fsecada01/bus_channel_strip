@@ -1,0 +1,1733 @@
+{
+  "$schema": "studio-profile-v1",
+  "profiles": [
+    {
+      "id": "electric-lady-studios",
+      "display_name": "Electric Lady Studios (NYC)",
+      "entity_type": "studio",
+      "era": "1970–present",
+      "genre_gates": [],
+      "description": "Jimi Hendrix's purpose-built Greenwich Village studio. Distinctive curved walls, Neve 8068 consoles, warm low-mid resonance. Landmark for jazz-fusion, R&B, and classic rock.",
+      "room": {
+        "location": "New York, NY",
+        "acoustics": "live",
+        "low_end_character": "warm",
+        "high_end_character": "airy",
+        "reverb_tail_ms": 350
+      },
+      "console": {
+        "manufacturer": "Neve / SSL",
+        "model": "Neve 8078 (Studio A, restored with 1081 modules) / SSL 9080 custom (Studio B) / Neve 8068 (Studio C)",
+        "character": "warm",
+        "transformer_color": "moderate",
+        "bus_compression": "light"
+      },
+      "tape": {
+        "machine": "Studer A80",
+        "formula": "Ampex 456",
+        "speed": "30ips",
+        "saturation": "light"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "Neve 1073 / Pultec EQP-1A",
+          "character": "silky high shelves, musical low-end warmth",
+          "low_shelf_tendency": "boost",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "SSL G-Bus / UREI 1176",
+          "type": "VCA",
+          "ratio_tendency": "gentle",
+          "attack_tendency": "medium",
+          "release_tendency": "program-dependent"
+        },
+        "notable_outboard": [
+          "Neve 33609",
+          "Eventide H3000",
+          "Lexicon 480L",
+          "Fairchild 670"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Full and warm without muddiness. 60–80 Hz foundation with careful 200–300 Hz management.",
+        "midrange": "Smooth, never harsh. Upper mids (2–4 kHz) kept polite to serve vocals.",
+        "high_end": "Airy 'Neve silk' — 10 kHz and above lifted gently without sibilance.",
+        "dynamics": "Musical. Compression used for glue rather than limiting. Transients preserved.",
+        "stereo_field": "Wide but coherent. Room ambience adds natural width.",
+        "signature_moves": [
+          "Pultec low-shelf boost at 60 Hz with simultaneous cut to tighten",
+          "Neve 1073 as the tonal foundation, then EQ out of mix",
+          "Parallel compression to preserve transient feel",
+          "Lexicon 480L for lush stereo room on mix bus"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.12,
+          "band1_gain": 0.58,
+          "band2_freq": 0.28,
+          "band2_gain": 0.45,
+          "band5_freq": 0.85,
+          "band5_gain": 0.6,
+          "rationale": "Gentle 60 Hz foundation boost, light 200 Hz warmth, subtle 10 kHz air — the Neve 8068 character translated to API-style fixed bands"
+        },
+        "buttercomp2": {
+          "threshold": 0.45,
+          "ratio": 0.3,
+          "attack": 0.3,
+          "release": 0.65,
+          "dry_wet": 0.75,
+          "rationale": "Gentle glue compression (~2:1), medium attack to preserve transients, program-dependent release, 75% wet for parallel feel"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.25,
+          "lf_boost": 0.55,
+          "lf_atten": 0.25,
+          "hf_boost_freq": 0.72,
+          "hf_boost": 0.52,
+          "hf_atten": 0.05,
+          "rationale": "Classic Pultec push-pull at 60 Hz for warm foundation with tightness. 10 kHz high shelf boost for Neve-style silk"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.55,
+          "band1_ratio": 0.25,
+          "band2_threshold": 0.6,
+          "band2_ratio": 0.2,
+          "band3_threshold": 0.65,
+          "band3_ratio": 0.15,
+          "rationale": "Light dynamic control — this profile favors natural dynamics. DynEQ used only to catch occasional build-ups, not as a primary shaping tool"
+        },
+        "transformer": {
+          "model": 0.66,
+          "drive": 0.3,
+          "rationale": "Neve transformer character (model 0.66 = Neve position). Light drive preserves the warmth without aggressive saturation"
+        },
+        "punch": {
+          "clip_ceiling": 0.88,
+          "transient_attack": 0.35,
+          "transient_sustain": 0.55,
+          "rationale": "Soft ceiling, conservative transient shaping. The Electric Lady sound lives in dynamics — don't over-limit"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Stevie Wonder",
+          "album": "Innervisions",
+          "year": 1973,
+          "engineer": "Robert Margouleff",
+          "producer": "Stevie Wonder"
+        },
+        {
+          "artist": "AC/DC",
+          "album": "Back in Black",
+          "year": 1980,
+          "engineer": "Tony Platt",
+          "producer": "Mutt Lange"
+        },
+        {
+          "artist": "David Bowie",
+          "album": "Young Americans",
+          "year": 1975,
+          "engineer": "Harry Massey",
+          "producer": "Tony Visconti"
+        },
+        {
+          "artist": "Daft Punk",
+          "album": "Random Access Memories",
+          "year": 2013,
+          "engineer": "Peter Franco",
+          "producer": "Daft Punk"
+        },
+        {
+          "artist": "D'Angelo",
+          "album": "Voodoo",
+          "year": 2000,
+          "engineer": "Russell Elevado",
+          "producer": "D'Angelo"
+        }
+      ]
+    },
+    {
+      "id": "power-station-nyc",
+      "display_name": "Power Station / Avatar Studios (NYC)",
+      "entity_type": "studio",
+      "era": "1977–present",
+      "genre_gates": [],
+      "description": "Former Consolidated Edison substation. Massive live room with 55-foot ceiling, legendary for huge drum sounds. SSL 4000 and 9000 consoles. The definitive 80s rock and R&B sound.",
+      "room": {
+        "location": "New York, NY",
+        "acoustics": "very-live",
+        "low_end_character": "tight",
+        "high_end_character": "present",
+        "reverb_tail_ms": 600
+      },
+      "console": {
+        "manufacturer": "Neve / SSL",
+        "model": "Neve 8068 Mk.II (Studio A, 40-input) / SSL 4000E (Studios B & C) / SSL 9000J (current flagship)",
+        "character": "punchy",
+        "transformer_color": "moderate",
+        "bus_compression": "heavy"
+      },
+      "tape": {
+        "machine": "Studer A80",
+        "formula": "Quantegy GP9",
+        "speed": "30ips",
+        "saturation": "moderate"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "SSL 4000E inline EQ / API 550A",
+          "character": "surgical and punchy, not musical — carve the mix rather than sweeten it",
+          "low_shelf_tendency": "cut",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "SSL G-Bus Compressor",
+          "type": "VCA",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "fast",
+          "release_tendency": "fast"
+        },
+        "notable_outboard": [
+          "Neve 33609",
+          "Sony C800G",
+          "Lexicon 300",
+          "Eventide DSP4000"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Tight and punchy. The room's physical size provides natural low-end extension — mix benefits from controlled 80–120 Hz.",
+        "midrange": "Forward and present. Upper mids pushed to cut through dense arrangements.",
+        "high_end": "Bright and present. SSL sheen without harshness.",
+        "dynamics": "Compressed. SSL G-Bus doing real work (4:1, 3ms attack, auto release). GR visible.",
+        "stereo_field": "Wide. The live room adds natural depth; mixes rarely need artificial width.",
+        "signature_moves": [
+          "SSL G-Bus at 4:1 with fast attack, auto release, 2–4 dB GR",
+          "Roll off below 30 Hz aggressively on master bus",
+          "High-pass filter on everything except kick and bass",
+          "Bright, forward vocal presence boosted at 3–5 kHz"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.08,
+          "band1_gain": 0.42,
+          "band2_freq": 0.25,
+          "band2_gain": 0.38,
+          "band4_freq": 0.68,
+          "band4_gain": 0.6,
+          "band5_freq": 0.8,
+          "band5_gain": 0.65,
+          "rationale": "SSL character: cut clutter below 40 Hz, gentle warmth at 150 Hz, presence push at 3–5 kHz, SSL air boost at 8–10 kHz"
+        },
+        "buttercomp2": {
+          "threshold": 0.35,
+          "ratio": 0.55,
+          "attack": 0.15,
+          "release": 0.55,
+          "dry_wet": 1.0,
+          "rationale": "SSL G-Bus emulation: 4:1 ratio, fast attack (3ms), auto release, full wet — this is the signature Power Station bus glue"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.3,
+          "lf_boost": 0.3,
+          "lf_atten": 0.15,
+          "hf_boost_freq": 0.68,
+          "hf_boost": 0.55,
+          "hf_atten": 0.0,
+          "rationale": "Conservative Pultec here — SSL is the primary tonal shaper. Light low-end tightening, moderate high presence"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.4,
+          "band1_ratio": 0.4,
+          "band2_threshold": 0.45,
+          "band2_ratio": 0.35,
+          "band3_threshold": 0.5,
+          "band3_ratio": 0.3,
+          "rationale": "More active DynEQ — controlling the live room low-end buildup and keeping the midrange forward during dense passages"
+        },
+        "transformer": {
+          "model": 1.0,
+          "drive": 0.25,
+          "rationale": "SSL transformer model (position 1.0). Light drive — SSL already provides its own saturation character in the bus compression"
+        },
+        "punch": {
+          "clip_ceiling": 0.82,
+          "transient_attack": 0.6,
+          "transient_sustain": 0.4,
+          "rationale": "Slightly harder ceiling. Higher transient attack enhancement to match Power Station's punchy drum-forward aesthetic"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "David Bowie",
+          "album": "Let's Dance",
+          "year": 1983,
+          "engineer": "Bob Clearmountain",
+          "producer": "Nile Rodgers"
+        },
+        {
+          "artist": "Bruce Springsteen",
+          "album": "Born in the USA",
+          "year": 1984,
+          "engineer": "Bob Clearmountain",
+          "producer": "Bruce Springsteen / Jon Landau"
+        },
+        {
+          "artist": "Chic",
+          "album": "Risqué",
+          "year": 1979,
+          "engineer": "Bob Clearmountain",
+          "producer": "Nile Rodgers & Bernard Edwards"
+        },
+        {
+          "artist": "Madonna",
+          "album": "Like a Virgin",
+          "year": 1984,
+          "engineer": "Bob Clearmountain",
+          "producer": "Nile Rodgers"
+        },
+        {
+          "artist": "Talking Heads",
+          "album": "Speaking in Tongues",
+          "year": 1983,
+          "engineer": "Eric Thorngren",
+          "producer": "Talking Heads"
+        }
+      ]
+    },
+    {
+      "id": "sunset-sound",
+      "display_name": "Sunset Sound (Hollywood)",
+      "entity_type": "studio",
+      "era": "1958–present",
+      "genre_gates": [],
+      "description": "Hollywood institution founded by Tutti Camarata. Small-room sound known for intimate warmth and a beloved reverb chamber. Neve and SSL rooms. Landmark for classic rock, pop, and metal.",
+      "room": {
+        "location": "Hollywood, CA",
+        "acoustics": "controlled",
+        "low_end_character": "warm",
+        "high_end_character": "neutral",
+        "reverb_tail_ms": 280
+      },
+      "console": {
+        "manufacturer": "API / Neve",
+        "model": "Custom API/DeMedio with API 990 op-amps + API 550A EQ (Studios 1 & 3) / Neve 8088 with 1081 modules (Studio 2)",
+        "character": "warm",
+        "transformer_color": "moderate",
+        "bus_compression": "moderate"
+      },
+      "tape": {
+        "machine": "Studer A800",
+        "formula": "Ampex 456",
+        "speed": "30ips",
+        "saturation": "moderate"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "Neve 1081 / API 550B",
+          "character": "musical, slightly colored — warmth first",
+          "low_shelf_tendency": "boost",
+          "high_shelf_tendency": "flat"
+        },
+        "compression_preference": {
+          "primary": "UREI 1176 All-Buttons / Neve 33609",
+          "type": "FET",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "fast",
+          "release_tendency": "medium"
+        },
+        "notable_outboard": [
+          "Pultec EQP-1A",
+          "Manley Vari-Mu",
+          "Lexicon 480L",
+          "AMS RMX16"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Warm and round. Sunset's small-room character adds congestion at 200 Hz — mixes often subtract here.",
+        "midrange": "Intimate. Guitars and vocals sit close; mixes rarely need to push presence.",
+        "high_end": "Neutral to dark. The room doesn't gift you high-end extension — it's earned.",
+        "dynamics": "Variable. Classic rock recordings here are uncompressed and loud; pop has more bus processing.",
+        "stereo_field": "Tight width on rock. The room's reverb chamber adds mono-compatible depth.",
+        "signature_moves": [
+          "The Sunset reverb chamber — a physical chamber that appears on countless recordings",
+          "Mid-side processing to open up the center",
+          "1176 in 'British mode' (all-buttons) on aggressive buses",
+          "HPF below 30 Hz + gentle 200–250 Hz notch to clear the small room buildup"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.1,
+          "band1_gain": 0.52,
+          "band2_freq": 0.3,
+          "band2_gain": 0.35,
+          "band3_freq": 0.48,
+          "band3_gain": 0.42,
+          "band5_freq": 0.75,
+          "band5_gain": 0.52,
+          "rationale": "Warm low foundation, gentle 200 Hz sculpt (room buildup control), slight upper-mid presence, conservative air — Sunset's intimate character"
+        },
+        "buttercomp2": {
+          "threshold": 0.4,
+          "ratio": 0.45,
+          "attack": 0.2,
+          "release": 0.58,
+          "dry_wet": 0.85,
+          "rationale": "FET character (1176 reference): moderate ratio ~3:1, fast attack, medium release. 85% wet keeps the transient snap"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.2,
+          "lf_boost": 0.48,
+          "lf_atten": 0.22,
+          "hf_boost_freq": 0.65,
+          "hf_boost": 0.38,
+          "hf_atten": 0.05,
+          "rationale": "Pultec push-pull for warm low foundation. Conservative high-end boost — Sunset's rooms aren't bright"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.48,
+          "band1_ratio": 0.3,
+          "band2_threshold": 0.42,
+          "band2_ratio": 0.38,
+          "band3_threshold": 0.58,
+          "band3_ratio": 0.2,
+          "rationale": "Dynamic control at 200 Hz (small-room buildup) and mid frequencies — more active than Electric Lady, less than Power Station"
+        },
+        "transformer": {
+          "model": 0.33,
+          "drive": 0.38,
+          "rationale": "API transformer character (0.33). Moderate drive — Sunset mixing often uses API outboard heavily"
+        },
+        "punch": {
+          "clip_ceiling": 0.85,
+          "transient_attack": 0.45,
+          "transient_sustain": 0.5,
+          "rationale": "Balanced transient shaping. Sunset records span classic rock (preserve dynamics) to modern pop (tighter ceiling)"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Van Halen",
+          "album": "Van Halen",
+          "year": 1978,
+          "engineer": "Don Landee",
+          "producer": "Ted Templeman"
+        },
+        {
+          "artist": "The Doors",
+          "album": "The Doors",
+          "year": 1967,
+          "engineer": "Bruce Botnick",
+          "producer": "Paul Rothchild"
+        },
+        {
+          "artist": "Prince",
+          "album": "Purple Rain",
+          "year": 1984,
+          "engineer": "David Rivkin",
+          "producer": "Prince & The Revolution"
+        },
+        {
+          "artist": "Led Zeppelin",
+          "album": "IV",
+          "year": 1971,
+          "engineer": "Andy Johns",
+          "producer": "Jimmy Page"
+        },
+        {
+          "artist": "Slayer",
+          "album": "Reign in Blood",
+          "year": 1986,
+          "engineer": "Bill Metoyer",
+          "producer": "Rick Rubin"
+        }
+      ]
+    },
+    {
+      "id": "blackbird-studio",
+      "display_name": "Blackbird Studio (Nashville)",
+      "entity_type": "studio",
+      "era": "2002–present",
+      "genre_gates": [
+        "country",
+        "americana",
+        "bluegrass",
+        "singer-songwriter",
+        "pop"
+      ],
+      "description": "John McBride's world-class Nashville facility. Multiple large-format rooms with modern SSL and Neve consoles alongside vintage gear. Known for acoustic excellence and live-to-tape recording.",
+      "room": {
+        "location": "Nashville, TN",
+        "acoustics": "controlled",
+        "low_end_character": "neutral",
+        "high_end_character": "airy",
+        "reverb_tail_ms": 320
+      },
+      "console": {
+        "manufacturer": "Neve",
+        "model": "Neve 8078 (Studio A, ex-Motown LA, fully rebuilt — 1081 EQ modules) / SSL Origin (recent addition)",
+        "character": "transparent",
+        "transformer_color": "subtle",
+        "bus_compression": "light"
+      },
+      "tape": {
+        "machine": "Studer A827",
+        "formula": "Quantegy GP9",
+        "speed": "30ips",
+        "saturation": "light"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "Neve 1073 / API 550A",
+          "character": "transparent when needed, colored when desired — Nashville serves the song",
+          "low_shelf_tendency": "flat",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "SSL G-Bus / Tube-Tech CL 1B",
+          "type": "optical",
+          "ratio_tendency": "gentle",
+          "attack_tendency": "slow",
+          "release_tendency": "program-dependent"
+        },
+        "notable_outboard": [
+          "Fairchild 670",
+          "GML 8200",
+          "Shadow Hills Mastering",
+          "Empirical Labs Fatso"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Defined and musical. Nashville mixes prioritize clarity — bass and kick share space without congestion.",
+        "midrange": "Open and present. Acoustic instruments need room in the 1–3 kHz range.",
+        "high_end": "Extended and airy. Steel guitar and acoustic overtones benefit from gentle high-end lift.",
+        "dynamics": "Natural. Live-performance energy preserved. Gentle glue rather than crushing.",
+        "stereo_field": "Organic. Room mics and natural width over artificial stereo widening.",
+        "signature_moves": [
+          "Optical compression (Tube-Tech) for transparent, breathing glue",
+          "Gentle Pultec at 100 Hz for acoustic warmth",
+          "High-pass filtered low mids to let acoustic guitar fundamentals breathe",
+          "Subtle tape saturation for analog warmth on digital sessions"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.15,
+          "band1_gain": 0.5,
+          "band2_freq": 0.32,
+          "band2_gain": 0.45,
+          "band5_freq": 0.88,
+          "band5_gain": 0.62,
+          "rationale": "Serve-the-song EQ: gentle foundation, open midrange, air for steel guitar and acoustic overtones"
+        },
+        "buttercomp2": {
+          "threshold": 0.5,
+          "ratio": 0.25,
+          "attack": 0.4,
+          "release": 0.7,
+          "dry_wet": 0.7,
+          "rationale": "Optical character: slow attack, program-dependent release, gentle ratio (~1.5:1). 70% wet preserves live feel"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.28,
+          "lf_boost": 0.45,
+          "lf_atten": 0.18,
+          "hf_boost_freq": 0.78,
+          "hf_boost": 0.48,
+          "hf_atten": 0.0,
+          "rationale": "Acoustic warmth at 100 Hz, extended air at 12 kHz. Blackbird's rooms need gentle encouragement, not heavy shaping"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.6,
+          "band1_ratio": 0.2,
+          "band2_threshold": 0.62,
+          "band2_ratio": 0.18,
+          "band3_threshold": 0.65,
+          "band3_ratio": 0.15,
+          "rationale": "Very conservative DynEQ. Nashville top-down mixing values natural dynamics — intervention only when acoustics build up"
+        },
+        "transformer": {
+          "model": 0.66,
+          "drive": 0.22,
+          "rationale": "Neve character, very light drive. Blackbird often runs clean signal paths — transformer color here is seasoning, not sauce"
+        },
+        "punch": {
+          "clip_ceiling": 0.9,
+          "transient_attack": 0.3,
+          "transient_sustain": 0.6,
+          "rationale": "High ceiling (more headroom), gentle transient shaping — preserve the natural dynamics of live performances"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Jack White",
+          "album": "Blunderbuss",
+          "year": 2012,
+          "engineer": "Vance Powell",
+          "producer": "Jack White"
+        },
+        {
+          "artist": "Taylor Swift",
+          "album": "Fearless",
+          "year": 2008,
+          "engineer": "Justin Niebank",
+          "producer": "Taylor Swift / Nathan Chapman"
+        },
+        {
+          "artist": "Kings of Leon",
+          "album": "Only by the Night",
+          "year": 2008,
+          "engineer": "Jacquire King",
+          "producer": "Jacquire King / Angelo Petraglia"
+        },
+        {
+          "artist": "Alison Krauss",
+          "album": "Paper Airplane",
+          "year": 2011,
+          "engineer": "Mike Shipley",
+          "producer": "Mike Shipley"
+        }
+      ]
+    },
+    {
+      "id": "criteria-recording",
+      "display_name": "Criteria Recording (Miami)",
+      "entity_type": "studio",
+      "era": "1958–1997",
+      "genre_gates": [
+        "r&b",
+        "soul",
+        "pop",
+        "classic rock",
+        "disco"
+      ],
+      "description": "Miami's legendary studio. Home to Eric Clapton, Eagles, and the Bee Gees. Known for a deep, sun-drenched low end and Miami bass character. MCI consoles, humid warmth.",
+      "room": {
+        "location": "Miami, FL",
+        "acoustics": "live",
+        "low_end_character": "warm",
+        "high_end_character": "neutral",
+        "reverb_tail_ms": 400
+      },
+      "console": {
+        "manufacturer": "MCI",
+        "model": "JH-636",
+        "character": "warm",
+        "transformer_color": "moderate",
+        "bus_compression": "light"
+      },
+      "tape": {
+        "machine": "MCI JH-24",
+        "formula": "Ampex 456",
+        "speed": "15ips",
+        "saturation": "heavy"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "API 550A / Neve 1073",
+          "character": "warm and musical, slightly colored",
+          "low_shelf_tendency": "boost",
+          "high_shelf_tendency": "flat"
+        },
+        "compression_preference": {
+          "primary": "UREI 1176 / Neve 33609",
+          "type": "FET",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "medium",
+          "release_tendency": "medium"
+        },
+        "notable_outboard": [
+          "Pultec EQP-1A",
+          "EMT 140 plate reverb",
+          "Roland Space Echo RE-201"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Deep and warm. 15 ips tape at +3 saturation gives natural compression and harmonic richness below 100 Hz.",
+        "midrange": "Open and soulful. Miami sessions often feature live horn sections — mids kept uncrowded.",
+        "high_end": "Slightly dark. 15 ips tape rolls off above 12 kHz naturally — accepted as character.",
+        "dynamics": "Moderate. Tape compression doing work; bus compressor adds polish rather than control.",
+        "stereo_field": "Wide with depth. Plate reverb on master bus adds space without washing.",
+        "signature_moves": [
+          "15 ips tape speed for extra saturation and natural low-end warmth",
+          "EMT 140 plate reverb as master bus ambience",
+          "API 550A on the mix bus for punchy mid coloration",
+          "Deep low-end foundation (60–80 Hz) boosted before tape saturation"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.12,
+          "band1_gain": 0.6,
+          "band2_freq": 0.26,
+          "band2_gain": 0.5,
+          "band4_freq": 0.62,
+          "band4_gain": 0.48,
+          "band5_freq": 0.72,
+          "band5_gain": 0.48,
+          "rationale": "Miami warmth: deep 60 Hz foundation, 150 Hz warmth, gentle 2 kHz mid presence, moderate 8 kHz — tape rolls off the rest naturally"
+        },
+        "buttercomp2": {
+          "threshold": 0.42,
+          "ratio": 0.42,
+          "attack": 0.28,
+          "release": 0.55,
+          "dry_wet": 0.9,
+          "rationale": "FET/Neve blend: moderate ratio (~2.5:1), medium attack and release. Heavier wet mix because tape is doing compression work too"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.22,
+          "lf_boost": 0.65,
+          "lf_atten": 0.3,
+          "hf_boost_freq": 0.6,
+          "hf_boost": 0.3,
+          "hf_atten": 0.1,
+          "rationale": "Heavy Pultec low-end push (Criteria low-end character). Conservative high shelf — let tape darkness be the character"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.45,
+          "band1_ratio": 0.35,
+          "band2_threshold": 0.5,
+          "band2_ratio": 0.3,
+          "band3_threshold": 0.6,
+          "band3_ratio": 0.2,
+          "rationale": "Moderate DynEQ to manage the live room's low-end warmth and keep the deep bass character without overwhelming smaller speakers"
+        },
+        "transformer": {
+          "model": 0.33,
+          "drive": 0.5,
+          "rationale": "API character (0.33) with moderate drive — Criteria's MCI/API combination gives a warm, slightly punchy character"
+        },
+        "punch": {
+          "clip_ceiling": 0.84,
+          "transient_attack": 0.42,
+          "transient_sustain": 0.52,
+          "rationale": "Moderate ceiling and transient shaping — the tape compression and heavy low-end need some management to translate on modern playback"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Bee Gees",
+          "album": "Saturday Night Fever (OST)",
+          "year": 1977,
+          "engineer": "Karl Richardson",
+          "producer": "Barry, Robin & Maurice Gibb"
+        },
+        {
+          "artist": "Eagles",
+          "album": "Hotel California",
+          "year": 1977,
+          "engineer": "Bill Szymczyk",
+          "producer": "Bill Szymczyk"
+        },
+        {
+          "artist": "Eric Clapton",
+          "album": "461 Ocean Boulevard",
+          "year": 1974,
+          "engineer": "Tom Dowd",
+          "producer": "Tom Dowd"
+        },
+        {
+          "artist": "Derek and the Dominos",
+          "album": "Layla and Other Assorted Love Songs",
+          "year": 1970,
+          "engineer": "Tom Dowd",
+          "producer": "Tom Dowd"
+        }
+      ]
+    },
+    {
+      "id": "erik-rutan-engineer",
+      "display_name": "Erik Rutan (Engineer/Producer)",
+      "entity_type": "engineer",
+      "era": "2001–present",
+      "genre_gates": [
+        "death metal",
+        "extreme metal",
+        "black metal",
+        "grindcore"
+      ],
+      "description": "Guitarist/producer who owns Mana Recording in St. Petersburg, FL. Known for massive, surgical death metal mixes: tight low-end, brutal midrange presence, and controlled aggression. Clients include Cannibal Corpse, Morbid Angel, Obituary.",
+      "room": null,
+      "console": {
+        "manufacturer": "API",
+        "model": "Legacy Plus",
+        "character": "punchy",
+        "transformer_color": "moderate",
+        "bus_compression": "moderate"
+      },
+      "tape": null,
+      "outboard": {
+        "eq_preference": {
+          "primary": "API 550A / Neve 1073",
+          "character": "surgical — cut first, boost sparingly",
+          "low_shelf_tendency": "cut",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "API 2500 / dbx 160",
+          "type": "VCA",
+          "ratio_tendency": "heavy",
+          "attack_tendency": "fast",
+          "release_tendency": "fast"
+        },
+        "notable_outboard": [
+          "SSL G-Bus",
+          "Empirical Labs Distressor",
+          "Manley Massive Passive",
+          "Neve 33609"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Tight and controlled. Sub frequencies (below 60 Hz) aggressively filtered. The weight lives at 80–120 Hz.",
+        "midrange": "Brutal and forward. Guitars cut at 300–400 Hz (mud) and pushed at 700–900 Hz (grind). Vocals sit right of center.",
+        "high_end": "Defined and present. Hi-hat and cymbal detail without wash. High-frequency air is minimal — this music doesn't need it.",
+        "dynamics": "Heavily compressed. Consistent, controlled aggression. Little to no dynamic variation on the bus.",
+        "stereo_field": "Wide guitars, centered drums. Classic death metal panning.",
+        "signature_moves": [
+          "Aggressive HPF on the master bus below 30 Hz",
+          "API 2500 at 4:1+ with fast attack/release for relentless control",
+          "Brutal 300–400 Hz cut on guitar buses before they hit the master",
+          "Kick drum centered and wide — single dominant element at 80 Hz",
+          "Parallel distortion on bass for mid presence"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.08,
+          "band1_gain": 0.38,
+          "band2_freq": 0.28,
+          "band2_gain": 0.35,
+          "band3_freq": 0.45,
+          "band3_gain": 0.55,
+          "band4_freq": 0.6,
+          "band4_gain": 0.62,
+          "band5_freq": 0.7,
+          "band5_gain": 0.58,
+          "rationale": "Rutan's surgical approach: cut below 40 Hz, cut mud at 200 Hz, push grind at 700-900 Hz, push presence at 2–3 kHz, moderate definition at 8 kHz"
+        },
+        "buttercomp2": {
+          "threshold": 0.25,
+          "ratio": 0.75,
+          "attack": 0.1,
+          "release": 0.2,
+          "dry_wet": 1.0,
+          "rationale": "Heavy VCA compression — high ratio (6:1+), very fast attack and release. Relentless bus control. Full wet — no parallel blend"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.32,
+          "lf_boost": 0.35,
+          "lf_atten": 0.4,
+          "hf_boost_freq": 0.65,
+          "hf_boost": 0.42,
+          "hf_atten": 0.15,
+          "rationale": "Pultec as a tightening tool: the push-pull at 100 Hz tightens the low end. High-end boost adds definition on cymbals and pick attack"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.3,
+          "band1_ratio": 0.55,
+          "band2_threshold": 0.32,
+          "band2_ratio": 0.5,
+          "band3_threshold": 0.35,
+          "band3_ratio": 0.55,
+          "band4_threshold": 0.4,
+          "band4_ratio": 0.45,
+          "rationale": "Aggressive dynamic control across all bands. Rutan's mixes are consistent — DynEQ actively preventing low-end buildup and midrange masking"
+        },
+        "transformer": {
+          "model": 0.33,
+          "drive": 0.55,
+          "rationale": "API character with moderate-to-high drive. API transformers add the punchy coloration associated with Mana Recording's sound"
+        },
+        "punch": {
+          "clip_ceiling": 0.75,
+          "transient_attack": 0.7,
+          "transient_sustain": 0.35,
+          "rationale": "Hard ceiling, high transient attack (drum attack emphasis), short sustain (tight, controlled). This is death metal — it should be aggressive and controlled simultaneously"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Cannibal Corpse",
+          "album": "Kill",
+          "year": 2006,
+          "engineer": "Erik Rutan",
+          "producer": "Erik Rutan"
+        },
+        {
+          "artist": "Cannibal Corpse",
+          "album": "Evisceration Plague",
+          "year": 2009,
+          "engineer": "Erik Rutan",
+          "producer": "Erik Rutan"
+        },
+        {
+          "artist": "Morbid Angel",
+          "album": "Heretic",
+          "year": 2003,
+          "engineer": "Erik Rutan",
+          "producer": "Erik Rutan"
+        },
+        {
+          "artist": "Obituary",
+          "album": "Inked in Blood",
+          "year": 2014,
+          "engineer": "Erik Rutan",
+          "producer": "Erik Rutan"
+        },
+        {
+          "artist": "Hate Eternal",
+          "album": "Phoenix Amongst the Ashes",
+          "year": 2011,
+          "engineer": "Erik Rutan",
+          "producer": "Erik Rutan"
+        }
+      ]
+    },
+    {
+      "id": "jimmy-jam-terry-lewis",
+      "display_name": "Jimmy Jam & Terry Lewis (Producers)",
+      "entity_type": "engineer",
+      "era": "1982–present",
+      "genre_gates": [
+        "r&b",
+        "soul",
+        "pop",
+        "funk",
+        "new jack swing"
+      ],
+      "description": "The architects of 80s-90s R&B. Flyte Tyme Productions, Minneapolis. Signature sound: deep programmed bass, lush string synths, punchy drum machines, and impeccable vocal space. Clients: Janet Jackson, Mariah Carey, Usher.",
+      "room": null,
+      "console": {
+        "manufacturer": "SSL",
+        "model": "4000E / 4000G",
+        "character": "punchy",
+        "transformer_color": "subtle",
+        "bus_compression": "moderate"
+      },
+      "tape": {
+        "machine": "Studer A820",
+        "formula": "Ampex 456",
+        "speed": "30ips",
+        "saturation": "light"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "SSL 4000E inline EQ / GML 8200",
+          "character": "precise and clean — the color comes from synthesis, not EQ",
+          "low_shelf_tendency": "flat",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "SSL G-Bus / Neve 33609",
+          "type": "VCA",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "medium",
+          "release_tendency": "program-dependent"
+        },
+        "notable_outboard": [
+          "Fairchild 670",
+          "Lexicon 480L",
+          "Roland VP-330",
+          "Oberheim DMX"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Deep and controlled programmed bass. Sub-bass punchy and sustained. Bass and kick locked in phase.",
+        "midrange": "Open for vocals above everything else. Instruments carefully carved to not intrude on vocal range.",
+        "high_end": "Bright and shimmering. Hi-hats and percussion detailed and forward. Airy without harshness.",
+        "dynamics": "Controlled and polished. SSL bus compression with 2–3 dB GR. Nothing too dynamic — this is produced music.",
+        "stereo_field": "Lush and wide. String pads pushed wide; drums centered; bass mono.",
+        "signature_moves": [
+          "Vocal sits above everything — cut anything that intrudes at 800 Hz–2 kHz",
+          "SSL G-Bus at 2:1, 10ms attack, auto release — polished glue",
+          "Deep programmed bass sits at 50–80 Hz, barely touched",
+          "Lexicon 480L stereo room adds depth without muddying",
+          "Drum machine samples EQed to sound like real kit — hi-hat brightness key"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.1,
+          "band1_gain": 0.55,
+          "band3_freq": 0.5,
+          "band3_gain": 0.38,
+          "band4_freq": 0.65,
+          "band4_gain": 0.6,
+          "band5_freq": 0.9,
+          "band5_gain": 0.65,
+          "rationale": "Deep bass foundation, mid carve to open vocal space, presence lift for percussion detail, extended air for the Flyte Tyme sheen"
+        },
+        "buttercomp2": {
+          "threshold": 0.38,
+          "ratio": 0.38,
+          "attack": 0.25,
+          "release": 0.6,
+          "dry_wet": 0.95,
+          "rationale": "SSL G-Bus character: 2:1 gentle, medium attack, program release. Nearly full wet — the polished production feel requires consistent dynamics"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.18,
+          "lf_boost": 0.5,
+          "lf_atten": 0.15,
+          "hf_boost_freq": 0.82,
+          "hf_boost": 0.6,
+          "hf_atten": 0.0,
+          "rationale": "Low-end weight for the programmed bass. High-end lift at 12–16 kHz for the characteristic Jam & Lewis shimmer on hi-hats and synths"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.5,
+          "band1_ratio": 0.28,
+          "band2_threshold": 0.45,
+          "band2_ratio": 0.32,
+          "band3_threshold": 0.55,
+          "band3_ratio": 0.22,
+          "rationale": "Moderate DynEQ controlling frequency build-up during chorus sections where multiple synth layers stack up"
+        },
+        "transformer": {
+          "model": 1.0,
+          "drive": 0.18,
+          "rationale": "SSL character (1.0), minimal drive. Jam & Lewis mixes are clean and precise — transformer color is very subtle"
+        },
+        "punch": {
+          "clip_ceiling": 0.86,
+          "transient_attack": 0.5,
+          "transient_sustain": 0.55,
+          "rationale": "Balanced ceiling and transient shaping — drum machine hits need attack definition but programmed music benefits from sustain control"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Janet Jackson",
+          "album": "Control",
+          "year": 1986,
+          "engineer": "Steve Hodge",
+          "producer": "Jimmy Jam & Terry Lewis"
+        },
+        {
+          "artist": "Janet Jackson",
+          "album": "Rhythm Nation 1814",
+          "year": 1989,
+          "engineer": "Steve Hodge",
+          "producer": "Jimmy Jam & Terry Lewis"
+        },
+        {
+          "artist": "Mariah Carey",
+          "album": "Emotions",
+          "year": 1991,
+          "engineer": "Dave Way",
+          "producer": "Jimmy Jam & Terry Lewis"
+        },
+        {
+          "artist": "Human League",
+          "album": "Hysteria",
+          "year": 1984,
+          "engineer": "Steve Hodge",
+          "producer": "Jimmy Jam & Terry Lewis"
+        },
+        {
+          "artist": "Usher",
+          "album": "Confessions",
+          "year": 2004,
+          "engineer": "Chris Carmouche",
+          "producer": "Jimmy Jam & Terry Lewis / Lil Jon"
+        }
+      ]
+    },
+    {
+      "id": "rutan-producing-rb",
+      "display_name": "Erik Rutan Producing R&B",
+      "entity_type": "combination",
+      "era": "hypothetical",
+      "genre_gates": [
+        "r&b",
+        "neo-soul"
+      ],
+      "description": "What if Erik Rutan applied his surgical death metal precision to an R&B record? The result: unusually tight low-end control, aggressive mid-frequency carving for vocal clarity, and heavy VCA compression giving a relentlessly polished feel. The warmth is hard-won rather than inherited.",
+      "room": null,
+      "tape": null,
+      "console": {
+        "manufacturer": "API",
+        "model": "Legacy Plus",
+        "character": "punchy",
+        "transformer_color": "moderate",
+        "bus_compression": "heavy"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "API 550A / Neve 1073",
+          "character": "surgical clarity applied to soul music — unusual precision, not lush warmth",
+          "low_shelf_tendency": "cut",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "API 2500 (applied with restraint)",
+          "type": "VCA",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "medium",
+          "release_tendency": "medium"
+        },
+        "notable_outboard": [
+          "Empirical Labs Distressor (mild settings)",
+          "Lexicon 480L (for warmth)"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Rutan's tight 80–120 Hz weight applied to programmed/live bass. Surprisingly controlled for R&B.",
+        "midrange": "Death-metal-style vocal clarity carving (300–500 Hz cut) benefits the vocal sit — paradoxically cleaner than typical R&B.",
+        "high_end": "More restrained than typical R&B. Rutan would add definition, not shimmer. Hi-hats present but not sparkly.",
+        "dynamics": "Heavier bus compression than typical R&B — VCA glue applied assertively. More controlled, less breathy.",
+        "stereo_field": "Death metal panning habits meet R&B: wider lows than expected, more centered vocals.",
+        "signature_moves": [
+          "Aggressive HPF on everything except kick and bass — much higher cutoffs than R&B producers typically use",
+          "Surgical 300–400 Hz cut to clear 'mud' — creates unusual vocal presence for the genre",
+          "API compression on bus at higher ratio than typical R&B (3–4:1 vs standard 2:1)",
+          "Pultec low-end push at 60 Hz — the one concession to genre warmth"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.1,
+          "band1_gain": 0.48,
+          "band2_freq": 0.28,
+          "band2_gain": 0.38,
+          "band3_freq": 0.44,
+          "band3_gain": 0.52,
+          "band4_freq": 0.62,
+          "band4_gain": 0.6,
+          "band5_freq": 0.75,
+          "band5_gain": 0.55,
+          "rationale": "Rutan's surgical cuts adapted: tight low foundation, mud cut at 200 Hz, presence push at 700 Hz for vocal clarity, upper presence — stops short of metal aggression"
+        },
+        "buttercomp2": {
+          "threshold": 0.32,
+          "ratio": 0.58,
+          "attack": 0.2,
+          "release": 0.45,
+          "dry_wet": 0.9,
+          "rationale": "Rutan's heavy-handed compression applied with R&B restraint: moderate-high ratio (4:1), fast-medium attack, medium release. Still harder than typical R&B"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.22,
+          "lf_boost": 0.55,
+          "lf_atten": 0.35,
+          "hf_boost_freq": 0.68,
+          "hf_boost": 0.42,
+          "hf_atten": 0.1,
+          "rationale": "The genre concession: warm Pultec low-end that Rutan would use, but with the push-pull tightening he favors. High end stays controlled"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.35,
+          "band1_ratio": 0.48,
+          "band2_threshold": 0.38,
+          "band2_ratio": 0.45,
+          "band3_threshold": 0.42,
+          "band3_ratio": 0.42,
+          "band4_threshold": 0.48,
+          "band4_ratio": 0.35,
+          "rationale": "Aggressive DynEQ reflecting Rutan's control-oriented approach, but with slightly higher thresholds to allow R&B vocal dynamics to breathe"
+        },
+        "transformer": {
+          "model": 0.33,
+          "drive": 0.42,
+          "rationale": "API transformer (Rutan's console of choice) at moderate drive — more color than R&B typically uses, less than death metal"
+        },
+        "punch": {
+          "clip_ceiling": 0.78,
+          "transient_attack": 0.55,
+          "transient_sustain": 0.48,
+          "rationale": "Harder ceiling than R&B norm (Rutan tendency), strong transient attack for drum clarity — the death-metal instinct of making every hit count"
+        }
+      },
+      "landmark_records": [],
+      "combination": {
+        "base_studio": null,
+        "base_engineer": "erik-rutan-engineer",
+        "genre_shift": "r&b",
+        "blend_notes": "Engineer authority dominates compression, transient shaping, and EQ surgery. Genre shift softens the extremes: ratio from 6:1 to 4:1, ceiling raised from 0.75 to 0.78, Pultec low-end added (genre concession). The result is unusual — an R&B mix that sounds startlingly clear and controlled compared to typical genre production.",
+        "domain_authority": {
+          "api5500": "engineer",
+          "buttercomp2": "engineer",
+          "pultec": "engineer",
+          "dynamic_eq": "engineer",
+          "transformer": "engineer",
+          "punch": "engineer"
+        }
+      }
+    },
+    {
+      "id": "cannibal-corpse-electric-lady",
+      "display_name": "Cannibal Corpse at Electric Lady Studios",
+      "entity_type": "combination",
+      "era": "hypothetical",
+      "genre_gates": [
+        "death metal"
+      ],
+      "description": "Cannibal Corpse's brutal death metal run through Electric Lady's Neve 8068 and its warm, live room. The room's natural reverb meets the band's tight death metal aesthetic. The conflict: Neve warmth vs. death metal precision. Resolution: the studio's live acoustics are tamed while the Neve transformer color adds unexpected depth to an already brutal sound.",
+      "room": {
+        "location": "New York, NY (Electric Lady Studios)",
+        "acoustics": "live",
+        "low_end_character": "warm",
+        "high_end_character": "airy",
+        "reverb_tail_ms": 350
+      },
+      "console": {
+        "manufacturer": "Neve",
+        "model": "8068",
+        "character": "warm",
+        "transformer_color": "moderate",
+        "bus_compression": "moderate"
+      },
+      "tape": {
+        "machine": "Studer A80",
+        "formula": "Ampex 456",
+        "speed": "30ips",
+        "saturation": "moderate"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "Neve 1073 (studio) + API 550A (engineer instinct)",
+          "character": "conflict resolved: Neve warmth for low-end, API precision for surgical cuts",
+          "low_shelf_tendency": "boost",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "API 2500 (engineer) with Neve 33609 in parallel (studio)",
+          "type": "VCA",
+          "ratio_tendency": "heavy",
+          "attack_tendency": "fast",
+          "release_tendency": "fast"
+        },
+        "notable_outboard": [
+          "Fairchild 670 (studio, used conservatively)",
+          "Empirical Labs Distressor",
+          "Lexicon 480L (NOT used — live room provides ambience)"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "The studio's warm low-end conflicts with Rutan's tight approach. Resolution: Neve warmth at 80–100 Hz kept, but below 60 Hz filtered aggressively. The result is a death metal mix with unusual depth.",
+        "midrange": "Rutan's precision carving still active (300–400 Hz cut), but the Neve 1073 adds a warm harmonic richness that makes guitars sound different — fuller, less brittle.",
+        "high_end": "Here the studio wins: the Neve 8068's 'silk' and the Lexicon 480L's air add an unusual sheen to death metal — cymbals and guitar harmonics have unexpected beauty.",
+        "dynamics": "Engineer dominates: heavy VCA compression still present. But the tape saturation (Studer A80) adds natural compression that makes the overall dynamics less relentless.",
+        "stereo_field": "The live room adds natural width that Mana Recording lacks. Guitars in this scenario would be wider and the room would add depth to cymbals.",
+        "signature_moves": [
+          "Neve 8068 transformer warmth applied to guitar buses — unexpected harmonic depth for death metal",
+          "Studer A80 tape saturation at +3 adds natural compression on top of VCA bus compression",
+          "Electric Lady's live room ambience on drum overheads — NOT gated (unusual for death metal)",
+          "Neve 33609 in parallel with aggressive VCA — blending warmth into brutal compression",
+          "High-end 'Neve silk' EQ on bus — cymbals have unexpected beauty"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.1,
+          "band1_gain": 0.52,
+          "band2_freq": 0.28,
+          "band2_gain": 0.35,
+          "band3_freq": 0.45,
+          "band3_gain": 0.55,
+          "band4_freq": 0.6,
+          "band4_gain": 0.58,
+          "band5_freq": 0.82,
+          "band5_gain": 0.62,
+          "rationale": "Hybrid: studio's warm 60 Hz boost meets engineer's mud cut at 200 Hz. Rutan's presence push at 700 Hz still active. Studio wins on high-end air (10 kHz elevated more than Rutan typically allows)"
+        },
+        "buttercomp2": {
+          "threshold": 0.28,
+          "ratio": 0.68,
+          "attack": 0.12,
+          "release": 0.22,
+          "dry_wet": 0.95,
+          "rationale": "Engineer dominates compression: high ratio (5:1+), fast attack and release. Slightly reduced from full Rutan intensity to account for tape compression doubling"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.25,
+          "lf_boost": 0.52,
+          "lf_atten": 0.32,
+          "hf_boost_freq": 0.78,
+          "hf_boost": 0.55,
+          "hf_atten": 0.05,
+          "rationale": "Studio wins on Pultec: Electric Lady's Neve-warm Pultec low-end applied (more boost than Rutan alone). High shelf elevated vs. Rutan's typical approach — studio's 'silk' quality applied to metal"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.32,
+          "band1_ratio": 0.52,
+          "band2_threshold": 0.35,
+          "band2_ratio": 0.48,
+          "band3_threshold": 0.38,
+          "band3_ratio": 0.5,
+          "band4_threshold": 0.42,
+          "band4_ratio": 0.42,
+          "rationale": "Aggressive DynEQ (engineer) but managing the live room low-end buildup (studio). Active across all bands — this combination creates complex frequency interactions"
+        },
+        "transformer": {
+          "model": 0.66,
+          "drive": 0.48,
+          "rationale": "Studio wins: Neve transformer model (0.66). Higher drive than Electric Lady typically uses — meeting the engineer's instinct for more color. The warmth of Neve plus moderate saturation creates unexpected depth on death metal"
+        },
+        "punch": {
+          "clip_ceiling": 0.77,
+          "transient_attack": 0.68,
+          "transient_sustain": 0.38,
+          "rationale": "Engineer's hard ceiling and strong transient attack (death metal instinct). Slightly higher than Rutan alone because tape and live room are adding natural limiting. Short sustain — tight, controlled aggression"
+        }
+      },
+      "landmark_records": [],
+      "combination": {
+        "base_studio": "electric-lady-studios",
+        "base_engineer": "erik-rutan-engineer",
+        "genre_shift": "death metal",
+        "blend_notes": "Studio wins on: room acoustics (live reverb, not gated), console character (Neve over API), transformer model, Pultec low-end warmth, high-frequency air. Engineer wins on: compression ratio and speed, transient shaping, punch ceiling hardness, dynamic EQ aggressiveness. Conflict resolved: the Neve's warmth makes guitar harmonics unexpectedly beautiful; the engineer's aggression makes the bus controlled and tight despite the live room. The unexpected result is death metal with depth and harmonic richness that Mana Recording doesn't normally provide.",
+        "domain_authority": {
+          "api5500": "engineer",
+          "buttercomp2": "engineer",
+          "pultec": "studio",
+          "dynamic_eq": "engineer",
+          "transformer": "studio",
+          "punch": "engineer"
+        }
+      }
+    },
+    {
+      "id": "morrisound-recording",
+      "display_name": "Morrisound Recording (Tampa, FL)",
+      "entity_type": "studio",
+      "era": "1981-present",
+      "genre_gates": [
+        "death metal",
+        "extreme metal",
+        "thrash metal",
+        "grindcore"
+      ],
+      "description": "The birthplace of Florida death metal. SSL 4000G, Scott Burns engineering. Clinical precision: triggered drums, scooped guitars, surgical separation. Cannibal Corpse, Death, Morbid Angel, Obituary.",
+      "room": {
+        "location": "Tampa, FL",
+        "acoustics": "dead",
+        "low_end_character": "tight",
+        "high_end_character": "present",
+        "reverb_tail_ms": 80
+      },
+      "console": {
+        "manufacturer": "SSL",
+        "model": "4000G (death metal era) / SSL Duality Fuse (current)",
+        "character": "transparent",
+        "transformer_color": "subtle",
+        "bus_compression": "moderate"
+      },
+      "tape": null,
+      "outboard": {
+        "eq_preference": {
+          "primary": "SSL 4000G inline EQ / dbx 160A",
+          "character": "surgical mid-scoop on guitars, presence boost, no warmth",
+          "low_shelf_tendency": "cut",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "dbx 160A / SSL G-Bus",
+          "type": "VCA",
+          "ratio_tendency": "heavy",
+          "attack_tendency": "fast",
+          "release_tendency": "fast"
+        },
+        "notable_outboard": [
+          "Drawmer DS201 gates",
+          "Roland drum trigger system",
+          "Eventide H3000",
+          "UREI 1176"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Ultra-tight below 150 Hz. Sub aggressively filtered. Kick at 80-100 Hz with zero room bleed.",
+        "midrange": "Scooped guitar (800-1k notch) with presence boost (3-5 kHz). Maximum separation.",
+        "high_end": "Cymbals present and defined. No wash, no reverb tails.",
+        "dynamics": "Triggered drums, zero natural ambience. dbx 160A fast compression.",
+        "stereo_field": "Wide guitars L/R, centered drums. No artificial width.",
+        "signature_moves": [
+          "Triggered kick: zero decay, typewriter aesthetic",
+          "SSL G scooped guitar EQ",
+          "dbx 160A fast drum bus compression",
+          "HPF aggressive at 60 Hz",
+          "Minimal reverb gated to 80ms max"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.06,
+          "band1_gain": 0.32,
+          "band2_freq": 0.27,
+          "band2_gain": 0.3,
+          "band3_freq": 0.44,
+          "band3_gain": 0.55,
+          "band4_freq": 0.62,
+          "band4_gain": 0.65,
+          "band5_freq": 0.72,
+          "band5_gain": 0.6,
+          "rationale": "Scott Burns template: aggressive HP below 40 Hz, mud cut 200 Hz, guitar scoop 700 Hz, presence push 2-3 kHz, definition 8 kHz"
+        },
+        "buttercomp2": {
+          "threshold": 0.22,
+          "ratio": 0.8,
+          "attack": 0.08,
+          "release": 0.15,
+          "dry_wet": 1.0,
+          "rationale": "dbx 160A character: very high ratio 8:1+, blazing fast attack/release, full wet. Relentless consistency"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.32,
+          "lf_boost": 0.28,
+          "lf_atten": 0.45,
+          "hf_boost_freq": 0.65,
+          "hf_boost": 0.5,
+          "hf_atten": 0.2,
+          "rationale": "Minimal Pultec: push-pull tightens low end further. High shelf for cymbal definition"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.28,
+          "band1_ratio": 0.6,
+          "band2_threshold": 0.3,
+          "band2_ratio": 0.58,
+          "band3_threshold": 0.32,
+          "band3_ratio": 0.6,
+          "band4_threshold": 0.35,
+          "band4_ratio": 0.55,
+          "rationale": "Maximum DynEQ across all bands. Morrisound is surgically controlled"
+        },
+        "transformer": {
+          "model": 1.0,
+          "drive": 0.2,
+          "rationale": "SSL character (1.0), minimal drive. SSL G is transparent"
+        },
+        "punch": {
+          "clip_ceiling": 0.7,
+          "transient_attack": 0.8,
+          "transient_sustain": 0.2,
+          "rationale": "Hard ceiling, maximum transient attack, minimal sustain for tight-gate aesthetic"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Death",
+          "album": "Human",
+          "year": 1991,
+          "engineer": "Scott Burns",
+          "producer": "Scott Burns"
+        },
+        {
+          "artist": "Morbid Angel",
+          "album": "Blessed Are the Sick",
+          "year": 1991,
+          "engineer": "Scott Burns",
+          "producer": "Tom Morris / Scott Burns"
+        },
+        {
+          "artist": "Cannibal Corpse",
+          "album": "Tomb of the Mutilated",
+          "year": 1992,
+          "engineer": "Scott Burns",
+          "producer": "Scott Burns"
+        },
+        {
+          "artist": "Obituary",
+          "album": "Slowly We Rot",
+          "year": 1989,
+          "engineer": "Scott Burns",
+          "producer": "Scott Burns"
+        }
+      ]
+    },
+    {
+      "id": "compass-point-studios",
+      "display_name": "Compass Point Studios (Nassau, Bahamas)",
+      "entity_type": "studio",
+      "era": "1977-2010",
+      "genre_gates": [
+        "rock",
+        "new wave",
+        "reggae",
+        "post-punk",
+        "art-rock",
+        "pop"
+      ],
+      "description": "Chris Blackwell Island Records studio. Neve 8078 and AMS RMX-16 defined the sound: deep groove, tempo-locked reverb delays, warm Neve low-end. AC/DC Back in Black, Talking Heads Remain in Light, Grace Jones Nightclubbing.",
+      "room": {
+        "location": "Nassau, Bahamas",
+        "acoustics": "controlled",
+        "low_end_character": "warm",
+        "high_end_character": "present",
+        "reverb_tail_ms": 300
+      },
+      "console": {
+        "manufacturer": "Neve",
+        "model": "Neve 8078 (Studio A, 40-input) / Neve V3 (post-1985)",
+        "character": "warm",
+        "transformer_color": "moderate",
+        "bus_compression": "light"
+      },
+      "tape": {
+        "machine": "MCI JH-110B",
+        "formula": "Ampex 456",
+        "speed": "30ips",
+        "saturation": "moderate"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "API 550 / EAR 822Q (Rupert Neve EAR designs)",
+          "character": "forward articulate -- Neve warmth plus API punch",
+          "low_shelf_tendency": "boost",
+          "high_shelf_tendency": "boost"
+        },
+        "compression_preference": {
+          "primary": "Lucas tube compressor",
+          "type": "tube",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "medium",
+          "release_tendency": "medium"
+        },
+        "notable_outboard": [
+          "AMS RMX-16 (signature: tempo-locked rhythmic reverb)",
+          "Eventide H910",
+          "Roland RE-201 Space Echo",
+          "API 550 EQs"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Deep syncopated groove. Sly and Robbie bass forward. Neve warmth plus tape adds weight without mud.",
+        "midrange": "Articulate and forward. API 550 bite on guitars and keys.",
+        "high_end": "Bright and present. AMS RMX-16 shimmer. Crisp without harshness.",
+        "dynamics": "Groove-forward. Natural dynamics -- feel over compression.",
+        "stereo_field": "Wide and rhythmic. AMS RMX-16 delays panned wide, tempo-locked.",
+        "signature_moves": [
+          "AMS RMX-16 delay timed to tempo",
+          "Neve 8078 three-dimensionality",
+          "Sly Dunbar drums set up 4+ hours for maximum care",
+          "API 550 bite before Neve summing",
+          "Tropical isolation sessions with no time pressure"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.12,
+          "band1_gain": 0.58,
+          "band2_freq": 0.26,
+          "band2_gain": 0.52,
+          "band4_freq": 0.65,
+          "band4_gain": 0.58,
+          "band5_freq": 0.82,
+          "band5_gain": 0.62,
+          "rationale": "Neve+API hybrid: warm low (Neve), mid body, forward upper-mid articulation (API 550 character), present high end"
+        },
+        "buttercomp2": {
+          "threshold": 0.48,
+          "ratio": 0.28,
+          "attack": 0.38,
+          "release": 0.65,
+          "dry_wet": 0.7,
+          "rationale": "Tube character (Lucas compressor): gentle 1.8:1, medium attack, program release. 70% wet -- feel over control"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.22,
+          "lf_boost": 0.58,
+          "lf_atten": 0.22,
+          "hf_boost_freq": 0.72,
+          "hf_boost": 0.55,
+          "hf_atten": 0.0,
+          "rationale": "Warm Neve low-end push, moderate high-end air to complement AMS RMX-16 brightness"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.52,
+          "band1_ratio": 0.25,
+          "band2_threshold": 0.55,
+          "band2_ratio": 0.22,
+          "band3_threshold": 0.58,
+          "band3_ratio": 0.2,
+          "rationale": "Light DynEQ. Compass Point is groove-forward, not controlled. Minimal intervention"
+        },
+        "transformer": {
+          "model": 0.66,
+          "drive": 0.4,
+          "rationale": "Neve character (0.66) moderate drive. Built on Neve 8078 transformer warmth"
+        },
+        "punch": {
+          "clip_ceiling": 0.87,
+          "transient_attack": 0.4,
+          "transient_sustain": 0.58,
+          "rationale": "High ceiling, balanced transient shaping. Groove and feel over aggressive limiting"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "AC/DC",
+          "album": "Back in Black",
+          "year": 1980,
+          "engineer": "Tony Platt",
+          "producer": "Mutt Lange"
+        },
+        {
+          "artist": "Talking Heads",
+          "album": "Remain in Light",
+          "year": 1980,
+          "engineer": "Dave Jerden",
+          "producer": "Brian Eno / Talking Heads"
+        },
+        {
+          "artist": "Grace Jones",
+          "album": "Nightclubbing",
+          "year": 1981,
+          "engineer": "Alex Sadkin",
+          "producer": "Chris Blackwell / Alex Sadkin"
+        },
+        {
+          "artist": "Rolling Stones",
+          "album": "Emotional Rescue",
+          "year": 1980,
+          "engineer": "Chris Kimsey",
+          "producer": "The Glimmer Twins"
+        }
+      ]
+    },
+    {
+      "id": "muscle-shoals-sound",
+      "display_name": "Muscle Shoals Sound Studio (Sheffield, AL)",
+      "entity_type": "studio",
+      "era": "1969-present",
+      "genre_gates": [
+        "r&b",
+        "soul",
+        "country soul",
+        "rock",
+        "americana"
+      ],
+      "description": "The Swampers studio at 3614 Jackson Highway. UA 610 tube console original era, Neve 8068 later. Dead intimate room. Rolling Stones, Aretha Franklin, Paul Simon. Groove lives in the performances: tube saturation and 15 ips tape do the processing.",
+      "room": {
+        "location": "Sheffield, AL",
+        "acoustics": "dead",
+        "low_end_character": "warm",
+        "high_end_character": "neutral",
+        "reverb_tail_ms": 120
+      },
+      "console": {
+        "manufacturer": "Universal Audio / Neve",
+        "model": "UA 610 tube (original era) / Neve 8068 (1980s) / API (current)",
+        "character": "warm",
+        "transformer_color": "heavy",
+        "bus_compression": "light"
+      },
+      "tape": {
+        "machine": "Scully 280 / Ampex MM1000",
+        "formula": "Ampex 456",
+        "speed": "15ips",
+        "saturation": "heavy"
+      },
+      "outboard": {
+        "eq_preference": {
+          "primary": "UA 610 passive EQ / Pultec EQP-1A",
+          "character": "musical and warm -- tube saturation IS the EQ",
+          "low_shelf_tendency": "boost",
+          "high_shelf_tendency": "flat"
+        },
+        "compression_preference": {
+          "primary": "UREI 1176 / Teletronix LA-2A",
+          "type": "FET",
+          "ratio_tendency": "moderate",
+          "attack_tendency": "medium",
+          "release_tendency": "medium"
+        },
+        "notable_outboard": [
+          "UA 610 tube preamps (fundamental)",
+          "EMT reverb plates",
+          "UREI 1176"
+        ]
+      },
+      "mix_tendencies": {
+        "low_end": "Round and warm. 15 ips tape saturation adds natural compression and harmonic richness.",
+        "midrange": "Intimate and vocal-forward. Dead room forces close mixing.",
+        "high_end": "Dark naturally. 15 ips tape rolls off above 12 kHz.",
+        "dynamics": "Natural. Tube saturation and tape do the work. Bus compressor minimal.",
+        "stereo_field": "Narrow. Dead room provides no natural width -- centered, direct, intimate.",
+        "signature_moves": [
+          "UA 610 all-tube path: natural compression at every stage",
+          "15 ips tape running hot for heavy saturation",
+          "The Swampers locked groove without click",
+          "EMT plate for spatial air only",
+          "RCA 44-BX ribbon on vocals"
+        ]
+      },
+      "module_parameter_hints": {
+        "api5500": {
+          "band1_freq": 0.14,
+          "band1_gain": 0.55,
+          "band2_freq": 0.28,
+          "band2_gain": 0.52,
+          "band3_freq": 0.46,
+          "band3_gain": 0.48,
+          "band5_freq": 0.68,
+          "band5_gain": 0.45,
+          "rationale": "Tube console character: warm low-end, full body 150-200 Hz, gentle midrange presence. High end restrained -- 15 ips rolls off naturally"
+        },
+        "buttercomp2": {
+          "threshold": 0.5,
+          "ratio": 0.3,
+          "attack": 0.42,
+          "release": 0.68,
+          "dry_wet": 0.65,
+          "rationale": "Very gentle bus compression -- tube saturation and tape already working hard. FET character, slow attack for groove feel. 65% wet"
+        },
+        "pultec": {
+          "lf_boost_freq": 0.2,
+          "lf_boost": 0.62,
+          "lf_atten": 0.28,
+          "hf_boost_freq": 0.6,
+          "hf_boost": 0.28,
+          "hf_atten": 0.15,
+          "rationale": "Heavy Pultec low-end mimicking UA 610 tube warmth. Conservative high end: warm and dark is the Muscle Shoals character"
+        },
+        "dynamic_eq": {
+          "band1_threshold": 0.58,
+          "band1_ratio": 0.2,
+          "band2_threshold": 0.62,
+          "band2_ratio": 0.18,
+          "band3_threshold": 0.65,
+          "band3_ratio": 0.15,
+          "rationale": "Minimal DynEQ. Tube saturation and performance dynamics are organic -- not to be over-controlled"
+        },
+        "transformer": {
+          "model": 0.0,
+          "drive": 0.6,
+          "rationale": "Trident/neutral (0.0) at high drive -- approximating UA 610 tube preamp saturation character"
+        },
+        "punch": {
+          "clip_ceiling": 0.88,
+          "transient_attack": 0.32,
+          "transient_sustain": 0.62,
+          "rationale": "High ceiling, gentle transient shaping. 15 ips tape already limiting peaks. High sustain for Swampers groove feel"
+        }
+      },
+      "landmark_records": [
+        {
+          "artist": "Rolling Stones",
+          "album": "Sticky Fingers (sessions)",
+          "year": 1969,
+          "engineer": "Jimmy Johnson",
+          "producer": "Jimmy Miller"
+        },
+        {
+          "artist": "Paul Simon",
+          "album": "There Goes Rhymin Simon",
+          "year": 1973,
+          "engineer": "Barry Beckett",
+          "producer": "Paul Simon / Phil Ramone"
+        },
+        {
+          "artist": "Aretha Franklin",
+          "album": "Spirit in the Dark",
+          "year": 1970,
+          "engineer": "Jimmy Johnson",
+          "producer": "Jerry Wexler"
+        }
+      ]
+    }
+  ]
+}
