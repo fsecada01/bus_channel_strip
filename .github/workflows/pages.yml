@@ -7,8 +7,6 @@ on:
       - 'site/**'
       - 'docs/**'
       - 'README.md'
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
