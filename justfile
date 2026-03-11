@@ -25,23 +25,23 @@ default:
 
 # Fast type-check (no codegen) - use for rapid iteration
 check:
-    cargo check --features "{{CORE_FEATURES}}"
+    cargo check --features {{CORE_FEATURES}}
 
 # Type-check with GUI features
 check-gui:
-    cargo +nightly check --features "{{FEATURES}}"
+    cargo +nightly check --features {{FEATURES}}
 
 # Debug build (no GUI, fast)
 build:
-    cargo build --features "{{CORE_FEATURES}}"
+    cargo build --features {{CORE_FEATURES}}
 
 # Debug build with full GUI
 build-gui:
-    cargo +nightly build --features "{{FEATURES}}"
+    cargo +nightly build --features {{FEATURES}}
 
 # Release build
 release:
-    cargo +nightly build --release --features "{{FEATURES}}"
+    cargo +nightly build --release --features {{FEATURES}}
 
 # ── Bundle (VST3 + CLAP) ──────────────────────────────────────────────────────
 
@@ -82,15 +82,15 @@ deploy: bundle install
 
 # Run unit tests
 test:
-    cargo test --features "{{CORE_FEATURES}}"
+    cargo test --features {{CORE_FEATURES}}
 
 # Lint with Clippy - treats warnings as errors
 lint:
-    cargo clippy --all-targets --features "{{CORE_FEATURES}}" -- -D warnings
+    cargo clippy --all-targets --features {{CORE_FEATURES}} -- -D warnings
 
 # Lint with leniency (warnings only)
 lint-warn:
-    cargo clippy --all-targets --features "{{CORE_FEATURES}}"
+    cargo clippy --all-targets --features {{CORE_FEATURES}}
 
 # Format code (nightly required for best formatting)
 fmt:
@@ -135,7 +135,7 @@ env:
 
 # Show dependency tree for core features
 deps:
-    cargo tree --features "{{CORE_FEATURES}}"
+    cargo tree --features {{CORE_FEATURES}}
 
 # Watch src/ for changes and run check (requires cargo-watch)
 watch:

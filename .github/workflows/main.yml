@@ -29,6 +29,7 @@ on:
       - 'feature/**'      # Build and release for testing
     tags:
       - 'v*'             # Build and release on version tags
+  workflow_dispatch:      # Manual trigger from GitHub Actions UI
 
 jobs:
   build:
