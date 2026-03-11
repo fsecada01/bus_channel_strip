@@ -26,34 +26,30 @@ just test
 | `transformer.rs` | 12 | All 4 saturation models (zero-amount, finite output, bounded), model cache coherence, reset |
 | `punch.rs` | 10 | Hard/soft/cubic clip, envelope follower, transient detector, oversampler (pre-existing) |
 
-### Known Bug: NaN Dirty-Check in Compressor Models
+### Fixed Bug: NaN Dirty-Check in Compressor Models (fixed in commit `4ad5ea0c`)
 
-During test development, a critical bug was discovered in `FetCompressor`, `VcaCompressor`,
-and `OpticalCompressor`. All three use `f32::NAN` as a dirty-check sentinel to force
-coefficient recomputation on first call to `update_parameters()`. This pattern is broken:
+During test development, a critical bug was discovered and fixed in `FetCompressor`,
+`VcaCompressor`, and `OpticalCompressor`. All three used `f32::NAN` as a dirty-check
+sentinel to force coefficient recomputation on first call to `update_parameters()`.
+This pattern is broken in IEEE754:
 
 ```rust
-// BROKEN: IEEE754 NaN comparisons always return false
+// BROKEN: (x - NaN).abs() = NaN, NaN > threshold = false → never triggered
 let atk_changed = (attack_ms - self.cached_attack_ms).abs() > 0.0001;
-// (x - NaN).abs() = NaN, NaN > 0.0001 = false → never triggers recompute
 ```
 
-**Impact**:
-- `FetCompressor`: `effective_threshold = -NaN = NaN`, so `over_db` always resolves to 0.0
-  via `f32::max()` NaN-ignoring semantics — no compression is ever applied
-- `VcaCompressor`: `cached_thresh = NaN` propagates through `f32::clamp()` (which does NOT
-  ignore NaN unlike `f32::max()`) → NaN output on every sample
-- `OpticalCompressor`: similar NaN propagation
+**Impact before fix**:
+- `FetCompressor`: no compression ever applied (effective_threshold stuck at NaN)
+- `VcaCompressor`: NaN output on every sample (NaN propagates through `f32::clamp()`)
+- `OpticalCompressor`: same NaN propagation
 
-**Fix required** (all three compressors):
+**Fix applied** — explicit `.is_nan()` guard on every dirty-check:
 ```rust
-// Replace bare dirty-check with NaN-aware guard
 let atk_changed = self.cached_attack_ms.is_nan()
     || (attack_ms - self.cached_attack_ms).abs() > 0.0001;
 ```
 
-The unit tests work around this by pre-seeding cached fields directly (possible via Rust's
-`mod tests` private-field access). The production code bug still needs fixing.
+This was present in the v0.4.0 release. Fixed and released in v0.4.1.
 
 ---
 
