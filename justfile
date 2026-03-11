@@ -65,11 +65,11 @@ bundle-profile:
 
 # Install VST3 to system plugin directory
 install-vst3:
-    powershell -NoProfile -Command "New-Item -ItemType Directory -Force '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win' | Out-Null; Copy-Item -Force 'target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3' '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3'; Write-Host 'Installed VST3 to {{VST3_DIR}}\Bus-Channel-Strip.vst3'"
+    powershell -NoProfile -Command "New-Item -ItemType Directory -Force '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win' | Out-Null; Copy-Item -Force '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3' '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3'; Write-Host 'Installed VST3 to {{VST3_DIR}}\Bus-Channel-Strip.vst3'"
 
 # Install CLAP to system plugin directory
 install-clap:
-    powershell -NoProfile -Command "if (Test-Path 'target\bundled\Bus-Channel-Strip.clap') { New-Item -ItemType Directory -Force '{{CLAP_DIR}}' | Out-Null; Copy-Item -Force 'target\bundled\Bus-Channel-Strip.clap' '{{CLAP_DIR}}\Bus-Channel-Strip.clap'; Write-Host 'Installed CLAP to {{CLAP_DIR}}' } else { Write-Host 'CLAP bundle not found (may not have been built)' }"
+    powershell -NoProfile -Command "if (Test-Path '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.clap') { New-Item -ItemType Directory -Force '{{CLAP_DIR}}' | Out-Null; Copy-Item -Force '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.clap' '{{CLAP_DIR}}\Bus-Channel-Strip.clap'; Write-Host 'Installed CLAP to {{CLAP_DIR}}' } else { Write-Host 'CLAP bundle not found (may not have been built)' }"
 
 # Install both formats
 install: install-vst3 install-clap
@@ -140,6 +140,21 @@ deps:
 # Watch src/ for changes and run check (requires cargo-watch)
 watch:
     cargo watch -x "check --features {{CORE_FEATURES}}"
+
+# ── CI / GitHub Actions ───────────────────────────────────────────────────────
+
+# Trigger a manual CI build on the current branch
+ci:
+    gh workflow run main.yml --ref main
+    @echo Triggered. Watch with: just ci-watch
+
+# Watch live CI run status (polls until complete)
+ci-watch:
+    gh run watch $(gh run list --workflow=main.yml --limit=1 --json databaseId --jq '.[0].databaseId')
+
+# Show recent CI run history
+ci-log:
+    rtk gh run list --limit 10
 
 # ── Git Workflow ──────────────────────────────────────────────────────────────
 
@@ -228,6 +243,11 @@ docs-preview:
 # Clean build artifacts (preserves registry cache)
 clean:
     cargo clean
+
+# Force recompile of this package only (deps stay cached) then deploy
+rebuild:
+    cargo clean -p bus_channel_strip
+    just deploy
 
 # Update all dependencies
 update:
