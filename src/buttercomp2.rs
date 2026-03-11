@@ -144,16 +144,16 @@ impl FetCompressor {
         ratio: FetRatio,
         auto_release: bool,
     ) {
-        if (input_db - self.cached_input_db).abs() > 0.001 {
+        if self.cached_input_db.is_nan() || (input_db - self.cached_input_db).abs() > 0.001 {
             self.cached_input_db = input_db;
             self.input_gain_linear = 10.0_f32.powf(input_db / 20.0);
         }
-        if (output_db - self.cached_output_db).abs() > 0.001 {
+        if self.cached_output_db.is_nan() || (output_db - self.cached_output_db).abs() > 0.001 {
             self.cached_output_db = output_db;
             self.output_gain_linear = 10.0_f32.powf(output_db / 20.0);
         }
-        let atk_changed  = (attack_ms  - self.cached_attack_ms ).abs() > 0.0001;
-        let rel_changed  = (release_ms - self.cached_release_ms).abs() > 0.5;
+        let atk_changed  = self.cached_attack_ms.is_nan()  || (attack_ms  - self.cached_attack_ms ).abs() > 0.0001;
+        let rel_changed  = self.cached_release_ms.is_nan() || (release_ms - self.cached_release_ms).abs() > 0.5;
         let auto_changed = auto_release != self.cached_auto_release;
         if atk_changed || rel_changed || auto_changed {
             self.cached_attack_ms    = attack_ms;
@@ -361,10 +361,10 @@ impl VcaCompressor {
         atk_ms: f32,
         rel_ms: f32,
     ) {
-        let thresh_changed = (thresh_db - self.cached_thresh).abs() > 0.001;
-        let ratio_changed  = (ratio    - self.cached_ratio  ).abs() > 0.001;
-        let atk_changed    = (atk_ms   - self.cached_atk_ms ).abs() > 0.01;
-        let rel_changed    = (rel_ms   - self.cached_rel_ms ).abs() > 0.01;
+        let thresh_changed = self.cached_thresh.is_nan() || (thresh_db - self.cached_thresh).abs() > 0.001;
+        let ratio_changed  = self.cached_ratio.is_nan()  || (ratio    - self.cached_ratio  ).abs() > 0.001;
+        let atk_changed    = self.cached_atk_ms.is_nan() || (atk_ms   - self.cached_atk_ms ).abs() > 0.01;
+        let rel_changed    = self.cached_rel_ms.is_nan() || (rel_ms   - self.cached_rel_ms ).abs() > 0.01;
         if thresh_changed { self.cached_thresh = thresh_db; }
         if ratio_changed  { self.cached_ratio  = ratio; }
         if atk_changed || rel_changed {
@@ -555,9 +555,9 @@ impl OpticalCompressor {
     /// Update parameters — call once per buffer, not per sample.
     /// Coefficient recomputation only happens when values change beyond a threshold.
     pub fn update_parameters(&mut self, thresh_db: f32, speed: f32, char_val: f32) {
-        let thresh_changed = (thresh_db - self.cached_thresh).abs() > 0.001;
-        let speed_changed  = (speed     - self.cached_speed ).abs() > 0.005;
-        let char_changed   = (char_val  - self.cached_char  ).abs() > 0.005;
+        let thresh_changed = self.cached_thresh.is_nan() || (thresh_db - self.cached_thresh).abs() > 0.001;
+        let speed_changed  = self.cached_speed.is_nan()  || (speed     - self.cached_speed ).abs() > 0.005;
+        let char_changed   = self.cached_char.is_nan()   || (char_val  - self.cached_char  ).abs() > 0.005;
         if thresh_changed { self.cached_thresh = thresh_db; }
         if speed_changed || char_changed {
             self.cached_speed = speed;
@@ -847,13 +847,7 @@ mod tests {
     #[test]
     fn test_fet_compressor_quiet_signal_passes_through() {
         let mut fet = FetCompressor::new(44100.0);
-        // Pre-seed: NaN dirty-check in update_parameters never fires for the first call
-        // (IEEE754: (x - NaN).abs() > threshold always returns false).
-        // Set cached values directly so the compressor state is valid for the test.
-        fet.cached_input_db = 0.0;
-        fet.cached_output_db = 0.0;
-        fet.input_gain_linear = 1.0;
-        fet.output_gain_linear = 1.0;
+        fet.update_parameters(0.0, 0.0, 0.2, 250.0, FetRatio::R4, false);
         // Very quiet signal (well below 0 dB effective threshold)
         let input = 0.001_f32;
         let (out_l, out_r) = fet.process_sample(input, input);
@@ -864,15 +858,8 @@ mod tests {
     #[test]
     fn test_fet_compressor_loud_signal_is_attenuated() {
         let mut fet = FetCompressor::new(44100.0);
-        // Pre-seed: effective_threshold = -cached_input_db.
-        // Use +6 dB input_db → effective_threshold = -6 dBFS so a 0 dBFS signal engages GR.
-        fet.cached_input_db = 6.0;
-        fet.input_gain_linear = 10.0_f32.powf(6.0 / 20.0);
-        fet.cached_output_db = 0.0;
-        fet.output_gain_linear = 1.0;
-        // Use fast attack so the envelope builds quickly in the test
-        fet.recompute_coefficients(0.001, 100.0, false);
-
+        // +6 dB input drive → effective_threshold = -6 dBFS; 0 dBFS signal engages GR
+        fet.update_parameters(6.0, 0.0, 0.001, 100.0, FetRatio::R4, false);
         for _ in 0..2000 { fet.process_sample(1.0, 1.0); }
         let (out_l, _) = fet.process_sample(1.0, 1.0);
         assert!(out_l < 1.0, "Loud signal should be attenuated, got {out_l}");
@@ -920,11 +907,8 @@ mod tests {
     #[test]
     fn test_fet_compressor_update_dirty_check_skips_recompute() {
         let mut fet = FetCompressor::new(44100.0);
-        // Seed the cache first (bypassing the NaN-init limitation)
-        fet.cached_attack_ms = 1.0;
-        fet.cached_release_ms = 200.0;
-        fet.cached_auto_release = false;
-        fet.recompute_coefficients(1.0, 200.0, false);
+        // First call seeds the cache (NaN → real value)
+        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
         let coeff_before = fet.coeff_attack;
         // Same parameters — dirty check should skip recompute
         fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
@@ -934,13 +918,10 @@ mod tests {
     #[test]
     fn test_fet_compressor_update_new_attack_recomputes() {
         let mut fet = FetCompressor::new(44100.0);
-        // Seed the cache so the dirty check can detect changes
-        fet.cached_attack_ms = 1.0;
-        fet.cached_release_ms = 200.0;
-        fet.cached_auto_release = false;
-        fet.recompute_coefficients(1.0, 200.0, false);
+        // First call seeds the cache
+        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
         let coeff_before = fet.coeff_attack;
-        // Different attack time — should trigger recompute
+        // Different attack time — dirty check fires, coefficients recomputed
         fet.update_parameters(0.0, 0.0, 10.0, 200.0, FetRatio::R4, false);
         assert!(
             (fet.coeff_attack - coeff_before).abs() > 1e-5,
@@ -950,12 +931,12 @@ mod tests {
 
     #[test]
     fn test_fet_compressor_coeff_attack_formula() {
-        // new() calls recompute_coefficients(0.2, 250.0) — verify the stored coeff
-        // matches exp(-1 / (ms * 0.001 * sr)) for the initial 0.2 ms attack time.
+        // coeff = exp(-1 / (ms * 0.001 * sr))
         let sr = 44100.0_f32;
-        let ms = 0.2_f32; // value used in new()
+        let ms = 1.0_f32;
         let expected = (-1.0_f32 / (ms * 0.001 * sr)).exp();
-        let fet = FetCompressor::new(sr);
+        let mut fet = FetCompressor::new(sr);
+        fet.update_parameters(0.0, 0.0, ms, 200.0, FetRatio::R4, false);
         assert!((fet.coeff_attack - expected).abs() < 1e-7, "coeff mismatch: {} vs {expected}", fet.coeff_attack);
     }
 
@@ -970,9 +951,7 @@ mod tests {
     #[test]
     fn test_vca_compressor_process_produces_finite_output() {
         let mut vca = VcaCompressor::new(44100.0);
-        // Pre-seed NaN-initialized cache fields (dirty-check NaN issue — same as FetCompressor)
-        vca.cached_thresh = -18.0;
-        vca.cached_ratio = 4.0;
+        vca.update_parameters(-18.0, 4.0, 5.0, 100.0);
         for _ in 0..200 {
             let (l, r) = vca.process_sample(0.5, 0.5);
             assert!(l.is_finite(), "VCA output L must be finite");
@@ -983,8 +962,7 @@ mod tests {
     #[test]
     fn test_vca_compressor_quiet_passes_through() {
         let mut vca = VcaCompressor::new(44100.0);
-        vca.cached_thresh = -18.0;
-        vca.cached_ratio = 4.0;
+        vca.update_parameters(-18.0, 4.0, 5.0, 100.0);
         let input = 0.0001_f32;
         let (out_l, out_r) = vca.process_sample(input, input);
         assert!(out_l.is_finite());
