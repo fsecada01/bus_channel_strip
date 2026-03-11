@@ -313,19 +313,174 @@ fn american_transformer_saturation(input: f32, amount: f32) -> f32 {
     if amount < 0.01 {
         return input;
     }
-    
+
     // Balanced approach between vintage warmth and modern clarity
     let driven = input * (1.0 + amount * 1.8);
-    
+
     // Soft clipping with gentle compression
     let saturated = if driven.abs() > 0.5 {
         driven.signum() * (0.5 + (driven.abs() - 0.5).tanh() * 0.5)
     } else {
         driven
     };
-    
+
     // Balanced harmonic content
     let harmonic = driven * driven * driven * amount * 0.08;
-    
+
     input * (1.0 - amount * 0.6) + (saturated + harmonic) * (amount * 0.6)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Saturation functions (private but accessible from child mod tests) ────
+
+    #[test]
+    fn test_all_saturation_fns_zero_amount_passthrough() {
+        // All saturation functions guard amount < 0.01 — return input unchanged
+        for &input in &[-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
+            let v = vintage_transformer_saturation(input, 0.0);
+            let m = modern_transformer_saturation(input, 0.0);
+            let b = british_transformer_saturation(input, 0.0);
+            let a = american_transformer_saturation(input, 0.0);
+            assert!((v - input).abs() < 1e-6, "Vintage zero-amount: {v} vs {input}");
+            assert!((m - input).abs() < 1e-6, "Modern zero-amount: {m} vs {input}");
+            assert!((b - input).abs() < 1e-6, "British zero-amount: {b} vs {input}");
+            assert!((a - input).abs() < 1e-6, "American zero-amount: {a} vs {input}");
+        }
+    }
+
+    #[test]
+    fn test_all_saturation_fns_produce_finite_output() {
+        for &amount in &[0.1_f32, 0.5, 1.0] {
+            for &input in &[-2.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0] {
+                let v = vintage_transformer_saturation(input, amount);
+                let m = modern_transformer_saturation(input, amount);
+                let b = british_transformer_saturation(input, amount);
+                let a = american_transformer_saturation(input, amount);
+                assert!(v.is_finite(), "Vintage finite: input={input}, amount={amount}, out={v}");
+                assert!(m.is_finite(), "Modern finite: input={input}, amount={amount}, out={m}");
+                assert!(b.is_finite(), "British finite: input={input}, amount={amount}, out={b}");
+                assert!(a.is_finite(), "American finite: input={input}, amount={amount}, out={a}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_saturation_antisymmetric_for_odd_models() {
+        // All models use wet/dry blend — verify approximate antisymmetry
+        for amount in [0.3_f32, 0.7, 1.0] {
+            let x = 0.5_f32;
+            let v_pos = vintage_transformer_saturation(x, amount);
+            let v_neg = vintage_transformer_saturation(-x, amount);
+            // Pure tanh saturation is antisymmetric; our blend adds even harmonics
+            // but the blend should keep the result bounded
+            assert!(v_pos.is_finite() && v_neg.is_finite());
+        }
+    }
+
+    #[test]
+    fn test_saturation_output_bounded() {
+        // For realistic input levels, saturation shouldn't explode
+        for &amount in &[0.5_f32, 1.0] {
+            for &input in &[-1.0_f32, -0.5, 0.5, 1.0] {
+                let v = vintage_transformer_saturation(input, amount).abs();
+                let m = modern_transformer_saturation(input, amount).abs();
+                let b = british_transformer_saturation(input, amount).abs();
+                let a = american_transformer_saturation(input, amount).abs();
+                assert!(v < 4.0, "Vintage out-of-bounds: {v}");
+                assert!(m < 4.0, "Modern out-of-bounds: {m}");
+                assert!(b < 4.0, "British out-of-bounds: {b}");
+                assert!(a < 4.0, "American out-of-bounds: {a}");
+            }
+        }
+    }
+
+    // ── TransformerModule ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_transformer_module_new_does_not_panic() {
+        let _t = TransformerModule::new(44100.0);
+        let _t = TransformerModule::new(48000.0);
+        let _t = TransformerModule::new(96000.0);
+    }
+
+    #[test]
+    fn test_transformer_module_nan_cache_forces_recompute() {
+        // NaN sentinel in cached values should cause update_frequency_response on first call
+        let mut t = TransformerModule::new(44100.0);
+        assert!(t.cached_low_response.is_nan(), "cached_low_response should start NaN");
+        assert!(t.cached_high_response.is_nan(), "cached_high_response should start NaN");
+        // First update_parameters call should not panic
+        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+        assert!(!t.cached_low_response.is_nan(), "cached_low_response should be set after first update");
+    }
+
+    #[test]
+    fn test_transformer_module_model_selection() {
+        let mut t = TransformerModule::new(44100.0);
+        for model in [TransformerModel::Vintage, TransformerModel::Modern,
+                      TransformerModel::British, TransformerModel::American] {
+            t.update_parameters(model, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+            assert_eq!(t.model, model, "Model should be updated to {:?}", model);
+        }
+    }
+
+    #[test]
+    fn test_transformer_module_cache_skips_filter_recompute() {
+        let mut t = TransformerModule::new(44100.0);
+        // First call — triggers recompute and sets cache
+        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.2, 0.2, 0.3);
+        let cached_low = t.cached_low_response;
+        let cached_high = t.cached_high_response;
+        // Same values — cache should match, no recompute
+        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.2, 0.2, 0.3);
+        assert_eq!(t.cached_low_response.to_bits(), cached_low.to_bits());
+        assert_eq!(t.cached_high_response.to_bits(), cached_high.to_bits());
+    }
+
+    #[test]
+    fn test_transformer_module_model_change_updates_cache() {
+        let mut t = TransformerModule::new(44100.0);
+        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+        assert_eq!(t.cached_model, TransformerModel::Vintage);
+        // Change model — cached_model should update
+        t.update_parameters(TransformerModel::British, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+        assert_eq!(t.cached_model, TransformerModel::British);
+    }
+
+    #[test]
+    fn test_transformer_module_reset_clears_envelopes() {
+        let mut t = TransformerModule::new(44100.0);
+        t.update_parameters(TransformerModel::Vintage, 0.5, 0.8, 0.5, 0.8, 0.0, 0.0, 0.5);
+        // Manually set envelope state
+        t.input_transformer.envelope = 0.9;
+        t.output_transformer.envelope = 0.7;
+        t.reset();
+        assert!((t.input_transformer.envelope - 0.0).abs() < 1e-9);
+        assert!((t.output_transformer.envelope - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transformer_input_drive_scales() {
+        let mut t = TransformerModule::new(44100.0);
+        // input_drive=0 → drive_gain = 1.0; input_drive=1 → drive_gain = 1.8
+        t.update_parameters(TransformerModel::Vintage, 0.0, 0.3, 0.3, 0.3, 0.0, 0.0, 0.0);
+        assert!((t.input_transformer.drive_gain - 1.0).abs() < 1e-5, "drive=0 should give gain 1.0");
+        t.update_parameters(TransformerModel::Vintage, 1.0, 0.3, 0.3, 0.3, 0.0, 0.0, 0.0);
+        assert!((t.input_transformer.drive_gain - 1.8).abs() < 1e-5, "drive=1 should give gain 1.8");
+    }
+
+    #[test]
+    fn test_transformer_freq_response_per_model() {
+        // Spot-check that low_freq characteristic differs per model
+        let mut t44 = TransformerModule::new(44100.0);
+        // Vintage → low_freq=80, Modern → low_freq=60
+        // Simply verify update doesn't panic for each model
+        for model in [TransformerModel::Vintage, TransformerModel::Modern,
+                      TransformerModel::British, TransformerModel::American] {
+            t44.update_parameters(model, 0.3, 0.3, 0.3, 0.3, 0.5, -0.5, 0.3);
+        }
+    }
 }

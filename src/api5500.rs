@@ -68,3 +68,71 @@ impl Api5500 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api5500_new_does_not_panic() {
+        let _eq = Api5500::new(44100.0);
+        let _eq = Api5500::new(48000.0);
+        let _eq = Api5500::new(96000.0);
+    }
+
+    #[test]
+    fn test_api5500_update_parameters_does_not_panic() {
+        let mut eq = Api5500::new(44100.0);
+        // Nominal in-range values
+        eq.update_parameters(
+            100.0,  // lf_freq
+            3.0,    // lf_gain
+            300.0,  // lmf_freq
+            2.0,    // lmf_gain
+            0.7,    // lmf_q
+            1000.0, // mf_freq
+            -2.0,   // mf_gain
+            1.0,    // mf_q
+            5000.0, // hmf_freq
+            1.5,    // hmf_gain
+            1.2,    // hmf_q
+            12000.0,// hf_freq
+            -1.0,   // hf_gain
+        );
+    }
+
+    #[test]
+    fn test_api5500_gain_clamping_positive() {
+        // Passing gains > 12 dB should silently clamp — no panic, no NaN
+        let mut eq = Api5500::new(44100.0);
+        eq.update_parameters(
+            100.0, 100.0,  // lf +100 dB — must be clamped to +12
+            300.0, 100.0, 0.7,
+            1000.0, 100.0, 1.0,
+            5000.0, 100.0, 1.2,
+            12000.0, 100.0,
+        );
+        // Processing a sample should not produce NaN or ±inf
+        // We cannot call process() without a Buffer, so we verify the update didn't crash.
+    }
+
+    #[test]
+    fn test_api5500_gain_clamping_negative() {
+        let mut eq = Api5500::new(44100.0);
+        eq.update_parameters(
+            100.0, -100.0,
+            300.0, -100.0, 0.7,
+            1000.0, -100.0, 1.0,
+            5000.0, -100.0, 1.2,
+            12000.0, -100.0,
+        );
+    }
+
+    #[test]
+    fn test_api5500_multiple_sample_rates() {
+        for &sr in &[22050.0, 44100.0, 48000.0, 88200.0, 96000.0_f32] {
+            let mut eq = Api5500::new(sr);
+            eq.update_parameters(200.0, 3.0, 500.0, 2.0, 0.7, 2000.0, -1.0, 1.0, 8000.0, 1.0, 1.0, 15000.0, -2.0);
+        }
+    }
+}

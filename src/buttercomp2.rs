@@ -804,3 +804,218 @@ impl Drop for ButterComp2 {
 
 unsafe impl Send for ButterComp2 {}
 unsafe impl Sync for ButterComp2 {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── FetRatio ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fet_ratio_values() {
+        assert!((FetRatio::R4.value()  -  4.0).abs() < 1e-5);
+        assert!((FetRatio::R8.value()  -  8.0).abs() < 1e-5);
+        assert!((FetRatio::R12.value() - 12.0).abs() < 1e-5);
+        assert!((FetRatio::R20.value() - 20.0).abs() < 1e-5);
+        // All-buttons uses 20:1 for the gain computer
+        assert!((FetRatio::All.value() - 20.0).abs() < 1e-5);
+    }
+
+    // ── FetCompressor ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fet_compressor_new_initial_state() {
+        let fet = FetCompressor::new(44100.0);
+        assert!((fet.envelope_db - 0.0).abs() < 1e-5);
+        assert!((fet.fast_env_db - 0.0).abs() < 1e-5);
+        assert!((fet.input_gain_linear - 1.0).abs() < 1e-5);
+        assert!((fet.output_gain_linear - 1.0).abs() < 1e-5);
+        assert!(fet.coeff_attack > 0.0 && fet.coeff_attack < 1.0);
+        assert!(fet.coeff_release > 0.0 && fet.coeff_release < 1.0);
+    }
+
+    #[test]
+    fn test_fet_compressor_reset_clears_envelopes() {
+        let mut fet = FetCompressor::new(44100.0);
+        for _ in 0..500 { fet.process_sample(1.0, 1.0); }
+        fet.reset();
+        assert!((fet.envelope_db - 0.0).abs() < 1e-5, "envelope_db after reset: {}", fet.envelope_db);
+        assert!((fet.fast_env_db - 0.0).abs() < 1e-5, "fast_env_db after reset: {}", fet.fast_env_db);
+        assert!((fet.envelope_fast_db - 0.0).abs() < 1e-5, "envelope_fast_db after reset: {}", fet.envelope_fast_db);
+    }
+
+    #[test]
+    fn test_fet_compressor_quiet_signal_passes_through() {
+        let mut fet = FetCompressor::new(44100.0);
+        // Pre-seed: NaN dirty-check in update_parameters never fires for the first call
+        // (IEEE754: (x - NaN).abs() > threshold always returns false).
+        // Set cached values directly so the compressor state is valid for the test.
+        fet.cached_input_db = 0.0;
+        fet.cached_output_db = 0.0;
+        fet.input_gain_linear = 1.0;
+        fet.output_gain_linear = 1.0;
+        // Very quiet signal (well below 0 dB effective threshold)
+        let input = 0.001_f32;
+        let (out_l, out_r) = fet.process_sample(input, input);
+        assert!((out_l / input - 1.0).abs() < 0.01, "Quiet signal gain: {}", out_l / input);
+        assert!((out_r / input - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_fet_compressor_loud_signal_is_attenuated() {
+        let mut fet = FetCompressor::new(44100.0);
+        // Pre-seed: effective_threshold = -cached_input_db.
+        // Use +6 dB input_db → effective_threshold = -6 dBFS so a 0 dBFS signal engages GR.
+        fet.cached_input_db = 6.0;
+        fet.input_gain_linear = 10.0_f32.powf(6.0 / 20.0);
+        fet.cached_output_db = 0.0;
+        fet.output_gain_linear = 1.0;
+        // Use fast attack so the envelope builds quickly in the test
+        fet.recompute_coefficients(0.001, 100.0, false);
+
+        for _ in 0..2000 { fet.process_sample(1.0, 1.0); }
+        let (out_l, _) = fet.process_sample(1.0, 1.0);
+        assert!(out_l < 1.0, "Loud signal should be attenuated, got {out_l}");
+        assert!(out_l > 0.0, "Output should still be positive");
+    }
+
+    #[test]
+    fn test_fet_compressor_all_buttons_gr_cap() {
+        let mut fet = FetCompressor::new(44100.0);
+        fet.update_parameters(18.0, 0.0, 0.001, 100.0, FetRatio::All, false);
+
+        for _ in 0..5000 { fet.process_sample(1.0, 1.0); }
+
+        // GR should never exceed the -18 dB cap
+        assert!(
+            fet.envelope_db >= FET_ALL_BUTTONS_GR_CAP,
+            "All-Buttons GR cap violated: envelope_db = {}",
+            fet.envelope_db
+        );
+    }
+
+    #[test]
+    fn test_fet_compressor_envelope_clamped_in_range() {
+        let mut fet = FetCompressor::new(44100.0);
+        for _ in 0..5000 { fet.process_sample(100.0, 100.0); }
+        assert!(
+            fet.envelope_db >= FET_ENVELOPE_MIN_DB,
+            "envelope_db below floor: {}",
+            fet.envelope_db
+        );
+        assert!(fet.envelope_db <= 0.0, "envelope_db must be <= 0: {}", fet.envelope_db);
+    }
+
+    #[test]
+    fn test_fet_compressor_process_produces_finite_output() {
+        let mut fet = FetCompressor::new(44100.0);
+        fet.update_parameters(6.0, -6.0, 1.0, 200.0, FetRatio::R8, true);
+        for _ in 0..100 {
+            let (l, r) = fet.process_sample(0.5, -0.5);
+            assert!(l.is_finite(), "Output L must be finite, got {l}");
+            assert!(r.is_finite(), "Output R must be finite, got {r}");
+        }
+    }
+
+    #[test]
+    fn test_fet_compressor_update_dirty_check_skips_recompute() {
+        let mut fet = FetCompressor::new(44100.0);
+        // Seed the cache first (bypassing the NaN-init limitation)
+        fet.cached_attack_ms = 1.0;
+        fet.cached_release_ms = 200.0;
+        fet.cached_auto_release = false;
+        fet.recompute_coefficients(1.0, 200.0, false);
+        let coeff_before = fet.coeff_attack;
+        // Same parameters — dirty check should skip recompute
+        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
+        assert!((fet.coeff_attack - coeff_before).abs() < 1e-9, "Dirty-check bypass: coeff should not change");
+    }
+
+    #[test]
+    fn test_fet_compressor_update_new_attack_recomputes() {
+        let mut fet = FetCompressor::new(44100.0);
+        // Seed the cache so the dirty check can detect changes
+        fet.cached_attack_ms = 1.0;
+        fet.cached_release_ms = 200.0;
+        fet.cached_auto_release = false;
+        fet.recompute_coefficients(1.0, 200.0, false);
+        let coeff_before = fet.coeff_attack;
+        // Different attack time — should trigger recompute
+        fet.update_parameters(0.0, 0.0, 10.0, 200.0, FetRatio::R4, false);
+        assert!(
+            (fet.coeff_attack - coeff_before).abs() > 1e-5,
+            "New attack time should change coeff_attack"
+        );
+    }
+
+    #[test]
+    fn test_fet_compressor_coeff_attack_formula() {
+        // new() calls recompute_coefficients(0.2, 250.0) — verify the stored coeff
+        // matches exp(-1 / (ms * 0.001 * sr)) for the initial 0.2 ms attack time.
+        let sr = 44100.0_f32;
+        let ms = 0.2_f32; // value used in new()
+        let expected = (-1.0_f32 / (ms * 0.001 * sr)).exp();
+        let fet = FetCompressor::new(sr);
+        assert!((fet.coeff_attack - expected).abs() < 1e-7, "coeff mismatch: {} vs {expected}", fet.coeff_attack);
+    }
+
+    // ── VcaCompressor ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_vca_compressor_new_does_not_panic() {
+        let _vca = VcaCompressor::new(44100.0);
+        let _vca = VcaCompressor::new(48000.0);
+    }
+
+    #[test]
+    fn test_vca_compressor_process_produces_finite_output() {
+        let mut vca = VcaCompressor::new(44100.0);
+        // Pre-seed NaN-initialized cache fields (dirty-check NaN issue — same as FetCompressor)
+        vca.cached_thresh = -18.0;
+        vca.cached_ratio = 4.0;
+        for _ in 0..200 {
+            let (l, r) = vca.process_sample(0.5, 0.5);
+            assert!(l.is_finite(), "VCA output L must be finite");
+            assert!(r.is_finite(), "VCA output R must be finite");
+        }
+    }
+
+    #[test]
+    fn test_vca_compressor_quiet_passes_through() {
+        let mut vca = VcaCompressor::new(44100.0);
+        vca.cached_thresh = -18.0;
+        vca.cached_ratio = 4.0;
+        let input = 0.0001_f32;
+        let (out_l, out_r) = vca.process_sample(input, input);
+        assert!(out_l.is_finite());
+        assert!(out_r.is_finite());
+    }
+
+    // ── OpticalCompressor ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_optical_compressor_new_does_not_panic() {
+        let _opt = OpticalCompressor::new(44100.0);
+    }
+
+    #[test]
+    fn test_optical_compressor_process_produces_finite_output() {
+        let mut opt = OpticalCompressor::new(44100.0);
+        opt.update_parameters(-12.0, 0.5, 0.5);
+        for _ in 0..200 {
+            let (l, r) = opt.process_sample(0.7, -0.7, -12.0);
+            assert!(l.is_finite(), "Optical output L: {l}");
+            assert!(r.is_finite(), "Optical output R: {r}");
+        }
+    }
+
+    #[test]
+    fn test_optical_compressor_loud_signal_is_attenuated() {
+        let mut opt = OpticalCompressor::new(44100.0);
+        opt.update_parameters(-12.0, 0.8, 0.5);
+        // Warm up
+        for _ in 0..2000 { opt.process_sample(1.0, 1.0, -12.0); }
+        let (out_l, _) = opt.process_sample(1.0, 1.0, -12.0);
+        assert!(out_l < 1.0, "Optical compressor should reduce loud signal, got {out_l}");
+    }
+}

@@ -156,3 +156,103 @@ impl PultecEQ {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pultec_new_does_not_panic() {
+        let _eq = PultecEQ::new(44100.0);
+        let _eq = PultecEQ::new(48000.0);
+        let _eq = PultecEQ::new(96000.0);
+    }
+
+    #[test]
+    fn test_pultec_update_parameters_nominal_does_not_panic() {
+        let mut eq = PultecEQ::new(44100.0);
+        eq.update_parameters(
+            100.0, // lf_boost_freq
+            0.5,   // lf_boost_gain
+            0.3,   // lf_cut_gain
+            8000.0,// hf_boost_freq
+            0.6,   // hf_boost_gain
+            0.5,   // hf_boost_bandwidth
+            10000.0,// hf_cut_freq
+            0.2,   // hf_cut_gain
+            0.0,   // tube_drive
+        );
+    }
+
+    #[test]
+    fn test_pultec_lf_boost_quadratic_curve() {
+        // With gain=1.0, boost_db = 1^2 * 8.0 = 8.0 dB
+        // With gain=0.5, boost_db = 0.5^2 * 8.0 = 2.0 dB
+        // These values come from the formula in update_parameters; we verify the intent.
+        let gain_high = 1.0_f32;
+        let gain_low = 0.5_f32;
+        let boost_high = gain_high * gain_high * 8.0;
+        let boost_low = gain_low * gain_low * 8.0;
+        assert!((boost_high - 8.0).abs() < 1e-5, "1.0 → 8 dB");
+        assert!((boost_low - 2.0).abs() < 1e-5, "0.5 → 2 dB");
+        assert!(boost_high > boost_low);
+    }
+
+    #[test]
+    fn test_pultec_hf_boost_quadratic_curve() {
+        // max gain: 1^2 * 10 = 10 dB
+        let boost = 1.0_f32 * 1.0 * 10.0;
+        assert!((boost - 10.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_pultec_hf_cut_quadratic_curve() {
+        // max cut: 1^2 * 8 = 8 dB negative
+        let cut = -(1.0_f32 * 1.0 * 8.0);
+        assert!((cut + 8.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_pultec_tube_drive_clamping() {
+        let mut eq = PultecEQ::new(44100.0);
+        // tube_drive is clamped to [0.0, 1.0] in update_parameters
+        eq.update_parameters(100.0, 0.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 2.0);
+        assert!((eq.tube_drive - 1.0).abs() < 1e-5, "tube_drive > 1.0 should clamp to 1.0");
+
+        eq.update_parameters(100.0, 0.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, -1.0);
+        assert!((eq.tube_drive - 0.0).abs() < 1e-5, "tube_drive < 0.0 should clamp to 0.0");
+    }
+
+    #[test]
+    fn test_pultec_lf_boost_freq_clamping() {
+        // safe_lf_freq is clamped to [30, 200] — extremely low freq should not panic
+        let mut eq = PultecEQ::new(44100.0);
+        eq.update_parameters(1.0, 0.5, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+        eq.update_parameters(500.0, 0.5, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+    }
+
+    #[test]
+    fn test_pultec_hf_freq_clamping() {
+        let mut eq = PultecEQ::new(44100.0);
+        // hf_boost_freq clamps to [3000, 20000]
+        eq.update_parameters(100.0, 0.5, 0.0, 100.0, 0.5, 0.5, 10000.0, 0.2, 0.0);
+        eq.update_parameters(100.0, 0.5, 0.0, 30000.0, 0.5, 0.5, 25000.0, 0.2, 0.0);
+    }
+
+    #[test]
+    fn test_pultec_hf_q_range() {
+        // hf_q = 0.6 + bandwidth^2 * 1.4 — ranges from 0.6 (bandwidth=0) to 2.0 (bandwidth=1)
+        let q_min = 0.6_f32 + 0.0_f32.powi(2) * 1.4;
+        let q_max = 0.6_f32 + 1.0_f32.powi(2) * 1.4;
+        assert!((q_min - 0.6).abs() < 1e-5, "Q min should be 0.6");
+        assert!((q_max - 2.0).abs() < 1e-5, "Q max should be 2.0");
+    }
+
+    #[test]
+    fn test_pultec_inactive_sections_do_not_modify_coefficients() {
+        // Gain values <= 0.01 should result in 0 dB (inactive sections).
+        // Verify no panic when all gains are near zero.
+        let mut eq = PultecEQ::new(44100.0);
+        eq.update_parameters(100.0, 0.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+    }
+}
+

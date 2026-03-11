@@ -370,3 +370,242 @@ impl DynamicEQ {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── BiquadPeak ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_biquad_peak_identity_passthrough() {
+        let mut bq = BiquadPeak::new();
+        // Identity filter (b0=1, all others 0) should pass signal unchanged
+        for &input in &[0.0, 0.5, -0.5, 1.0, -1.0] {
+            let out = bq.process(input);
+            assert!((out - input).abs() < 1e-6, "Identity passthrough: input={input}, out={out}");
+        }
+    }
+
+    #[test]
+    fn test_biquad_peak_reset_clears_state() {
+        let mut bq = BiquadPeak::new();
+        bq.update_peaking(1000.0, 1.0, 6.0, 44100.0);
+        for _ in 0..100 { bq.process(1.0); }
+        bq.reset();
+        assert!((bq.x1 - 0.0).abs() < 1e-9);
+        assert!((bq.x2 - 0.0).abs() < 1e-9);
+        assert!((bq.y1 - 0.0).abs() < 1e-9);
+        assert!((bq.y2 - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_biquad_peak_update_peaking_does_not_clear_state() {
+        // State fields must survive a coefficient update (key design invariant)
+        let mut bq = BiquadPeak::new();
+        bq.update_peaking(1000.0, 1.0, 6.0, 44100.0);
+        for _ in 0..100 { bq.process(0.7); }
+        let y1_before = bq.y1;
+        bq.update_peaking(2000.0, 1.5, -3.0, 44100.0);
+        assert!((bq.y1 - y1_before).abs() < 1e-9, "y1 state should survive coeff update");
+    }
+
+    #[test]
+    fn test_biquad_peak_nonzero_gain_changes_amplitude() {
+        let mut flat = BiquadPeak::new();
+        flat.update_peaking(1000.0, 1.0, 0.0, 44100.0);
+
+        let mut boosted = BiquadPeak::new();
+        boosted.update_peaking(1000.0, 1.0, 6.0, 44100.0);
+
+        // Warm up both with a DC signal
+        for _ in 0..1000 {
+            flat.process(0.5);
+            boosted.process(0.5);
+        }
+        let flat_out = flat.process(0.5);
+        let boosted_out = boosted.process(0.5);
+        // 6 dB boost at center freq — boosted should produce higher output
+        assert!(boosted_out.abs() > flat_out.abs(), "6 dB boost should increase amplitude");
+    }
+
+    #[test]
+    fn test_biquad_peak_produces_finite_output() {
+        let mut bq = BiquadPeak::new();
+        bq.update_peaking(20.0, 0.1, -60.0, 44100.0); // extreme params
+        for i in 0..200 {
+            let out = bq.process(if i % 2 == 0 { 1.0 } else { -1.0 });
+            assert!(out.is_finite(), "BiquadPeak output must be finite at sample {i}: {out}");
+        }
+    }
+
+    #[test]
+    fn test_biquad_bandpass_update_does_not_panic() {
+        let mut bq = BiquadPeak::new();
+        bq.update_bandpass(1000.0, 1.0, 44100.0);
+        bq.update_bandpass(500.0, 2.0, 48000.0);
+    }
+
+    #[test]
+    fn test_biquad_freq_clamping_to_nyquist() {
+        let sr = 44100.0;
+        let nyquist = sr * 0.49;
+        let mut bq = BiquadPeak::new();
+        // freq above Nyquist should be clamped — should not panic or produce NaN
+        bq.update_peaking(nyquist + 10000.0, 1.0, 3.0, sr);
+        let out = bq.process(0.5);
+        assert!(out.is_finite(), "Output after freq clamping: {out}");
+    }
+
+    // ── DynamicBand ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_dynamic_band_new_default_values() {
+        let band = DynamicBand::new(44100.0);
+        assert!((band.envelope - 0.0).abs() < 1e-9);
+        assert!((band.gain_reduction_db - 0.0).abs() < 1e-9);
+        assert!(band.enabled);
+        assert!(!band.solo);
+        assert!((band.threshold_db - (-18.0)).abs() < 1e-5);
+        assert!((band.ratio - 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_dynamic_band_disabled_passes_through() {
+        let sr = 44100.0;
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(
+            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
+            -18.0, 4.0, 5.0, 100.0, 0.0, false, false,
+        );
+        // When disabled, process_sample should return input unchanged
+        let input = 0.7_f32;
+        let out = band.process_sample(input);
+        assert!((out - input).abs() < 1e-5, "Disabled band: expected {input}, got {out}");
+    }
+
+    #[test]
+    fn test_dynamic_band_reset_clears_envelope() {
+        let mut band = DynamicBand::new(44100.0);
+        band.update_parameters(
+            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
+            -18.0, 4.0, 0.1, 10.0, 0.0, true, false,
+        );
+        for _ in 0..500 { band.process_sample(1.0); }
+        band.reset();
+        assert!((band.envelope - 0.0).abs() < 1e-9, "Envelope should be 0 after reset");
+        assert!((band.gain_reduction_db - 0.0).abs() < 1e-9, "GR should be 0 after reset");
+    }
+
+    #[test]
+    fn test_dynamic_band_compress_mode_reduces_loud_signal() {
+        let sr = 44100.0;
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(
+            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
+            -30.0, // very sensitive threshold
+            4.0, 0.001, 50.0, 0.0, true, false,
+        );
+        // Warm up the envelope with loud signal
+        for _ in 0..2000 { band.process_sample(1.0); }
+        let gr = band.gain_reduction_db;
+        assert!(gr > 0.0, "Compressor should show positive GR in dB, got {gr}");
+    }
+
+    #[test]
+    fn test_dynamic_band_gate_mode_attenuates_quiet_signal() {
+        let sr = 44100.0;
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(
+            DynamicMode::Gate, 1000.0, 1000.0, 1.0,
+            -6.0, // high threshold — quiet signal is below it
+            4.0, 0.1, 50.0, 0.0, true, false,
+        );
+        // Process a quiet signal below threshold
+        for _ in 0..200 { band.process_sample(0.01); }
+        let out = band.process_sample(0.01);
+        // Gate should attenuate signal below threshold
+        assert!(out.abs() < 0.01, "Gate should attenuate quiet signal, got {out}");
+    }
+
+    #[test]
+    fn test_dynamic_band_attack_coeff_formula() {
+        // attack_coeff = exp(-1 / (attack_ms * 0.001 * sr))
+        let sr = 44100.0_f32;
+        let attack_ms = 5.0_f32;
+        let expected = (-1.0_f32 / (attack_ms * 0.001 * sr)).exp();
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(
+            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
+            -18.0, 4.0, attack_ms, 100.0, 0.0, true, false,
+        );
+        assert!(
+            (band.attack_coeff - expected).abs() < 1e-7,
+            "Attack coeff: {} vs expected {}",
+            band.attack_coeff, expected
+        );
+    }
+
+    #[test]
+    fn test_dynamic_band_process_produces_finite_output() {
+        let mut band = DynamicBand::new(44100.0);
+        band.update_parameters(
+            DynamicMode::CompressDownward, 500.0, 500.0, 1.5,
+            -18.0, 8.0, 1.0, 100.0, 0.0, true, false,
+        );
+        for i in 0..500 {
+            let input = if i % 3 == 0 { 1.0 } else { 0.1 };
+            let out = band.process_sample(input);
+            assert!(out.is_finite(), "DynamicBand output must be finite at {i}: {out}");
+        }
+    }
+
+    // ── DynamicEQ public API ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_dynamic_eq_new_does_not_panic() {
+        let _deq = DynamicEQ::new(44100.0);
+        let _deq = DynamicEQ::new(48000.0);
+        let _deq = DynamicEQ::new(96000.0);
+    }
+
+    #[test]
+    fn test_dynamic_eq_update_parameters_does_not_panic() {
+        let mut deq = DynamicEQ::new(44100.0);
+        let params = [DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0, freq: 1000.0, q: 1.0,
+            threshold_db: -18.0, ratio: 4.0,
+            attack_ms: 5.0, release_ms: 100.0,
+            gain_db: 0.0, enabled: true, solo: false,
+        }; 4];
+        deq.update_parameters(&params);
+    }
+
+    #[test]
+    fn test_dynamic_eq_get_gain_reduction_db_initial() {
+        let deq = DynamicEQ::new(44100.0);
+        let gr = deq.get_gain_reduction_db();
+        for (i, &val) in gr.iter().enumerate() {
+            assert!((val - 0.0).abs() < 1e-9, "Initial GR band {i} should be 0.0");
+        }
+    }
+
+    #[test]
+    fn test_dynamic_eq_reset_clears_all_bands() {
+        let mut deq = DynamicEQ::new(44100.0);
+        // Manually drive envelope in all bands
+        for band in &mut deq.bands {
+            band.update_parameters(
+                DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
+                -18.0, 4.0, 0.1, 10.0, 0.0, true, false,
+            );
+            for _ in 0..200 { band.process_sample(1.0); }
+        }
+        deq.reset();
+        let gr = deq.get_gain_reduction_db();
+        for (i, &val) in gr.iter().enumerate() {
+            assert!((val - 0.0).abs() < 1e-9, "GR band {i} should be 0 after reset");
+        }
+    }
+}

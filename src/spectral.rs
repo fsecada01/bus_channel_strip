@@ -141,3 +141,151 @@ impl Default for GainReductionData {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    // ── SpectrumData ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_spectrum_data_new_not_dirty() {
+        let sd = SpectrumData::new();
+        let mut out = vec![0.0_f32; SPECTRUM_BINS];
+        assert!(!sd.read_into_slice(&mut out), "Fresh SpectrumData must not be dirty");
+    }
+
+    #[test]
+    fn test_spectrum_data_write_read_roundtrip() {
+        let sd = SpectrumData::new();
+        let input: Vec<f32> = (0..SPECTRUM_BINS).map(|i| i as f32 * 0.001).collect();
+        sd.write_from_slice(&input);
+
+        let mut out = vec![0.0_f32; SPECTRUM_BINS];
+        assert!(sd.read_into_slice(&mut out), "Should detect new data after write");
+        for (i, (&expected, &actual)) in input.iter().zip(out.iter()).enumerate() {
+            assert!(
+                (expected - actual).abs() < 1e-7,
+                "Bin {i} mismatch: expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_spectrum_data_dirty_clears_after_read() {
+        let sd = SpectrumData::new();
+        sd.write_from_slice(&vec![1.0_f32; SPECTRUM_BINS]);
+
+        let mut out = vec![0.0_f32; SPECTRUM_BINS];
+        let first = sd.read_into_slice(&mut out);
+        let second = sd.read_into_slice(&mut out);
+
+        assert!(first, "First read should see pending data");
+        assert!(!second, "Second read should see no new data (dirty flag cleared)");
+    }
+
+    #[test]
+    fn test_spectrum_data_oversized_write_does_not_panic() {
+        let sd = SpectrumData::new();
+        let input = vec![0.5_f32; SPECTRUM_BINS + 100]; // more bins than SPECTRUM_BINS
+        sd.write_from_slice(&input); // should clamp silently
+        let mut out = vec![0.0_f32; SPECTRUM_BINS];
+        assert!(sd.read_into_slice(&mut out));
+        for &v in &out {
+            assert!((v - 0.5).abs() < 1e-6, "All written bins should be 0.5");
+        }
+    }
+
+    #[test]
+    fn test_spectrum_data_undersized_read_does_not_panic() {
+        let sd = SpectrumData::new();
+        sd.write_from_slice(&vec![0.25_f32; SPECTRUM_BINS]);
+        let mut out = vec![0.0_f32; 16]; // read fewer than SPECTRUM_BINS
+        assert!(sd.read_into_slice(&mut out));
+        for &v in &out {
+            assert!((v - 0.25).abs() < 1e-6, "Read bins should be 0.25");
+        }
+    }
+
+    #[test]
+    fn test_spectrum_data_zero_slice_write_read() {
+        let sd = SpectrumData::new();
+        sd.write_from_slice(&[]); // empty write still sets dirty flag
+        let mut out = vec![0.0_f32; 4];
+        // dirty flag is set even on empty write
+        let updated = sd.read_into_slice(&mut out);
+        assert!(updated, "Empty write should still set dirty");
+    }
+
+    // ── f32 bit-packing ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_f32_bit_roundtrip_normal_values() {
+        for &v in &[-1.0_f32, -0.5, 0.0, f32::MIN_POSITIVE, 0.5, 1.0, 100.0] {
+            let recovered = f32::from_bits(v.to_bits());
+            assert_eq!(v.to_bits(), recovered.to_bits(), "bit roundtrip failed for {v}");
+        }
+    }
+
+    // ── AnalysisResult ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_analysis_result_default_not_ready() {
+        let ar = AnalysisResult::new();
+        assert!(!ar.ready.load(Ordering::Relaxed), "AnalysisResult should not be ready by default");
+    }
+
+    #[test]
+    fn test_analysis_result_default_freq_is_1khz() {
+        let ar = AnalysisResult::new();
+        let freq = f32::from_bits(ar.target_freq.load(Ordering::Relaxed));
+        assert!((freq - 1000.0).abs() < 0.1, "Default target_freq should be 1000 Hz, got {freq}");
+    }
+
+    #[test]
+    fn test_analysis_result_default_threshold_is_minus_18db() {
+        let ar = AnalysisResult::new();
+        let thresh = f32::from_bits(ar.target_threshold_db.load(Ordering::Relaxed));
+        assert!((thresh - (-18.0)).abs() < 0.1, "Default threshold should be -18 dB, got {thresh}");
+    }
+
+    #[test]
+    fn test_analysis_result_overlap_bins_length() {
+        let ar = AnalysisResult::new();
+        assert_eq!(ar.overlap_bins.len(), SPECTRUM_BINS);
+    }
+
+    // ── GainReductionData ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_gain_reduction_data_initialized_zero() {
+        let grd = GainReductionData::new();
+        for (i, band) in grd.bands.iter().enumerate() {
+            let val = f32::from_bits(band.load(Ordering::Relaxed));
+            assert!(
+                val == 0.0,
+                "Band {i} should be 0.0 dB at init, got {val}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_gain_reduction_data_write_read() {
+        let grd = GainReductionData::new();
+        let test_db = 3.5_f32;
+        grd.bands[2].store(test_db.to_bits(), Ordering::Relaxed);
+        let recovered = f32::from_bits(grd.bands[2].load(Ordering::Relaxed));
+        assert!((recovered - test_db).abs() < 1e-6, "GR write/read: expected {test_db}, got {recovered}");
+    }
+
+    // ── Constants ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_spectrum_constants_sane() {
+        assert_eq!(SPECTRUM_BINS, 512);
+        assert_eq!(FFT_SIZE, 2048);
+        // FFT_SIZE >= 2 × SPECTRUM_BINS ensures proper positive-frequency coverage
+        assert!(FFT_SIZE >= SPECTRUM_BINS * 2);
+    }
+}
