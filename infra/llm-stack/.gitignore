@@ -1,0 +1,12 @@
+# Local overrides
+.env.local
+.env.*.local
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Temp
+tmp/
+.tmp/
