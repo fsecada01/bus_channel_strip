@@ -13,23 +13,53 @@
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
 
+// Denormal flush threshold. IIR filters and envelope followers asymptote to
+// zero through the subnormal range (|x| < ~1.18e-38 on f32), which on x86
+// without FTZ costs ~100x the normal multiply latency. Flushing any state
+// below this threshold to zero eliminates the stall while introducing an
+// error well below any audible level.
+const DENORMAL_FLUSH: f32 = 1.0e-20;
+
+#[inline(always)]
+fn flush_denormal(x: f32) -> f32 {
+    if x.abs() < DENORMAL_FLUSH {
+        0.0
+    } else {
+        x
+    }
+}
+
 // ── Stateful biquad ──────────────────────────────────────────────────────────
 //
 // Both the EQ and sidechain filters use this struct. Coefficient fields
 // (b0‥a2) are updated in-place without touching the state fields (x1,x2,y1,y2).
 
 struct BiquadPeak {
-    b0: f32, b1: f32, b2: f32,
-    a1: f32, a2: f32,
-    x1: f32, x2: f32,
-    y1: f32, y2: f32,
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
 }
 
 impl BiquadPeak {
     fn new() -> Self {
         // Identity (flat): b0=1, all others 0.
-        Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0,
-               x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+        }
     }
 
     /// RBJ Cookbook peaking EQ — updates coefficients, preserves state.
@@ -58,8 +88,8 @@ impl BiquadPeak {
         let sin_w0 = w0.sin();
         let alpha = sin_w0 / (2.0 * q);
         let inv_a0 = 1.0 / (1.0 + alpha);
-        self.b0 =  (sin_w0 / 2.0) * inv_a0;
-        self.b1 =  0.0;
+        self.b0 = (sin_w0 / 2.0) * inv_a0;
+        self.b1 = 0.0;
         self.b2 = -(sin_w0 / 2.0) * inv_a0;
         self.a1 = (-2.0 * cos_w0) * inv_a0;
         self.a2 = (1.0 - alpha) * inv_a0;
@@ -68,16 +98,22 @@ impl BiquadPeak {
     /// Direct Form 1 — processes one sample.
     #[inline]
     fn process(&mut self, x0: f32) -> f32 {
-        let y0 = self.b0 * x0 + self.b1 * self.x1 + self.b2 * self.x2
-                              - self.a1 * self.y1 - self.a2 * self.y2;
-        self.x2 = self.x1; self.x1 = x0;
-        self.y2 = self.y1; self.y1 = y0;
+        let mut y0 = self.b0 * x0 + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
+            - self.a2 * self.y2;
+        y0 = flush_denormal(y0);
+        self.x2 = self.x1;
+        self.x1 = x0;
+        self.y2 = self.y1;
+        self.y1 = y0;
         y0
     }
 
     fn reset(&mut self) {
-        self.x1 = 0.0; self.x2 = 0.0;
-        self.y1 = 0.0; self.y2 = 0.0;
+        self.x1 = 0.0;
+        self.x2 = 0.0;
+        self.y1 = 0.0;
+        self.y2 = 0.0;
     }
 }
 
@@ -94,7 +130,9 @@ pub enum DynamicMode {
 }
 
 impl Default for DynamicMode {
-    fn default() -> Self { DynamicMode::CompressDownward }
+    fn default() -> Self {
+        DynamicMode::CompressDownward
+    }
 }
 
 // ── DynamicBand ───────────────────────────────────────────────────────────────
@@ -116,11 +154,11 @@ struct DynamicBand {
     detector_freq: f32,
     frequency: f32,
     q: f32,
-    threshold_db: f32,   // stored directly in dB (no round-trip conversion)
+    threshold_db: f32, // stored directly in dB (no round-trip conversion)
     ratio: f32,
     attack_coeff: f32,
     release_coeff: f32,
-    make_up_gain: f32,   // linear gain
+    make_up_gain: f32, // linear gain
     enabled: bool,
     solo: bool,
 }
@@ -177,14 +215,15 @@ impl DynamicBand {
         self.ratio = ratio;
         let sr = self.sample_rate;
         // Standard exponential-decay IIR attack/release coefficients.
-        self.attack_coeff  = (-1.0 / (attack_ms.max(0.01)  * 0.001 * sr)).exp();
+        self.attack_coeff = (-1.0 / (attack_ms.max(0.01) * 0.001 * sr)).exp();
         self.release_coeff = (-1.0 / (release_ms.max(0.01) * 0.001 * sr)).exp();
         self.make_up_gain = 10.0f32.powf(make_up_gain_db / 20.0);
         self.enabled = enabled;
         self.solo = solo;
 
         // Update sidechain detection filter — state preserved, no reset.
-        self.sidechain_filter.update_peaking(detector_freq, q, 6.0, sr);
+        self.sidechain_filter
+            .update_peaking(detector_freq, q, 6.0, sr);
 
         // Update solo bandpass filter for this band's center frequency.
         self.solo_filter.update_bandpass(frequency, q, sr);
@@ -202,8 +241,10 @@ impl DynamicBand {
         if detection_level > self.envelope {
             self.envelope = detection_level + (self.envelope - detection_level) * self.attack_coeff;
         } else {
-            self.envelope = detection_level + (self.envelope - detection_level) * self.release_coeff;
+            self.envelope =
+                detection_level + (self.envelope - detection_level) * self.release_coeff;
         }
+        self.envelope = flush_denormal(self.envelope);
 
         // 2. Gain computation in dB.
         // Guard: max with MIN_POSITIVE prevents log10(0) = -inf → NaN / Gate explosion.
@@ -239,7 +280,8 @@ impl DynamicBand {
         // with at most 0.05 dB of GR tracking error (inaudible).
         const GR_HYSTERESIS_DB: f32 = 0.05;
         if (gain_change_db - self.last_gain_change_db).abs() > GR_HYSTERESIS_DB {
-            self.eq_filter.update_peaking(self.frequency, self.q, gain_change_db, self.sample_rate);
+            self.eq_filter
+                .update_peaking(self.frequency, self.q, gain_change_db, self.sample_rate);
             self.last_gain_change_db = gain_change_db;
         }
 
@@ -269,7 +311,7 @@ pub struct DynamicBandParams {
     pub ratio: f32,        // linear, e.g. 4.0 for 4:1
     pub attack_ms: f32,
     pub release_ms: f32,
-    pub gain_db: f32,      // makeup gain in dB
+    pub gain_db: f32, // makeup gain in dB
     pub enabled: bool,
     pub solo: bool,
 }
@@ -313,7 +355,9 @@ impl DynamicEQ {
     pub fn process(&mut self, buffer: &mut Buffer) {
         let any_solo = self.bands.iter().any(|b| b.solo && b.enabled);
         // Normalise solo level: sum of N band-limited signals ÷ N to avoid clipping.
-        let solo_count = self.bands.iter()
+        let solo_count = self
+            .bands
+            .iter()
             .filter(|b| b.solo && b.enabled)
             .count()
             .max(1) as f32;
@@ -340,6 +384,7 @@ impl DynamicEQ {
                             } else {
                                 band.envelope = det + (band.envelope - det) * band.release_coeff;
                             }
+                            band.envelope = flush_denormal(band.envelope);
                         }
                     }
                     *sample = out / solo_count;
@@ -383,7 +428,10 @@ mod tests {
         // Identity filter (b0=1, all others 0) should pass signal unchanged
         for &input in &[0.0, 0.5, -0.5, 1.0, -1.0] {
             let out = bq.process(input);
-            assert!((out - input).abs() < 1e-6, "Identity passthrough: input={input}, out={out}");
+            assert!(
+                (out - input).abs() < 1e-6,
+                "Identity passthrough: input={input}, out={out}"
+            );
         }
     }
 
@@ -391,7 +439,9 @@ mod tests {
     fn test_biquad_peak_reset_clears_state() {
         let mut bq = BiquadPeak::new();
         bq.update_peaking(1000.0, 1.0, 6.0, 44100.0);
-        for _ in 0..100 { bq.process(1.0); }
+        for _ in 0..100 {
+            bq.process(1.0);
+        }
         bq.reset();
         assert!((bq.x1 - 0.0).abs() < 1e-9);
         assert!((bq.x2 - 0.0).abs() < 1e-9);
@@ -404,10 +454,15 @@ mod tests {
         // State fields must survive a coefficient update (key design invariant)
         let mut bq = BiquadPeak::new();
         bq.update_peaking(1000.0, 1.0, 6.0, 44100.0);
-        for _ in 0..100 { bq.process(0.7); }
+        for _ in 0..100 {
+            bq.process(0.7);
+        }
         let y1_before = bq.y1;
         bq.update_peaking(2000.0, 1.5, -3.0, 44100.0);
-        assert!((bq.y1 - y1_before).abs() < 1e-9, "y1 state should survive coeff update");
+        assert!(
+            (bq.y1 - y1_before).abs() < 1e-9,
+            "y1 state should survive coeff update"
+        );
     }
 
     #[test]
@@ -426,7 +481,10 @@ mod tests {
         let flat_out = flat.process(0.5);
         let boosted_out = boosted.process(0.5);
         // 6 dB boost at center freq — boosted should produce higher output
-        assert!(boosted_out.abs() > flat_out.abs(), "6 dB boost should increase amplitude");
+        assert!(
+            boosted_out.abs() > flat_out.abs(),
+            "6 dB boost should increase amplitude"
+        );
     }
 
     #[test]
@@ -435,7 +493,10 @@ mod tests {
         bq.update_peaking(20.0, 0.1, -60.0, 44100.0); // extreme params
         for i in 0..200 {
             let out = bq.process(if i % 2 == 0 { 1.0 } else { -1.0 });
-            assert!(out.is_finite(), "BiquadPeak output must be finite at sample {i}: {out}");
+            assert!(
+                out.is_finite(),
+                "BiquadPeak output must be finite at sample {i}: {out}"
+            );
         }
     }
 
@@ -460,6 +521,50 @@ mod tests {
     // ── DynamicBand ───────────────────────────────────────────────────────────
 
     #[test]
+    fn test_flush_denormal_zeros_subthreshold() {
+        assert_eq!(flush_denormal(0.0), 0.0);
+        assert_eq!(flush_denormal(1e-25), 0.0);
+        assert_eq!(flush_denormal(-1e-25), 0.0);
+        // Values above threshold pass through unchanged
+        assert_eq!(flush_denormal(1.0e-15), 1.0e-15);
+        assert_eq!(flush_denormal(1.0), 1.0);
+        assert_eq!(flush_denormal(-0.5), -0.5);
+    }
+
+    #[test]
+    fn test_dynamic_band_envelope_flushes_to_zero_on_silence() {
+        let sr = 44100.0;
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(
+            DynamicMode::CompressDownward,
+            1000.0,
+            1000.0,
+            1.0,
+            -18.0,
+            4.0,
+            1.0,
+            10.0, // 10 ms release — decays through subnormals within the sample budget
+            0.0,
+            true,
+            false,
+        );
+        for _ in 0..1000 {
+            band.process_sample(1.0);
+        }
+        assert!(band.envelope > 0.1);
+        // At 10 ms release, envelope reaches ~e^-500 after ~220k silent samples —
+        // guaranteed to cross the DENORMAL_FLUSH threshold well before the end.
+        for _ in 0..500_000 {
+            band.process_sample(0.0);
+        }
+        assert_eq!(
+            band.envelope, 0.0,
+            "Envelope must flush to exactly zero under sustained silence, got {}",
+            band.envelope
+        );
+    }
+
+    #[test]
     fn test_dynamic_band_new_default_values() {
         let band = DynamicBand::new(44100.0);
         assert!((band.envelope - 0.0).abs() < 1e-9);
@@ -475,26 +580,55 @@ mod tests {
         let sr = 44100.0;
         let mut band = DynamicBand::new(sr);
         band.update_parameters(
-            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
-            -18.0, 4.0, 5.0, 100.0, 0.0, false, false,
+            DynamicMode::CompressDownward,
+            1000.0,
+            1000.0,
+            1.0,
+            -18.0,
+            4.0,
+            5.0,
+            100.0,
+            0.0,
+            false,
+            false,
         );
         // When disabled, process_sample should return input unchanged
         let input = 0.7_f32;
         let out = band.process_sample(input);
-        assert!((out - input).abs() < 1e-5, "Disabled band: expected {input}, got {out}");
+        assert!(
+            (out - input).abs() < 1e-5,
+            "Disabled band: expected {input}, got {out}"
+        );
     }
 
     #[test]
     fn test_dynamic_band_reset_clears_envelope() {
         let mut band = DynamicBand::new(44100.0);
         band.update_parameters(
-            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
-            -18.0, 4.0, 0.1, 10.0, 0.0, true, false,
+            DynamicMode::CompressDownward,
+            1000.0,
+            1000.0,
+            1.0,
+            -18.0,
+            4.0,
+            0.1,
+            10.0,
+            0.0,
+            true,
+            false,
         );
-        for _ in 0..500 { band.process_sample(1.0); }
+        for _ in 0..500 {
+            band.process_sample(1.0);
+        }
         band.reset();
-        assert!((band.envelope - 0.0).abs() < 1e-9, "Envelope should be 0 after reset");
-        assert!((band.gain_reduction_db - 0.0).abs() < 1e-9, "GR should be 0 after reset");
+        assert!(
+            (band.envelope - 0.0).abs() < 1e-9,
+            "Envelope should be 0 after reset"
+        );
+        assert!(
+            (band.gain_reduction_db - 0.0).abs() < 1e-9,
+            "GR should be 0 after reset"
+        );
     }
 
     #[test]
@@ -502,14 +636,27 @@ mod tests {
         let sr = 44100.0;
         let mut band = DynamicBand::new(sr);
         band.update_parameters(
-            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
+            DynamicMode::CompressDownward,
+            1000.0,
+            1000.0,
+            1.0,
             -30.0, // very sensitive threshold
-            4.0, 0.001, 50.0, 0.0, true, false,
+            4.0,
+            0.001,
+            50.0,
+            0.0,
+            true,
+            false,
         );
         // Warm up the envelope with loud signal
-        for _ in 0..2000 { band.process_sample(1.0); }
+        for _ in 0..2000 {
+            band.process_sample(1.0);
+        }
         let gr = band.gain_reduction_db;
-        assert!(gr > 0.0, "Compressor should show positive GR in dB, got {gr}");
+        assert!(
+            gr > 0.0,
+            "Compressor should show positive GR in dB, got {gr}"
+        );
     }
 
     #[test]
@@ -517,15 +664,28 @@ mod tests {
         let sr = 44100.0;
         let mut band = DynamicBand::new(sr);
         band.update_parameters(
-            DynamicMode::Gate, 1000.0, 1000.0, 1.0,
+            DynamicMode::Gate,
+            1000.0,
+            1000.0,
+            1.0,
             -6.0, // high threshold — quiet signal is below it
-            4.0, 0.1, 50.0, 0.0, true, false,
+            4.0,
+            0.1,
+            50.0,
+            0.0,
+            true,
+            false,
         );
         // Process a quiet signal below threshold
-        for _ in 0..200 { band.process_sample(0.01); }
+        for _ in 0..200 {
+            band.process_sample(0.01);
+        }
         let out = band.process_sample(0.01);
         // Gate should attenuate signal below threshold
-        assert!(out.abs() < 0.01, "Gate should attenuate quiet signal, got {out}");
+        assert!(
+            out.abs() < 0.01,
+            "Gate should attenuate quiet signal, got {out}"
+        );
     }
 
     #[test]
@@ -536,13 +696,23 @@ mod tests {
         let expected = (-1.0_f32 / (attack_ms * 0.001 * sr)).exp();
         let mut band = DynamicBand::new(sr);
         band.update_parameters(
-            DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
-            -18.0, 4.0, attack_ms, 100.0, 0.0, true, false,
+            DynamicMode::CompressDownward,
+            1000.0,
+            1000.0,
+            1.0,
+            -18.0,
+            4.0,
+            attack_ms,
+            100.0,
+            0.0,
+            true,
+            false,
         );
         assert!(
             (band.attack_coeff - expected).abs() < 1e-7,
             "Attack coeff: {} vs expected {}",
-            band.attack_coeff, expected
+            band.attack_coeff,
+            expected
         );
     }
 
@@ -550,13 +720,25 @@ mod tests {
     fn test_dynamic_band_process_produces_finite_output() {
         let mut band = DynamicBand::new(44100.0);
         band.update_parameters(
-            DynamicMode::CompressDownward, 500.0, 500.0, 1.5,
-            -18.0, 8.0, 1.0, 100.0, 0.0, true, false,
+            DynamicMode::CompressDownward,
+            500.0,
+            500.0,
+            1.5,
+            -18.0,
+            8.0,
+            1.0,
+            100.0,
+            0.0,
+            true,
+            false,
         );
         for i in 0..500 {
             let input = if i % 3 == 0 { 1.0 } else { 0.1 };
             let out = band.process_sample(input);
-            assert!(out.is_finite(), "DynamicBand output must be finite at {i}: {out}");
+            assert!(
+                out.is_finite(),
+                "DynamicBand output must be finite at {i}: {out}"
+            );
         }
     }
 
@@ -574,10 +756,16 @@ mod tests {
         let mut deq = DynamicEQ::new(44100.0);
         let params = [DynamicBandParams {
             mode: DynamicMode::CompressDownward,
-            detector_freq: 1000.0, freq: 1000.0, q: 1.0,
-            threshold_db: -18.0, ratio: 4.0,
-            attack_ms: 5.0, release_ms: 100.0,
-            gain_db: 0.0, enabled: true, solo: false,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -18.0,
+            ratio: 4.0,
+            attack_ms: 5.0,
+            release_ms: 100.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
         }; 4];
         deq.update_parameters(&params);
     }
@@ -587,7 +775,10 @@ mod tests {
         let deq = DynamicEQ::new(44100.0);
         let gr = deq.get_gain_reduction_db();
         for (i, &val) in gr.iter().enumerate() {
-            assert!((val - 0.0).abs() < 1e-9, "Initial GR band {i} should be 0.0");
+            assert!(
+                (val - 0.0).abs() < 1e-9,
+                "Initial GR band {i} should be 0.0"
+            );
         }
     }
 
@@ -597,15 +788,29 @@ mod tests {
         // Manually drive envelope in all bands
         for band in &mut deq.bands {
             band.update_parameters(
-                DynamicMode::CompressDownward, 1000.0, 1000.0, 1.0,
-                -18.0, 4.0, 0.1, 10.0, 0.0, true, false,
+                DynamicMode::CompressDownward,
+                1000.0,
+                1000.0,
+                1.0,
+                -18.0,
+                4.0,
+                0.1,
+                10.0,
+                0.0,
+                true,
+                false,
             );
-            for _ in 0..200 { band.process_sample(1.0); }
+            for _ in 0..200 {
+                band.process_sample(1.0);
+            }
         }
         deq.reset();
         let gr = deq.get_gain_reduction_db();
         for (i, &val) in gr.iter().enumerate() {
-            assert!((val - 0.0).abs() < 1e-9, "GR band {i} should be 0 after reset");
+            assert!(
+                (val - 0.0).abs() < 1e-9,
+                "GR band {i} should be 0 after reset"
+            );
         }
     }
 }
