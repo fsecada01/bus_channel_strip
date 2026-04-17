@@ -54,15 +54,12 @@ impl Filter {
         self.filter.update_coefficients(coeff);
     }
 
-    /// Process a single sample with soft clipping to prevent harsh distortion.
+    /// Process a single sample. Output is linear — callers own any saturation.
     pub fn run(&mut self, sample: f32) -> f32 {
-        let output = self.filter.run(sample);
-        // Apply soft clipping using tanh for musical distortion behavior
-        if output.abs() > 0.95 {
-            output.signum() * (1.0 - (-3.0 * output.abs()).exp())
-        } else {
-            output
-        }
+        // Biquad filtering only. No inline clipping: hidden nonlinearity inside
+        // a chain of cascaded EQs aliases and smears the midrange. Headroom
+        // management is the job of an explicit saturator stage downstream.
+        self.filter.run(sample)
     }
 }
 
@@ -315,13 +312,32 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_soft_clip_prevents_extreme_output() {
-        // Peaking filter at high gain — soft clipping should keep output <= 1.0
-        let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 12.0);
-        for _ in 0..200 {
-            f.run(2.0); // hot input
+    fn test_filter_is_linear_no_inline_clip() {
+        // Filter::run must be LTI — output scales linearly with input.
+        // Doubling the input must double the steady-state output.
+        let mut f1 = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 6.0);
+        let mut f2 = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 6.0);
+        // Warm up both filters
+        for _ in 0..2000 {
+            f1.run(0.1);
+            f2.run(0.2);
         }
-        let out = f.run(2.0);
-        assert!(out.abs() <= 1.0, "Soft clip must limit output to [-1, 1]; got {out}");
+        let a = f1.run(0.1);
+        let b = f2.run(0.2);
+        let ratio = b / a;
+        assert!(
+            (ratio - 2.0).abs() < 1e-3,
+            "Filter must be linear (scales with input); ratio={ratio}"
+        );
+    }
+
+    #[test]
+    fn test_filter_output_finite_at_high_gain() {
+        // Even at +18 dB bell, output stays finite (no denormals or NaN).
+        let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 18.0);
+        for _ in 0..2000 {
+            let out = f.run(0.5);
+            assert!(out.is_finite(), "Filter output must stay finite");
+        }
     }
 }

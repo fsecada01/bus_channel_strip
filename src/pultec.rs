@@ -125,32 +125,23 @@ impl PultecEQ {
         for samples in buffer.iter_samples() {
             for sample in samples {
                 let mut s = *sample;
-                
-                // Apply filters in Pultec-style order with soft clipping between stages
-                // 1. Low frequency boost
+
+                // Linear biquad chain. No inline clamps: stability is guaranteed
+                // by the coefficient math, and clamps between stages would inject
+                // memoryless distortion that aliases into the midrange.
                 s = self.lf_boost_filter.run(s);
-                s = s.clamp(-2.0, 2.0); // Prevent filter overflow
-                
-                // 2. Low frequency cut (can be simultaneous with boost)
                 s = self.lf_cut_filter.run(s);
-                s = s.clamp(-2.0, 2.0);
-                
-                // 3. High frequency boost  
                 s = self.hf_boost_filter.run(s);
-                s = s.clamp(-2.0, 2.0);
-                
-                // 4. High frequency cut
                 s = self.hf_cut_filter.run(s);
-                s = s.clamp(-2.0, 2.0);
-                
-                // 5. Very gentle tube saturation to reduce harshness
+
+                // Tube saturation — the one intentional nonlinearity in this module.
+                // TODO(#4): route this through an oversampled block to avoid aliasing.
                 if self.tube_drive > 0.01 {
-                    let drive_amount = self.tube_drive * 0.3; // Much gentler tube drive
-                    s = s.tanh() * (1.0 + drive_amount * 0.2); // Soft tube-style saturation
+                    let drive_amount = self.tube_drive * 0.3;
+                    s = s.tanh() * (1.0 + drive_amount * 0.2);
                 }
-                
-                // Final soft clipping to prevent digital clipping
-                *sample = s.clamp(-1.0, 1.0);
+
+                *sample = s;
             }
         }
     }

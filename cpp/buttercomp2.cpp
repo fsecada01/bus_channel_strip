@@ -163,13 +163,12 @@ void buttercomp2_process_stereo(ButterComp2State* state,
                 input_sample /= comp_ratio;
             }
             
-            // Output stage
+            // Output stage.
+            // No inline hard clip: the dedicated Punch clipper at the end of
+            // the signal chain owns ceiling management. Clipping here robs the
+            // downstream clipper of headroom and aliases at native sample rate.
             input_sample *= output_gain;
-            
-            // Apply simple soft limiting to prevent clipping
-            if (input_sample > 1.0) input_sample = 1.0;
-            if (input_sample < -1.0) input_sample = -1.0;
-            
+
             // Dry/Wet mix
             double output_sample = (dry_sample * dry) + (input_sample * wet);
             
