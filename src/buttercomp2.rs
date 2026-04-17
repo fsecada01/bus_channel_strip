@@ -1,5 +1,20 @@
+use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
+
+// ============================================================================
+// Sidechain HP Filter constants
+// ============================================================================
+// The detection path of VCA/FET is HP-filtered so low-frequency energy (kick
+// drums, bass) does not pump the compressor. Output audio is unchanged —
+// only what the detector "hears" is high-passed.
+
+/// Minimum SC HP frequency — below this the filter is effectively off.
+/// Chosen so session-default value == off (backward compatibility).
+const SC_HP_OFF_HZ: f32 = 20.0;
+/// Q for the sidechain HP filter. Butterworth Q (0.707) is neutral and
+/// predictable; higher Q would ring and make attack timing unpredictable.
+const SC_HP_Q: f32 = 0.707;
 
 // ============================================================================
 // ButterComp2 Model Enum
@@ -19,7 +34,9 @@ pub enum ButterComp2Model {
 }
 
 impl Default for ButterComp2Model {
-    fn default() -> Self { ButterComp2Model::Classic }
+    fn default() -> Self {
+        ButterComp2Model::Classic
+    }
 }
 
 // ============================================================================
@@ -44,8 +61,8 @@ pub enum FetRatio {
 impl FetRatio {
     pub fn value(self) -> f32 {
         match self {
-            Self::R4  =>  4.0,
-            Self::R8  =>  8.0,
+            Self::R4 => 4.0,
+            Self::R8 => 8.0,
             Self::R12 => 12.0,
             Self::R20 => 20.0,
             // All-buttons mode: gain computer uses 20:1 then enforces a separate GR cap.
@@ -98,10 +115,24 @@ pub struct FetCompressor {
     // Linear gain values derived from dB params.
     input_gain_linear: f32,
     output_gain_linear: f32,
+    // Detection-path high-pass filter — stops kick/bass from triggering GR.
+    // Applied only to the signal feeding the detector; audio path is untouched.
+    sc_hp_l: DirectForm1<f32>,
+    sc_hp_r: DirectForm1<f32>,
+    cached_sc_hp_hz: f32,
 }
 
 impl FetCompressor {
     pub fn new(sample_rate: f32) -> Self {
+        // Filters are initialised at the "off" frequency; update_parameters()
+        // will reconfigure them before first use.
+        let flat_hp = Coefficients::<f32>::from_params(
+            Type::HighPass,
+            sample_rate.hz(),
+            SC_HP_OFF_HZ.hz(),
+            SC_HP_Q,
+        )
+        .expect("20 Hz HP at any sample rate is always valid");
         let mut s = Self {
             sample_rate,
             envelope_db: 0.0,
@@ -120,16 +151,19 @@ impl FetCompressor {
             cached_auto_release: false,
             input_gain_linear: 1.0,
             output_gain_linear: 1.0,
+            sc_hp_l: DirectForm1::<f32>::new(flat_hp),
+            sc_hp_r: DirectForm1::<f32>::new(flat_hp),
+            cached_sc_hp_hz: f32::NAN,
         };
         s.recompute_coefficients(0.2, 250.0, false);
         s
     }
 
     fn recompute_coefficients(&mut self, attack_ms: f32, release_ms: f32, _auto_release: bool) {
-        self.coeff_attack  = (-1.0 / (attack_ms  * 0.001 * self.sample_rate)).exp();
+        self.coeff_attack = (-1.0 / (attack_ms * 0.001 * self.sample_rate)).exp();
         self.coeff_release = (-1.0 / (release_ms * 0.001 * self.sample_rate)).exp();
         // Fixed fast coefficients used by the All-Buttons secondary envelope and auto-release.
-        self.coeff_fast_attack  = (-1.0 / (5.0  * 0.001 * self.sample_rate)).exp();
+        self.coeff_fast_attack = (-1.0 / (5.0 * 0.001 * self.sample_rate)).exp();
         self.coeff_fast_release = (-1.0 / (50.0 * 0.001 * self.sample_rate)).exp();
     }
 
@@ -143,6 +177,7 @@ impl FetCompressor {
         release_ms: f32,
         ratio: FetRatio,
         auto_release: bool,
+        sc_hp_hz: f32,
     ) {
         if self.cached_input_db.is_nan() || (input_db - self.cached_input_db).abs() > 0.001 {
             self.cached_input_db = input_db;
@@ -152,22 +187,42 @@ impl FetCompressor {
             self.cached_output_db = output_db;
             self.output_gain_linear = 10.0_f32.powf(output_db / 20.0);
         }
-        let atk_changed  = self.cached_attack_ms.is_nan()  || (attack_ms  - self.cached_attack_ms ).abs() > 0.0001;
-        let rel_changed  = self.cached_release_ms.is_nan() || (release_ms - self.cached_release_ms).abs() > 0.5;
+        let atk_changed =
+            self.cached_attack_ms.is_nan() || (attack_ms - self.cached_attack_ms).abs() > 0.0001;
+        let rel_changed =
+            self.cached_release_ms.is_nan() || (release_ms - self.cached_release_ms).abs() > 0.5;
         let auto_changed = auto_release != self.cached_auto_release;
         if atk_changed || rel_changed || auto_changed {
-            self.cached_attack_ms    = attack_ms;
-            self.cached_release_ms   = release_ms;
+            self.cached_attack_ms = attack_ms;
+            self.cached_release_ms = release_ms;
             self.cached_auto_release = auto_release;
             self.recompute_coefficients(attack_ms, release_ms, auto_release);
         }
         self.cached_ratio = ratio;
+
+        // SC HP coefficient update — only on frequency change. update_coefficients()
+        // preserves filter state so knob moves don't click.
+        let hp_changed =
+            self.cached_sc_hp_hz.is_nan() || (sc_hp_hz - self.cached_sc_hp_hz).abs() > 0.1;
+        if hp_changed {
+            self.cached_sc_hp_hz = sc_hp_hz;
+            let hz = sc_hp_hz.clamp(SC_HP_OFF_HZ, 800.0);
+            if let Ok(c) = Coefficients::<f32>::from_params(
+                Type::HighPass,
+                self.sample_rate.hz(),
+                hz.hz(),
+                SC_HP_Q,
+            ) {
+                self.sc_hp_l.update_coefficients(c);
+                self.sc_hp_r.update_coefficients(c);
+            }
+        }
     }
 
     /// Reset all envelope state. May be called from the audio thread (no allocation).
     pub fn reset(&mut self) {
-        self.envelope_db      = 0.0;
-        self.fast_env_db      = 0.0;
+        self.envelope_db = 0.0;
+        self.fast_env_db = 0.0;
         self.envelope_fast_db = 0.0;
     }
 
@@ -182,8 +237,16 @@ impl FetCompressor {
         let driven_l = in_l * self.input_gain_linear;
         let driven_r = in_r * self.input_gain_linear;
 
+        // Stage 1.5 — Sidechain HP filter. Runs on a *copy* of the driven
+        // signal; the main audio path below uses the unfiltered driven_l/r.
+        // At SC_HP_OFF_HZ the filter still updates state but has ~flat
+        // response above ~30 Hz, so the detector behaviour matches legacy
+        // sessions when sc_hp is left at default.
+        let det_l = self.sc_hp_l.run(driven_l);
+        let det_r = self.sc_hp_r.run(driven_r);
+
         // Stage 2 — Linked peak detection (max of absolute values, stereo-linked).
-        let x_abs = driven_l.abs().max(driven_r.abs());
+        let x_abs = det_l.abs().max(det_r.abs());
 
         // Stage 3 — Gain computer in log domain.
         let x_db = (20.0 * x_abs.max(FET_LEVEL_FLOOR).log10()).max(FET_DB_FLOOR);
@@ -212,16 +275,14 @@ impl FetCompressor {
 
         if gr_target < self.envelope_db {
             // More GR needed — follow attack coefficient.
-            self.envelope_db = coeff_attack * self.envelope_db
-                + (1.0 - coeff_attack) * gr_target;
+            self.envelope_db = coeff_attack * self.envelope_db + (1.0 - coeff_attack) * gr_target;
         } else if is_all_buttons {
             // All-Buttons: blend slow and fast release envelopes for the characteristic sound.
-            let coeff_r_fast =
-                (-1.0 / (50.0_f32 * 0.001 * self.sample_rate)).exp();
-            self.envelope_fast_db = coeff_r_fast * self.envelope_fast_db
-                + (1.0 - coeff_r_fast) * gr_target;
-            self.envelope_db = 0.7 * (self.coeff_release * self.envelope_db
-                + (1.0 - self.coeff_release) * gr_target)
+            let coeff_r_fast = (-1.0 / (50.0_f32 * 0.001 * self.sample_rate)).exp();
+            self.envelope_fast_db =
+                coeff_r_fast * self.envelope_fast_db + (1.0 - coeff_r_fast) * gr_target;
+            self.envelope_db = 0.7
+                * (self.coeff_release * self.envelope_db + (1.0 - self.coeff_release) * gr_target)
                 + 0.3 * self.envelope_fast_db;
         } else if self.cached_auto_release {
             // Auto-release: release time scales dynamically with current GR depth.
@@ -235,21 +296,19 @@ impl FetCompressor {
             }
             let gr_magnitude = self.fast_env_db.abs();
             let t_auto_ms = (FET_AUTO_RELEASE_MIN_MS
-                + (gr_magnitude / 20.0)
-                    * (FET_AUTO_RELEASE_MAX_MS - FET_AUTO_RELEASE_MIN_MS))
+                + (gr_magnitude / 20.0) * (FET_AUTO_RELEASE_MAX_MS - FET_AUTO_RELEASE_MIN_MS))
                 .clamp(FET_AUTO_RELEASE_MIN_MS, FET_AUTO_RELEASE_MAX_MS);
-            let coeff_auto_rel =
-                (-1.0 / (t_auto_ms * 0.001 * self.sample_rate)).exp();
-            self.envelope_db = coeff_auto_rel * self.envelope_db
-                + (1.0 - coeff_auto_rel) * gr_target;
+            let coeff_auto_rel = (-1.0 / (t_auto_ms * 0.001 * self.sample_rate)).exp();
+            self.envelope_db =
+                coeff_auto_rel * self.envelope_db + (1.0 - coeff_auto_rel) * gr_target;
         } else {
-            self.envelope_db = self.coeff_release * self.envelope_db
-                + (1.0 - self.coeff_release) * gr_target;
+            self.envelope_db =
+                self.coeff_release * self.envelope_db + (1.0 - self.coeff_release) * gr_target;
         }
 
         // Clamp envelopes and prevent denormals.
-        self.envelope_db      = self.envelope_db     .clamp(FET_ENVELOPE_MIN_DB, 0.0);
-        self.fast_env_db      = self.fast_env_db     .clamp(FET_ENVELOPE_MIN_DB, 0.0);
+        self.envelope_db = self.envelope_db.clamp(FET_ENVELOPE_MIN_DB, 0.0);
+        self.fast_env_db = self.fast_env_db.clamp(FET_ENVELOPE_MIN_DB, 0.0);
         self.envelope_fast_db = self.envelope_fast_db.clamp(FET_ENVELOPE_MIN_DB, 0.0);
 
         // Convert GR from dB to linear.
@@ -325,10 +384,22 @@ pub struct VcaCompressor {
     cached_ratio: f32,
     cached_atk_ms: f32,
     cached_rel_ms: f32,
+    // Sidechain HP filter — prevents low-frequency pumping without altering
+    // the audio path. See notes on FetCompressor for the pattern.
+    sc_hp_l: DirectForm1<f32>,
+    sc_hp_r: DirectForm1<f32>,
+    cached_sc_hp_hz: f32,
 }
 
 impl VcaCompressor {
     pub fn new(sample_rate: f32) -> Self {
+        let flat_hp = Coefficients::<f32>::from_params(
+            Type::HighPass,
+            sample_rate.hz(),
+            SC_HP_OFF_HZ.hz(),
+            SC_HP_Q,
+        )
+        .expect("20 Hz HP at any sample rate is always valid");
         let mut s = Self {
             sample_rate,
             rms_sq: 0.0,
@@ -341,6 +412,9 @@ impl VcaCompressor {
             cached_ratio: f32::NAN,
             cached_atk_ms: f32::NAN,
             cached_rel_ms: f32::NAN,
+            sc_hp_l: DirectForm1::<f32>::new(flat_hp),
+            sc_hp_r: DirectForm1::<f32>::new(flat_hp),
+            cached_sc_hp_hz: f32::NAN,
         };
         s.recompute_coefficients(10.0, 100.0);
         s
@@ -360,17 +434,39 @@ impl VcaCompressor {
         ratio: f32,
         atk_ms: f32,
         rel_ms: f32,
+        sc_hp_hz: f32,
     ) {
-        let thresh_changed = self.cached_thresh.is_nan() || (thresh_db - self.cached_thresh).abs() > 0.001;
-        let ratio_changed  = self.cached_ratio.is_nan()  || (ratio    - self.cached_ratio  ).abs() > 0.001;
-        let atk_changed    = self.cached_atk_ms.is_nan() || (atk_ms   - self.cached_atk_ms ).abs() > 0.01;
-        let rel_changed    = self.cached_rel_ms.is_nan() || (rel_ms   - self.cached_rel_ms ).abs() > 0.01;
-        if thresh_changed { self.cached_thresh = thresh_db; }
-        if ratio_changed  { self.cached_ratio  = ratio; }
+        let thresh_changed =
+            self.cached_thresh.is_nan() || (thresh_db - self.cached_thresh).abs() > 0.001;
+        let ratio_changed = self.cached_ratio.is_nan() || (ratio - self.cached_ratio).abs() > 0.001;
+        let atk_changed = self.cached_atk_ms.is_nan() || (atk_ms - self.cached_atk_ms).abs() > 0.01;
+        let rel_changed = self.cached_rel_ms.is_nan() || (rel_ms - self.cached_rel_ms).abs() > 0.01;
+        if thresh_changed {
+            self.cached_thresh = thresh_db;
+        }
+        if ratio_changed {
+            self.cached_ratio = ratio;
+        }
         if atk_changed || rel_changed {
             self.cached_atk_ms = atk_ms;
             self.cached_rel_ms = rel_ms;
             self.recompute_coefficients(atk_ms, rel_ms);
+        }
+
+        let hp_changed =
+            self.cached_sc_hp_hz.is_nan() || (sc_hp_hz - self.cached_sc_hp_hz).abs() > 0.1;
+        if hp_changed {
+            self.cached_sc_hp_hz = sc_hp_hz;
+            let hz = sc_hp_hz.clamp(SC_HP_OFF_HZ, 800.0);
+            if let Ok(c) = Coefficients::<f32>::from_params(
+                Type::HighPass,
+                self.sample_rate.hz(),
+                hz.hz(),
+                SC_HP_Q,
+            ) {
+                self.sc_hp_l.update_coefficients(c);
+                self.sc_hp_r.update_coefficients(c);
+            }
         }
     }
 
@@ -379,8 +475,13 @@ impl VcaCompressor {
     /// No allocation, no locking, no panics — safe for the audio thread.
     #[inline]
     pub fn process_sample(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
+        // Stage 0 — Detection-path HP. Audio path below uses raw in_l/in_r,
+        // only the RMS detector sees the high-passed copy.
+        let det_l = self.sc_hp_l.run(in_l);
+        let det_r = self.sc_hp_r.run(in_r);
+
         // Stage 1 — Linked RMS accumulation (max-abs side-chain, mean-square IIR).
-        let x_sq = in_l.abs().max(in_r.abs()).powi(2);
+        let x_sq = det_l.abs().max(det_r.abs()).powi(2);
         self.rms_sq = self.coeff_rms * self.rms_sq + (1.0 - self.coeff_rms) * x_sq;
         // Denormal guard: clamp to a small positive floor before sqrt.
         self.rms_sq = self.rms_sq.max(VCA_DENORMAL_FLOOR);
@@ -412,12 +513,10 @@ impl VcaCompressor {
         // Stage 4 — Attack/release envelope on the linear GR multiplier.
         if gr_linear_target < self.env_gr {
             // More GR needed — attack phase.
-            self.env_gr = self.coeff_atk * self.env_gr
-                + (1.0 - self.coeff_atk) * gr_linear_target;
+            self.env_gr = self.coeff_atk * self.env_gr + (1.0 - self.coeff_atk) * gr_linear_target;
         } else {
             // Less GR needed — release phase.
-            self.env_gr = self.coeff_rel * self.env_gr
-                + (1.0 - self.coeff_rel) * gr_linear_target;
+            self.env_gr = self.coeff_rel * self.env_gr + (1.0 - self.coeff_rel) * gr_linear_target;
         }
         self.env_gr = self.env_gr.clamp(VCA_GR_MIN_LINEAR, 1.0);
 
@@ -535,33 +634,37 @@ impl OpticalCompressor {
 
     fn recompute_coefficients(&mut self, speed: f32, char_val: f32) {
         // Log-space interpolation for perceptually uniform sweeping of time constants.
-        let attack_ms  = (50.0_f32.ln() * (1.0 - speed) + 3.0_f32.ln()    * speed).exp();
+        let attack_ms = (50.0_f32.ln() * (1.0 - speed) + 3.0_f32.ln() * speed).exp();
         let release_ms = (3000.0_f32.ln() * (1.0 - speed) + 80.0_f32.ln() * speed).exp();
-        let memory_ms  = (6000.0_f32.ln() * (1.0 - speed) + 500.0_f32.ln()* speed).exp();
+        let memory_ms = (6000.0_f32.ln() * (1.0 - speed) + 500.0_f32.ln() * speed).exp();
 
-        self.attack_coeff        = (-1.0 / (attack_ms  * 0.001 * self.sample_rate)).exp();
-        self.release_coeff       = (-1.0 / (release_ms * 0.001 * self.sample_rate)).exp();
-        self.memory_coeff        = (-1.0 / (memory_ms  * 0.001 * self.sample_rate)).exp();
-        self.memory_decay_coeff  = (-1.0 / (memory_ms * OPT_MEMORY_DECAY_FACTOR * 0.001 * self.sample_rate)).exp();
+        self.attack_coeff = (-1.0 / (attack_ms * 0.001 * self.sample_rate)).exp();
+        self.release_coeff = (-1.0 / (release_ms * 0.001 * self.sample_rate)).exp();
+        self.memory_coeff = (-1.0 / (memory_ms * 0.001 * self.sample_rate)).exp();
+        self.memory_decay_coeff =
+            (-1.0 / (memory_ms * OPT_MEMORY_DECAY_FACTOR * 0.001 * self.sample_rate)).exp();
 
         self.peak_atk_coeff = (-1.0 / (OPT_PEAK_HOLD_ATK_MS * 0.001 * self.sample_rate)).exp();
         self.peak_rel_coeff = (-1.0 / (OPT_PEAK_HOLD_REL_MS * 0.001 * self.sample_rate)).exp();
 
         // character sweeps memory_weight 0.3..0.9 and knee 12..3 dB.
         self.memory_weight = 0.3 + char_val * 0.6;
-        self.knee_db       = 12.0 - char_val * 9.0;
+        self.knee_db = 12.0 - char_val * 9.0;
     }
 
     /// Update parameters — call once per buffer, not per sample.
     /// Coefficient recomputation only happens when values change beyond a threshold.
     pub fn update_parameters(&mut self, thresh_db: f32, speed: f32, char_val: f32) {
-        let thresh_changed = self.cached_thresh.is_nan() || (thresh_db - self.cached_thresh).abs() > 0.001;
-        let speed_changed  = self.cached_speed.is_nan()  || (speed     - self.cached_speed ).abs() > 0.005;
-        let char_changed   = self.cached_char.is_nan()   || (char_val  - self.cached_char  ).abs() > 0.005;
-        if thresh_changed { self.cached_thresh = thresh_db; }
+        let thresh_changed =
+            self.cached_thresh.is_nan() || (thresh_db - self.cached_thresh).abs() > 0.001;
+        let speed_changed = self.cached_speed.is_nan() || (speed - self.cached_speed).abs() > 0.005;
+        let char_changed = self.cached_char.is_nan() || (char_val - self.cached_char).abs() > 0.005;
+        if thresh_changed {
+            self.cached_thresh = thresh_db;
+        }
         if speed_changed || char_changed {
             self.cached_speed = speed;
-            self.cached_char  = char_val;
+            self.cached_char = char_val;
             self.recompute_coefficients(speed, char_val);
         }
     }
@@ -580,14 +683,11 @@ impl OpticalCompressor {
             over * (1.0 - 1.0 / OPT_RATIO)
         } else {
             // Quadratic interpolation through the knee region.
-            (over + half_knee) * (over + half_knee)
-                / (2.0 * self.knee_db)
-                * (1.0 - 1.0 / OPT_RATIO)
+            (over + half_knee) * (over + half_knee) / (2.0 * self.knee_db) * (1.0 - 1.0 / OPT_RATIO)
         };
         // Log-law shaping: emulates the non-linear response of an opto-cell.
         let shaped = if gr_target > 0.0 {
-            gr_target * (1.0 + gr_target * OPT_LOG_SHAPE_K).ln()
-                / (1.0 + OPT_LOG_SHAPE_K).ln()
+            gr_target * (1.0 + gr_target * OPT_LOG_SHAPE_K).ln() / (1.0 + OPT_LOG_SHAPE_K).ln()
         } else {
             0.0
         };
@@ -609,9 +709,9 @@ impl OpticalCompressor {
         thresh_db: f32,
     ) -> (f32, f32, f32, f32) {
         // Stage 1 — Peak pre-filter (smooth peak tracking to reduce inter-sample clicks).
-        let x_abs    = x.abs() + OPT_DENORM_GUARD;
+        let x_abs = x.abs() + OPT_DENORM_GUARD;
         let x_db_raw = 20.0 * x_abs.log10();
-        let x_db     = x_db_raw.max(OPT_MIN_LEVEL_DB);
+        let x_db = x_db_raw.max(OPT_MIN_LEVEL_DB);
         let new_peak = if x_db > peak_hold {
             self.peak_atk_coeff * peak_hold + (1.0 - self.peak_atk_coeff) * x_db
         } else {
@@ -656,12 +756,26 @@ impl OpticalCompressor {
     /// No allocation, no locking, no panics — safe for the audio thread.
     #[inline]
     pub fn process_sample(&mut self, in_l: f32, in_r: f32, thresh_db: f32) -> (f32, f32) {
-        let (out_l, ef_l, es_l, ph_l) =
-            self.process_sample_channel(in_l, self.env_fast_l, self.env_slow_l, self.peak_hold_l, thresh_db);
-        let (out_r, ef_r, es_r, ph_r) =
-            self.process_sample_channel(in_r, self.env_fast_r, self.env_slow_r, self.peak_hold_r, thresh_db);
-        self.env_fast_l = ef_l; self.env_slow_l = es_l; self.peak_hold_l = ph_l;
-        self.env_fast_r = ef_r; self.env_slow_r = es_r; self.peak_hold_r = ph_r;
+        let (out_l, ef_l, es_l, ph_l) = self.process_sample_channel(
+            in_l,
+            self.env_fast_l,
+            self.env_slow_l,
+            self.peak_hold_l,
+            thresh_db,
+        );
+        let (out_r, ef_r, es_r, ph_r) = self.process_sample_channel(
+            in_r,
+            self.env_fast_r,
+            self.env_slow_r,
+            self.peak_hold_r,
+            thresh_db,
+        );
+        self.env_fast_l = ef_l;
+        self.env_slow_l = es_l;
+        self.peak_hold_l = ph_l;
+        self.env_fast_r = ef_r;
+        self.env_slow_r = es_r;
+        self.peak_hold_r = ph_r;
         (out_l, out_r)
     }
 
@@ -731,9 +845,9 @@ impl ButterComp2 {
         assert!(!state.is_null(), "Failed to create ButterComp2 state");
         Self { state }
     }
-    
+
     /// Update compressor parameters
-    /// 
+    ///
     /// # Arguments
     /// * `compress` - Compression amount (0.0 to 1.0, maps to 0-14dB)
     /// * `output` - Output gain (0.0 to 1.0, maps to 0-2x gain)
@@ -743,14 +857,14 @@ impl ButterComp2 {
         let safe_compress = (compress * 0.5).clamp(0.0, 0.5); // Reduce max compression
         let safe_output = (output * 0.8 + 0.2).clamp(0.2, 1.0); // Keep output in reasonable range
         let safe_dry_wet = dry_wet.clamp(0.0, 1.0);
-        
+
         unsafe {
             buttercomp2_set_compress(self.state, safe_compress as f64);
             buttercomp2_set_output(self.state, safe_output as f64);
             buttercomp2_set_dry_wet(self.state, safe_dry_wet as f64);
         }
     }
-    
+
     /// Process audio buffer in place (stereo, lock-free, allocation-free).
     ///
     /// Calls the C++ function once per buffer (O(1) FFI overhead) rather than
@@ -758,7 +872,9 @@ impl ButterComp2 {
     /// over `num_samples` internally — see buttercomp2_process_stereo in cpp/.
     pub fn process(&mut self, buffer: &mut Buffer) {
         let num_samples = buffer.samples();
-        if num_samples == 0 { return; }
+        if num_samples == 0 {
+            return;
+        }
 
         // Capture a *mut f32 to the start of each channel from the first sample
         // iteration. NIH-plug guarantees each channel is a contiguous, non-overlapping
@@ -783,7 +899,7 @@ impl ButterComp2 {
             }
         }
     }
-    
+
     /// Reset internal state
     pub fn reset(&mut self) {
         unsafe {
@@ -813,8 +929,8 @@ mod tests {
 
     #[test]
     fn test_fet_ratio_values() {
-        assert!((FetRatio::R4.value()  -  4.0).abs() < 1e-5);
-        assert!((FetRatio::R8.value()  -  8.0).abs() < 1e-5);
+        assert!((FetRatio::R4.value() - 4.0).abs() < 1e-5);
+        assert!((FetRatio::R8.value() - 8.0).abs() < 1e-5);
         assert!((FetRatio::R12.value() - 12.0).abs() < 1e-5);
         assert!((FetRatio::R20.value() - 20.0).abs() < 1e-5);
         // All-buttons uses 20:1 for the gain computer
@@ -837,21 +953,39 @@ mod tests {
     #[test]
     fn test_fet_compressor_reset_clears_envelopes() {
         let mut fet = FetCompressor::new(44100.0);
-        for _ in 0..500 { fet.process_sample(1.0, 1.0); }
+        for _ in 0..500 {
+            fet.process_sample(1.0, 1.0);
+        }
         fet.reset();
-        assert!((fet.envelope_db - 0.0).abs() < 1e-5, "envelope_db after reset: {}", fet.envelope_db);
-        assert!((fet.fast_env_db - 0.0).abs() < 1e-5, "fast_env_db after reset: {}", fet.fast_env_db);
-        assert!((fet.envelope_fast_db - 0.0).abs() < 1e-5, "envelope_fast_db after reset: {}", fet.envelope_fast_db);
+        assert!(
+            (fet.envelope_db - 0.0).abs() < 1e-5,
+            "envelope_db after reset: {}",
+            fet.envelope_db
+        );
+        assert!(
+            (fet.fast_env_db - 0.0).abs() < 1e-5,
+            "fast_env_db after reset: {}",
+            fet.fast_env_db
+        );
+        assert!(
+            (fet.envelope_fast_db - 0.0).abs() < 1e-5,
+            "envelope_fast_db after reset: {}",
+            fet.envelope_fast_db
+        );
     }
 
     #[test]
     fn test_fet_compressor_quiet_signal_passes_through() {
         let mut fet = FetCompressor::new(44100.0);
-        fet.update_parameters(0.0, 0.0, 0.2, 250.0, FetRatio::R4, false);
+        fet.update_parameters(0.0, 0.0, 0.2, 250.0, FetRatio::R4, false, 20.0);
         // Very quiet signal (well below 0 dB effective threshold)
         let input = 0.001_f32;
         let (out_l, out_r) = fet.process_sample(input, input);
-        assert!((out_l / input - 1.0).abs() < 0.01, "Quiet signal gain: {}", out_l / input);
+        assert!(
+            (out_l / input - 1.0).abs() < 0.01,
+            "Quiet signal gain: {}",
+            out_l / input
+        );
         assert!((out_r / input - 1.0).abs() < 0.01);
     }
 
@@ -859,8 +993,10 @@ mod tests {
     fn test_fet_compressor_loud_signal_is_attenuated() {
         let mut fet = FetCompressor::new(44100.0);
         // +6 dB input drive → effective_threshold = -6 dBFS; 0 dBFS signal engages GR
-        fet.update_parameters(6.0, 0.0, 0.001, 100.0, FetRatio::R4, false);
-        for _ in 0..2000 { fet.process_sample(1.0, 1.0); }
+        fet.update_parameters(6.0, 0.0, 0.001, 100.0, FetRatio::R4, false, 20.0);
+        for _ in 0..2000 {
+            fet.process_sample(1.0, 1.0);
+        }
         let (out_l, _) = fet.process_sample(1.0, 1.0);
         assert!(out_l < 1.0, "Loud signal should be attenuated, got {out_l}");
         assert!(out_l > 0.0, "Output should still be positive");
@@ -869,9 +1005,11 @@ mod tests {
     #[test]
     fn test_fet_compressor_all_buttons_gr_cap() {
         let mut fet = FetCompressor::new(44100.0);
-        fet.update_parameters(18.0, 0.0, 0.001, 100.0, FetRatio::All, false);
+        fet.update_parameters(18.0, 0.0, 0.001, 100.0, FetRatio::All, false, 20.0);
 
-        for _ in 0..5000 { fet.process_sample(1.0, 1.0); }
+        for _ in 0..5000 {
+            fet.process_sample(1.0, 1.0);
+        }
 
         // GR should never exceed the -18 dB cap
         assert!(
@@ -884,19 +1022,25 @@ mod tests {
     #[test]
     fn test_fet_compressor_envelope_clamped_in_range() {
         let mut fet = FetCompressor::new(44100.0);
-        for _ in 0..5000 { fet.process_sample(100.0, 100.0); }
+        for _ in 0..5000 {
+            fet.process_sample(100.0, 100.0);
+        }
         assert!(
             fet.envelope_db >= FET_ENVELOPE_MIN_DB,
             "envelope_db below floor: {}",
             fet.envelope_db
         );
-        assert!(fet.envelope_db <= 0.0, "envelope_db must be <= 0: {}", fet.envelope_db);
+        assert!(
+            fet.envelope_db <= 0.0,
+            "envelope_db must be <= 0: {}",
+            fet.envelope_db
+        );
     }
 
     #[test]
     fn test_fet_compressor_process_produces_finite_output() {
         let mut fet = FetCompressor::new(44100.0);
-        fet.update_parameters(6.0, -6.0, 1.0, 200.0, FetRatio::R8, true);
+        fet.update_parameters(6.0, -6.0, 1.0, 200.0, FetRatio::R8, true, 20.0);
         for _ in 0..100 {
             let (l, r) = fet.process_sample(0.5, -0.5);
             assert!(l.is_finite(), "Output L must be finite, got {l}");
@@ -908,21 +1052,24 @@ mod tests {
     fn test_fet_compressor_update_dirty_check_skips_recompute() {
         let mut fet = FetCompressor::new(44100.0);
         // First call seeds the cache (NaN → real value)
-        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
+        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false, 20.0);
         let coeff_before = fet.coeff_attack;
         // Same parameters — dirty check should skip recompute
-        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
-        assert!((fet.coeff_attack - coeff_before).abs() < 1e-9, "Dirty-check bypass: coeff should not change");
+        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false, 20.0);
+        assert!(
+            (fet.coeff_attack - coeff_before).abs() < 1e-9,
+            "Dirty-check bypass: coeff should not change"
+        );
     }
 
     #[test]
     fn test_fet_compressor_update_new_attack_recomputes() {
         let mut fet = FetCompressor::new(44100.0);
         // First call seeds the cache
-        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false);
+        fet.update_parameters(0.0, 0.0, 1.0, 200.0, FetRatio::R4, false, 20.0);
         let coeff_before = fet.coeff_attack;
         // Different attack time — dirty check fires, coefficients recomputed
-        fet.update_parameters(0.0, 0.0, 10.0, 200.0, FetRatio::R4, false);
+        fet.update_parameters(0.0, 0.0, 10.0, 200.0, FetRatio::R4, false, 20.0);
         assert!(
             (fet.coeff_attack - coeff_before).abs() > 1e-5,
             "New attack time should change coeff_attack"
@@ -936,8 +1083,12 @@ mod tests {
         let ms = 1.0_f32;
         let expected = (-1.0_f32 / (ms * 0.001 * sr)).exp();
         let mut fet = FetCompressor::new(sr);
-        fet.update_parameters(0.0, 0.0, ms, 200.0, FetRatio::R4, false);
-        assert!((fet.coeff_attack - expected).abs() < 1e-7, "coeff mismatch: {} vs {expected}", fet.coeff_attack);
+        fet.update_parameters(0.0, 0.0, ms, 200.0, FetRatio::R4, false, 20.0);
+        assert!(
+            (fet.coeff_attack - expected).abs() < 1e-7,
+            "coeff mismatch: {} vs {expected}",
+            fet.coeff_attack
+        );
     }
 
     // ── VcaCompressor ─────────────────────────────────────────────────────────
@@ -951,7 +1102,7 @@ mod tests {
     #[test]
     fn test_vca_compressor_process_produces_finite_output() {
         let mut vca = VcaCompressor::new(44100.0);
-        vca.update_parameters(-18.0, 4.0, 5.0, 100.0);
+        vca.update_parameters(-18.0, 4.0, 5.0, 100.0, 20.0);
         for _ in 0..200 {
             let (l, r) = vca.process_sample(0.5, 0.5);
             assert!(l.is_finite(), "VCA output L must be finite");
@@ -962,11 +1113,69 @@ mod tests {
     #[test]
     fn test_vca_compressor_quiet_passes_through() {
         let mut vca = VcaCompressor::new(44100.0);
-        vca.update_parameters(-18.0, 4.0, 5.0, 100.0);
+        vca.update_parameters(-18.0, 4.0, 5.0, 100.0, 20.0);
         let input = 0.0001_f32;
         let (out_l, out_r) = vca.process_sample(input, input);
         assert!(out_l.is_finite());
         assert!(out_r.is_finite());
+    }
+
+    #[test]
+    fn test_vca_sc_hp_reduces_gr_for_low_frequency_content() {
+        // A loud 30 Hz sine produces full GR with SC HP off, but should
+        // produce less GR when the detector filter cuts at 200 Hz.
+        let sr = 44100.0_f32;
+        let freq = 30.0_f32;
+        let amp = 0.5_f32;
+        let gain_from = |sc_hp: f32| -> f32 {
+            let mut vca = VcaCompressor::new(sr);
+            // Tight thresh + high ratio so any level above -30 dB engages GR.
+            vca.update_parameters(-30.0, 8.0, 1.0, 50.0, sc_hp);
+            let mut max_gr_db = 0.0_f32;
+            for i in 0..8000 {
+                let x = amp * (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin();
+                vca.process_sample(x, x);
+                let gr_db = 20.0 * vca.env_gr.log10();
+                if gr_db < max_gr_db {
+                    max_gr_db = gr_db;
+                }
+            }
+            max_gr_db
+        };
+        let gr_off = gain_from(20.0); // filter effectively off
+        let gr_on = gain_from(200.0); // filter at 200 Hz
+                                      // With the HP on, the detector sees less low energy → less GR (less negative).
+        assert!(
+            gr_on > gr_off,
+            "SC HP should reduce GR for LF content: gr_on={gr_on:.2} dB, gr_off={gr_off:.2} dB"
+        );
+    }
+
+    #[test]
+    fn test_fet_sc_hp_reduces_gr_for_low_frequency_content() {
+        let sr = 44100.0_f32;
+        let freq = 30.0_f32;
+        let amp = 0.7_f32;
+        let env_from = |sc_hp: f32| -> f32 {
+            let mut fet = FetCompressor::new(sr);
+            // Moderate input drive + 8:1 so a 30 Hz tone clearly engages the detector.
+            fet.update_parameters(6.0, 0.0, 0.2, 100.0, FetRatio::R8, false, sc_hp);
+            let mut max_env = 0.0_f32;
+            for i in 0..8000 {
+                let x = amp * (2.0 * std::f32::consts::PI * freq * i as f32 / sr).sin();
+                fet.process_sample(x, x);
+                if fet.envelope_db < max_env {
+                    max_env = fet.envelope_db;
+                }
+            }
+            max_env
+        };
+        let e_off = env_from(20.0);
+        let e_on = env_from(200.0);
+        assert!(
+            e_on > e_off,
+            "FET SC HP should reduce LF-induced GR: e_on={e_on:.2} dB, e_off={e_off:.2} dB"
+        );
     }
 
     // ── OpticalCompressor ─────────────────────────────────────────────────────
@@ -992,8 +1201,13 @@ mod tests {
         let mut opt = OpticalCompressor::new(44100.0);
         opt.update_parameters(-12.0, 0.8, 0.5);
         // Warm up
-        for _ in 0..2000 { opt.process_sample(1.0, 1.0, -12.0); }
+        for _ in 0..2000 {
+            opt.process_sample(1.0, 1.0, -12.0);
+        }
         let (out_l, _) = opt.process_sample(1.0, 1.0, -12.0);
-        assert!(out_l < 1.0, "Optical compressor should reduce loud signal, got {out_l}");
+        assert!(
+            out_l < 1.0,
+            "Optical compressor should reduce loud signal, got {out_l}"
+        );
     }
 }

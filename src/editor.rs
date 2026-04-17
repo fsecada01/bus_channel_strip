@@ -1,18 +1,18 @@
 // src/editor.rs
 // Vizia GUI implementation for Bus Channel Strip
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::cell::RefCell;
 use nih_plug::prelude::*;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
-use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 use vizia_plug::widgets::{ParamSlider, RawParamEvent};
+use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
-use crate::{BusChannelStripParams, ModuleType};
-use crate::spectral;
 use crate::components::{self, ModuleTheme};
+use crate::spectral;
 use crate::styles::COMPONENT_STYLES;
+use crate::{BusChannelStripParams, ModuleType};
 
 // ============================================================================
 // App Events
@@ -36,7 +36,11 @@ pub enum AppEvent {
     RequestAnalysis,
     /// Apply analysis results to the appropriate DynEQ band parameters.
     #[cfg(feature = "dynamic_eq")]
-    ApplyAnalysis { band: u32, freq: f32, threshold_db: f32 },
+    ApplyAnalysis {
+        band: u32,
+        freq: f32,
+        threshold_db: f32,
+    },
 }
 
 // ============================================================================
@@ -63,8 +67,12 @@ pub struct Data {
 impl Model for Data {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|e: &AppEvent, _| match e {
-            AppEvent::OpenDynEq  => { self.dyneq_open = true;  }
-            AppEvent::CloseDynEq => { self.dyneq_open = false; }
+            AppEvent::OpenDynEq => {
+                self.dyneq_open = true;
+            }
+            AppEvent::CloseDynEq => {
+                self.dyneq_open = false;
+            }
 
             AppEvent::ToggleDynEQBand(band) => {
                 let band = *band;
@@ -81,7 +89,11 @@ impl Model for Data {
             }
 
             #[cfg(feature = "dynamic_eq")]
-            AppEvent::ApplyAnalysis { band, freq, threshold_db } => {
+            AppEvent::ApplyAnalysis {
+                band,
+                freq,
+                threshold_db,
+            } => {
                 // Clear ready so the button reflects "stale" state until next analysis.
                 self.analysis_result.ready.store(false, Ordering::Relaxed);
 
@@ -105,7 +117,7 @@ impl Model for Data {
                 };
 
                 // Safety: ParamPtr is obtained from self.params (Arc'd, outlives the editor).
-                let freq_norm   = unsafe { freq_ptr.preview_normalized(*freq) };
+                let freq_norm = unsafe { freq_ptr.preview_normalized(*freq) };
                 let thresh_norm = unsafe { thresh_ptr.preview_normalized(*threshold_db) };
 
                 cx.emit(RawParamEvent::BeginSetParameter(freq_ptr));
@@ -113,44 +125,47 @@ impl Model for Data {
                 cx.emit(RawParamEvent::EndSetParameter(freq_ptr));
 
                 cx.emit(RawParamEvent::BeginSetParameter(thresh_ptr));
-                cx.emit(RawParamEvent::SetParameterNormalized(thresh_ptr, thresh_norm));
+                cx.emit(RawParamEvent::SetParameterNormalized(
+                    thresh_ptr,
+                    thresh_norm,
+                ));
                 cx.emit(RawParamEvent::EndSetParameter(thresh_ptr));
             }
 
             AppEvent::SelectSlot(idx) => {
-            let idx = *idx;
-            match self.drag_slot {
-                None => {
-                    // Select this slot as the reorder source
-                    self.drag_slot = Some(idx);
+                let idx = *idx;
+                match self.drag_slot {
+                    None => {
+                        // Select this slot as the reorder source
+                        self.drag_slot = Some(idx);
+                    }
+                    Some(src) if src == idx => {
+                        // Click the same slot again = cancel
+                        self.drag_slot = None;
+                    }
+                    Some(src) => {
+                        // Swap the modules at `src` and `idx`
+                        let src_mt = slot_module_type(&self.params, src);
+                        let tgt_mt = slot_module_type(&self.params, idx);
+                        let src_ptr = slot_param_ptr(&self.params, src);
+                        let tgt_ptr = slot_param_ptr(&self.params, idx);
+
+                        // src slot receives tgt_mt; tgt slot receives src_mt
+                        let src_norm = slot_preview_normalized(&self.params, src, tgt_mt);
+                        let tgt_norm = slot_preview_normalized(&self.params, idx, src_mt);
+
+                        // Safety: ParamPtr is valid as long as params lives, which outlives the editor.
+                        cx.emit(RawParamEvent::BeginSetParameter(src_ptr));
+                        cx.emit(RawParamEvent::SetParameterNormalized(src_ptr, src_norm));
+                        cx.emit(RawParamEvent::EndSetParameter(src_ptr));
+
+                        cx.emit(RawParamEvent::BeginSetParameter(tgt_ptr));
+                        cx.emit(RawParamEvent::SetParameterNormalized(tgt_ptr, tgt_norm));
+                        cx.emit(RawParamEvent::EndSetParameter(tgt_ptr));
+
+                        self.drag_slot = None;
+                    }
                 }
-                Some(src) if src == idx => {
-                    // Click the same slot again = cancel
-                    self.drag_slot = None;
-                }
-                Some(src) => {
-                    // Swap the modules at `src` and `idx`
-                    let src_mt = slot_module_type(&self.params, src);
-                    let tgt_mt = slot_module_type(&self.params, idx);
-                    let src_ptr = slot_param_ptr(&self.params, src);
-                    let tgt_ptr = slot_param_ptr(&self.params, idx);
-
-                    // src slot receives tgt_mt; tgt slot receives src_mt
-                    let src_norm = slot_preview_normalized(&self.params, src, tgt_mt);
-                    let tgt_norm = slot_preview_normalized(&self.params, idx, src_mt);
-
-                    // Safety: ParamPtr is valid as long as params lives, which outlives the editor.
-                    cx.emit(RawParamEvent::BeginSetParameter(src_ptr));
-                    cx.emit(RawParamEvent::SetParameterNormalized(src_ptr, src_norm));
-                    cx.emit(RawParamEvent::EndSetParameter(src_ptr));
-
-                    cx.emit(RawParamEvent::BeginSetParameter(tgt_ptr));
-                    cx.emit(RawParamEvent::SetParameterNormalized(tgt_ptr, tgt_norm));
-                    cx.emit(RawParamEvent::EndSetParameter(tgt_ptr));
-
-                    self.drag_slot = None;
-                }
-            }
             } // AppEvent::SelectSlot
         });
     }
@@ -182,7 +197,11 @@ fn slot_param_ptr(params: &Arc<BusChannelStripParams>, slot: usize) -> ParamPtr 
     }
 }
 
-fn slot_preview_normalized(params: &Arc<BusChannelStripParams>, slot: usize, mt: ModuleType) -> f32 {
+fn slot_preview_normalized(
+    params: &Arc<BusChannelStripParams>,
+    slot: usize,
+    mt: ModuleType,
+) -> f32 {
     // EnumParam::preview_normalized takes the enum variant directly (Plain = ModuleType)
     match slot {
         0 => params.module_order_1.preview_normalized(mt),
@@ -198,12 +217,12 @@ fn slot_preview_normalized(params: &Arc<BusChannelStripParams>, slot: usize, mt:
 /// vizia's `Binding::new` requires `Target: Data`; usize satisfies that.
 fn module_type_to_usize(mt: ModuleType) -> usize {
     match mt {
-        ModuleType::Api5500EQ   => 0,
+        ModuleType::Api5500EQ => 0,
         ModuleType::ButterComp2 => 1,
-        ModuleType::PultecEQ    => 2,
-        ModuleType::DynamicEQ   => 3,
+        ModuleType::PultecEQ => 2,
+        ModuleType::DynamicEQ => 3,
         ModuleType::Transformer => 4,
-        ModuleType::Punch       => 5,
+        ModuleType::Punch => 5,
     }
 }
 
@@ -220,34 +239,34 @@ fn usize_to_module_type(idx: usize) -> ModuleType {
 
 fn module_type_to_theme(mt: ModuleType) -> ModuleTheme {
     match mt {
-        ModuleType::Api5500EQ   => ModuleTheme::Api5500,
+        ModuleType::Api5500EQ => ModuleTheme::Api5500,
         ModuleType::ButterComp2 => ModuleTheme::ButterComp2,
-        ModuleType::PultecEQ    => ModuleTheme::Pultec,
-        ModuleType::DynamicEQ   => ModuleTheme::DynamicEq,
+        ModuleType::PultecEQ => ModuleTheme::Pultec,
+        ModuleType::DynamicEQ => ModuleTheme::DynamicEq,
         ModuleType::Transformer => ModuleTheme::Transformer,
-        ModuleType::Punch       => ModuleTheme::Punch,
+        ModuleType::Punch => ModuleTheme::Punch,
     }
 }
 
 fn module_type_name(mt: ModuleType) -> &'static str {
     match mt {
-        ModuleType::Api5500EQ   => "API 550A",
+        ModuleType::Api5500EQ => "API 550A",
         ModuleType::ButterComp2 => "ButterComp2",
-        ModuleType::PultecEQ    => "Pultec EQP-1A",
-        ModuleType::DynamicEQ   => "Dynamic EQ",
+        ModuleType::PultecEQ => "Pultec EQP-1A",
+        ModuleType::DynamicEQ => "Dynamic EQ",
         ModuleType::Transformer => "Console/Tape",
-        ModuleType::Punch       => "PUNCH",
+        ModuleType::Punch => "PUNCH",
     }
 }
 
 fn module_type_subtitle(mt: ModuleType) -> &'static str {
     match mt {
-        ModuleType::Api5500EQ   => "3-BAND EQ",
+        ModuleType::Api5500EQ => "3-BAND EQ",
         ModuleType::ButterComp2 => "COMPRESSOR",
-        ModuleType::PultecEQ    => "TUBE EQ",
-        ModuleType::DynamicEQ   => "DYN EQ",
+        ModuleType::PultecEQ => "TUBE EQ",
+        ModuleType::DynamicEQ => "DYN EQ",
         ModuleType::Transformer => "TRANSFORMER",
-        ModuleType::Punch       => "CLIP + TRANSIENT",
+        ModuleType::Punch => "CLIP + TRANSIENT",
     }
 }
 
@@ -268,7 +287,8 @@ pub(crate) fn create(
     gr_data: Arc<spectral::GainReductionData>,
 ) -> Option<Box<dyn Editor>> {
     create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, _| {
-        cx.add_stylesheet(COMPONENT_STYLES).expect("Failed to add stylesheet");
+        cx.add_stylesheet(COMPONENT_STYLES)
+            .expect("Failed to add stylesheet");
 
         Data {
             params: params.clone(),
@@ -289,17 +309,17 @@ pub(crate) fn create(
         VStack::new(cx, |cx| {
             // Chassis header
             HStack::new(cx, |cx| {
-                Label::new(cx, "API")
-                    .class("chassis-brand");
-                Label::new(cx, "Bus Channel Strip")
-                    .class("chassis-title");
+                Label::new(cx, "API").class("chassis-brand");
+                Label::new(cx, "Bus Channel Strip").class("chassis-title");
 
                 // Signal flow / reorder hint
                 VStack::new(cx, |cx| {
-                    Label::new(cx, "SIGNAL FLOW")
-                        .class("signal-flow-label");
-                    Label::new(cx, "Click \u{2261} on a module to select, then click another to swap")
-                        .class("signal-flow-hint");
+                    Label::new(cx, "SIGNAL FLOW").class("signal-flow-label");
+                    Label::new(
+                        cx,
+                        "Click \u{2261} on a module to select, then click another to swap",
+                    )
+                    .class("signal-flow-hint");
                     Label::new(cx, "DSP order: module_order_1 \u{2192} module_order_5")
                         .class("signal-flow-params");
                 })
@@ -322,10 +342,21 @@ pub(crate) fn create(
             .width(Stretch(1.0))
             .min_width(Pixels(1720.0))
             .gap(Pixels(4.0))
-            .display(Data::dyneq_open.map(|o| if *o { Display::None } else { Display::Flex }));
+            .display(Data::dyneq_open.map(|o| {
+                if *o {
+                    Display::None
+                } else {
+                    Display::Flex
+                }
+            }));
 
             // DynEQ back view — hidden when strip is shown.
-            build_dyneq_back_view(cx, spectrum_data.clone(), analysis_result.clone(), gr_data.clone());
+            build_dyneq_back_view(
+                cx,
+                spectrum_data.clone(),
+                analysis_result.clone(),
+                gr_data.clone(),
+            );
         })
         .class("lunchbox-chassis")
         .width(Stretch(1.0))
@@ -355,8 +386,7 @@ fn create_master_section(cx: &mut Context) {
         // Auto-gain compensation toggle.
         components::create_bool_button(cx, "AUTO GAIN", Data::params, |p| &p.global_auto_gain);
 
-        Label::new(cx, "MASTER")
-            .class("master-label");
+        Label::new(cx, "MASTER").class("master-label");
         components::create_gain_slider(cx, "Gain", Data::params, |p| &p.gain);
     })
     .class("master-controls")
@@ -385,23 +415,28 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
             VStack::new(cx, |cx| {
                 // ── Drag handle ─────────────────────────────────────────────
                 HStack::new(cx, |cx| {
-                    Label::new(cx, "\u{2261}")  // ≡ hamburger icon
+                    Label::new(cx, "\u{2261}") // ≡ hamburger icon
                         .class("drag-handle-icon");
                     // Reactive label: context changes based on drag state
-                    Label::new(cx, Data::drag_slot.map(move |ds| {
-                        match *ds {
+                    Label::new(
+                        cx,
+                        Data::drag_slot.map(move |ds| match *ds {
                             Some(src) if src == slot_idx => "CANCEL",
                             Some(_) => "SWAP HERE",
                             None => "MOVE",
-                        }
-                    }))
+                        }),
+                    )
                     .class("drag-handle-label");
                     // "SELECTED" indicator — only visible when this slot is
                     // the active swap source.
                     Label::new(cx, "\u{25CF} SELECTED")
                         .class("drag-selected-indicator")
                         .display(Data::drag_slot.map(move |ds| {
-                            if *ds == Some(slot_idx) { Display::Flex } else { Display::None }
+                            if *ds == Some(slot_idx) {
+                                Display::Flex
+                            } else {
+                                Display::None
+                            }
                         }));
                 })
                 .class("drag-handle")
@@ -428,8 +463,7 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
                                 theme.accent_color()
                             }
                         }));
-                    Label::new(cx, module_type_subtitle(mt))
-                        .class("module-type");
+                    Label::new(cx, module_type_subtitle(mt)).class("module-type");
                 })
                 .class("module-header")
                 .top(Pixels(0.0))
@@ -501,12 +535,12 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
 
 fn build_controls_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
-        ModuleType::Api5500EQ   => build_api5500_controls(cx),
+        ModuleType::Api5500EQ => build_api5500_controls(cx),
         ModuleType::ButterComp2 => build_buttercomp2_controls(cx),
-        ModuleType::PultecEQ    => build_pultec_controls(cx),
-        ModuleType::DynamicEQ   => build_dynamic_eq_controls(cx),
+        ModuleType::PultecEQ => build_pultec_controls(cx),
+        ModuleType::DynamicEQ => build_dynamic_eq_controls(cx),
         ModuleType::Transformer => build_transformer_controls(cx),
-        ModuleType::Punch       => build_punch_controls(cx),
+        ModuleType::Punch => build_punch_controls(cx),
     }
 }
 
@@ -636,7 +670,10 @@ fn build_vca_controls(cx: &mut Context) {
             components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.vca_atk);
             components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.vca_rel);
         });
-        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+        components::module_row(cx, |cx| {
+            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
+            components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+        });
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -678,7 +715,10 @@ fn build_fet_controls(cx: &mut Context) {
             components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
             components::create_bool_button(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
         });
-        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+        components::module_row(cx, |cx| {
+            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
+            components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+        });
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -694,29 +734,49 @@ fn build_pultec_controls(cx: &mut Context) {
         // EQP-1A boost+cut trick (boost at 60 Hz, cut at 200 Hz → tight lows).
         components::module_section(cx, "LOW FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.pultec_lf_boost_freq);
-                components::create_gain_slider(cx, "BOOST", Data::params, |p| &p.pultec_lf_boost_gain);
+                components::create_frequency_slider(cx, "FREQ", Data::params, |p| {
+                    &p.pultec_lf_boost_freq
+                });
+                components::create_gain_slider(cx, "BOOST", Data::params, |p| {
+                    &p.pultec_lf_boost_gain
+                });
             });
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| &p.pultec_lf_cut_freq);
-                components::create_gain_slider(cx, "ATTEN", Data::params, |p| &p.pultec_lf_cut_gain);
+                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| {
+                    &p.pultec_lf_cut_freq
+                });
+                components::create_gain_slider(cx, "ATTEN", Data::params, |p| {
+                    &p.pultec_lf_cut_gain
+                });
             });
         });
         // HIGH FREQUENCY: boost and cut each on their own row (freq + gain/bw)
         components::module_section(cx, "HIGH FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.pultec_hf_boost_freq);
-                components::create_gain_slider(cx, "BOOST", Data::params, |p| &p.pultec_hf_boost_gain);
-                components::create_param_slider(cx, "BW", Data::params, |p| &p.pultec_hf_boost_bandwidth);
+                components::create_frequency_slider(cx, "FREQ", Data::params, |p| {
+                    &p.pultec_hf_boost_freq
+                });
+                components::create_gain_slider(cx, "BOOST", Data::params, |p| {
+                    &p.pultec_hf_boost_gain
+                });
+                components::create_param_slider(cx, "BW", Data::params, |p| {
+                    &p.pultec_hf_boost_bandwidth
+                });
             });
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| &p.pultec_hf_cut_freq);
-                components::create_gain_slider(cx, "ATTEN", Data::params, |p| &p.pultec_hf_cut_gain);
+                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| {
+                    &p.pultec_hf_cut_freq
+                });
+                components::create_gain_slider(cx, "ATTEN", Data::params, |p| {
+                    &p.pultec_hf_cut_gain
+                });
             });
         });
         // OUTPUT: tube drive separate from the EQ bands
         components::module_section(cx, "OUTPUT", |cx| {
-            components::create_param_slider(cx, "TUBE DRIVE", Data::params, |p| &p.pultec_tube_drive);
+            components::create_param_slider(cx, "TUBE DRIVE", Data::params, |p| {
+                &p.pultec_tube_drive
+            });
         });
     })
     .gap(Pixels(4.0))
@@ -734,10 +794,13 @@ fn build_dynamic_eq_controls(cx: &mut Context) {
             .class("dyneq-card-hint")
             .height(Pixels(16.0))
             .width(Stretch(1.0));
-        Label::new(cx, "Real-time frequency-dependent compression with per-band threshold control")
-            .class("dyneq-card-desc")
-            .height(Auto)
-            .width(Stretch(1.0));
+        Label::new(
+            cx,
+            "Real-time frequency-dependent compression with per-band threshold control",
+        )
+        .class("dyneq-card-desc")
+        .height(Auto)
+        .width(Stretch(1.0));
         // OPEN button — flips to the full DynEQ back view.
         // Uses Button::new (not VStack) so the full 40px hit area is reliably clickable;
         // VStack + on_press can have dead zones where child labels shadow parent events.
@@ -821,7 +884,10 @@ impl View for SpectrumCanvas {
         // Pull overlap bins from the last analysis (Relaxed — display-only, staleness is fine).
         {
             let mut overlap = self.display_overlap.borrow_mut();
-            for (i, slot) in self.analysis_result.overlap_bins.iter()
+            for (i, slot) in self
+                .analysis_result
+                .overlap_bins
+                .iter()
                 .enumerate()
                 .take(spectral::SPECTRUM_BINS)
             {
@@ -829,7 +895,7 @@ impl View for SpectrumCanvas {
             }
         }
 
-        let bins    = self.display_bins.borrow();
+        let bins = self.display_bins.borrow();
         let overlap = self.display_overlap.borrow();
 
         // ── Background ──────────────────────────────────────────────────────
@@ -856,17 +922,17 @@ impl View for SpectrumCanvas {
         const CROSSOVER_HZ: [f32; 3] = [500.0, 2000.0, 6000.0];
         // Band colors: LOW=green, LOW-MID=sky-blue, HIGH-MID=purple, HIGH=amber
         const BAND_ARGB: [(u8, u8, u8, u8); 4] = [
-            (45, 80,  200, 110),  // band1 LOW      — green
-            (45, 60,  150, 220),  // band2 LOW MID  — sky blue
-            (45, 150,  90, 220),  // band3 HIGH MID — purple
-            (45, 220, 150,  50),  // band4 HIGH     — amber
+            (45, 80, 200, 110), // band1 LOW      — green
+            (45, 60, 150, 220), // band2 LOW MID  — sky blue
+            (45, 150, 90, 220), // band3 HIGH MID — purple
+            (45, 220, 150, 50), // band4 HIGH     — amber
         ];
 
         let cx_frac: [f32; 3] = CROSSOVER_HZ.map(|f| (f / SPECTRUM_TOP_HZ).clamp(0.0, 1.0));
         let cx_x: [f32; 3] = cx_frac.map(|fr| bounds.x + fr * bounds.w);
 
-        let band_left  = [bounds.x, cx_x[0], cx_x[1], cx_x[2]];
-        let band_right = [cx_x[0],  cx_x[1], cx_x[2], bounds.x + bounds.w];
+        let band_left = [bounds.x, cx_x[0], cx_x[1], cx_x[2]];
+        let band_right = [cx_x[0], cx_x[1], cx_x[2], bounds.x + bounds.w];
 
         // Read per-band gain reduction (Relaxed — display only, staleness fine).
         let gr_db: [f32; 4] = [
@@ -921,7 +987,11 @@ impl View for SpectrumCanvas {
 
         // ── Overlap overlay (orange) — drawn below the main spectrum fill ──
         // Normalise to the peak overlap value so relative masking is always visible.
-        let max_overlap = overlap.iter().cloned().fold(0.0_f32, f32::max).max(f32::MIN_POSITIVE);
+        let max_overlap = overlap
+            .iter()
+            .cloned()
+            .fold(0.0_f32, f32::max)
+            .max(f32::MIN_POSITIVE);
         if max_overlap > f32::MIN_POSITIVE * 2.0 {
             let mut ovl_path = vg::Path::new();
             let mut ovl_started = false;
@@ -929,12 +999,16 @@ impl View for SpectrumCanvas {
                 let norm = (ov / max_overlap).clamp(0.0, 1.0);
                 let x = bounds.x + i as f32 * x_step;
                 let y = bounds.y + bounds.h - norm * bounds.h;
-                if !ovl_started { ovl_path.move_to((x, y)); ovl_started = true; }
-                else { ovl_path.line_to((x, y)); }
+                if !ovl_started {
+                    ovl_path.move_to((x, y));
+                    ovl_started = true;
+                } else {
+                    ovl_path.line_to((x, y));
+                }
             }
             if ovl_started {
                 ovl_path.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
-                ovl_path.line_to((bounds.x,            bounds.y + bounds.h));
+                ovl_path.line_to((bounds.x, bounds.y + bounds.h));
                 ovl_path.close();
                 let mut ovl_paint = vg::Paint::default();
                 // Semi-transparent orange — stands out clearly against the teal spectrum.
@@ -949,14 +1023,19 @@ impl View for SpectrumCanvas {
         let mut fill = vg::Path::new();
         let mut started = false;
         for (i, &mag) in bins.iter().enumerate() {
-            let db   = 20.0 * mag.max(1e-9_f32).log10();
+            let db = 20.0 * mag.max(1e-9_f32).log10();
             let norm = ((db + 90.0) / 90.0).clamp(0.0, 1.0);
-            let x    = bounds.x + i as f32 * x_step;
-            let y    = bounds.y + bounds.h - norm * bounds.h;
-            if !started { fill.move_to((x, y)); started = true; } else { fill.line_to((x, y)); }
+            let x = bounds.x + i as f32 * x_step;
+            let y = bounds.y + bounds.h - norm * bounds.h;
+            if !started {
+                fill.move_to((x, y));
+                started = true;
+            } else {
+                fill.line_to((x, y));
+            }
         }
         fill.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
-        fill.line_to((bounds.x,            bounds.y + bounds.h));
+        fill.line_to((bounds.x, bounds.y + bounds.h));
         fill.close();
         let mut fill_paint = vg::Paint::default();
         fill_paint.set_color(vg::Color::from_argb(60, 50, 180, 150));
@@ -968,11 +1047,16 @@ impl View for SpectrumCanvas {
         let mut line = vg::Path::new();
         let mut started = false;
         for (i, &mag) in bins.iter().enumerate() {
-            let db   = 20.0 * mag.max(1e-9_f32).log10();
+            let db = 20.0 * mag.max(1e-9_f32).log10();
             let norm = ((db + 90.0) / 90.0).clamp(0.0, 1.0);
-            let x    = bounds.x + i as f32 * x_step;
-            let y    = bounds.y + bounds.h - norm * bounds.h;
-            if !started { line.move_to((x, y)); started = true; } else { line.line_to((x, y)); }
+            let x = bounds.x + i as f32 * x_step;
+            let y = bounds.y + bounds.h - norm * bounds.h;
+            if !started {
+                line.move_to((x, y));
+                started = true;
+            } else {
+                line.line_to((x, y));
+            }
         }
         let mut stroke_paint = vg::Paint::default();
         stroke_paint.set_color(vg::Color::from_argb(200, 80, 220, 180));
@@ -1059,12 +1143,18 @@ macro_rules! dyneq_band_col {
                 // Chevron toggle button — reactive label via dyneq_expand_gen lens
                 {
                     let expand_arc_chevron = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
-                    Button::new(
-                        cx,
-                        |cx| Label::new(cx, Data::dyneq_expand_gen.map(move |_| {
-                            if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) { "▼" } else { "▶" }
-                        })),
-                    )
+                    Button::new(cx, |cx| {
+                        Label::new(
+                            cx,
+                            Data::dyneq_expand_gen.map(move |_| {
+                                if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) {
+                                    "▼"
+                                } else {
+                                    "▶"
+                                }
+                            }),
+                        )
+                    })
                     .on_press(|cx| cx.emit(AppEvent::ToggleDynEQBand($band_idx)))
                     .class("dyneq-chevron")
                     .width(Pixels(24.0))
@@ -1079,10 +1169,10 @@ macro_rules! dyneq_band_col {
             .height(Auto);
 
             // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
-            dyneq_slider!(cx, "MODE",   |p| &p.$mode);
-            dyneq_slider!(cx, "FREQ",   |p| &p.$freq);
+            dyneq_slider!(cx, "MODE", |p| &p.$mode);
+            dyneq_slider!(cx, "FREQ", |p| &p.$freq);
             dyneq_slider!(cx, "THRESH", |p| &p.$thresh);
-            dyneq_slider!(cx, "GAIN",   |p| &p.$gain);
+            dyneq_slider!(cx, "GAIN", |p| &p.$gain);
 
             // Tier 2 — conditionally built when band is expanded.
             // Uses Binding::new rather than .display() because .display(lens.map(...))
@@ -1094,8 +1184,8 @@ macro_rules! dyneq_band_col {
                 Binding::new(cx, Data::dyneq_expand_gen, move |cx, _gen| {
                     if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
                         VStack::new(cx, |cx| {
-                            dyneq_slider!(cx, "RATIO",  |p| &p.$ratio);
-                            dyneq_slider!(cx, "Q",      |p| &p.$q);
+                            dyneq_slider!(cx, "RATIO", |p| &p.$ratio);
+                            dyneq_slider!(cx, "Q", |p| &p.$q);
                             dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
                             dyneq_slider!(cx, "REL ms", |p| &p.$rel);
                         })
@@ -1185,13 +1275,14 @@ fn build_dyneq_back_view(
                 .on_press(move |cx| {
                     if ar_clone.ready.load(Ordering::Acquire) {
                         let band = ar_clone.target_band.load(Ordering::Relaxed);
-                        let freq = f32::from_bits(
-                            ar_clone.target_freq.load(Ordering::Relaxed)
-                        );
-                        let threshold_db = f32::from_bits(
-                            ar_clone.target_threshold_db.load(Ordering::Relaxed)
-                        );
-                        cx.emit(AppEvent::ApplyAnalysis { band, freq, threshold_db });
+                        let freq = f32::from_bits(ar_clone.target_freq.load(Ordering::Relaxed));
+                        let threshold_db =
+                            f32::from_bits(ar_clone.target_threshold_db.load(Ordering::Relaxed));
+                        cx.emit(AppEvent::ApplyAnalysis {
+                            band,
+                            freq,
+                            threshold_db,
+                        });
                     }
                 })
                 .cursor(CursorIcon::Hand)
@@ -1221,33 +1312,69 @@ fn build_dyneq_back_view(
         // the header row and spectrum canvas, giving band columns a concrete
         // height to stretch into for dynamic spacing to work.
         HStack::new(cx, |cx| {
-            dyneq_band_col!(cx, "BAND 1 — LOW",
-                dyneq_band1_enabled, dyneq_band1_solo,
-                dyneq_band1_freq, dyneq_band1_threshold, dyneq_band1_ratio,
-                dyneq_band1_q, dyneq_band1_mode, dyneq_band1_attack,
-                dyneq_band1_release, dyneq_band1_gain,
-                0);
+            dyneq_band_col!(
+                cx,
+                "BAND 1 — LOW",
+                dyneq_band1_enabled,
+                dyneq_band1_solo,
+                dyneq_band1_freq,
+                dyneq_band1_threshold,
+                dyneq_band1_ratio,
+                dyneq_band1_q,
+                dyneq_band1_mode,
+                dyneq_band1_attack,
+                dyneq_band1_release,
+                dyneq_band1_gain,
+                0
+            );
 
-            dyneq_band_col!(cx, "BAND 2 — LOW MID",
-                dyneq_band2_enabled, dyneq_band2_solo,
-                dyneq_band2_freq, dyneq_band2_threshold, dyneq_band2_ratio,
-                dyneq_band2_q, dyneq_band2_mode, dyneq_band2_attack,
-                dyneq_band2_release, dyneq_band2_gain,
-                1);
+            dyneq_band_col!(
+                cx,
+                "BAND 2 — LOW MID",
+                dyneq_band2_enabled,
+                dyneq_band2_solo,
+                dyneq_band2_freq,
+                dyneq_band2_threshold,
+                dyneq_band2_ratio,
+                dyneq_band2_q,
+                dyneq_band2_mode,
+                dyneq_band2_attack,
+                dyneq_band2_release,
+                dyneq_band2_gain,
+                1
+            );
 
-            dyneq_band_col!(cx, "BAND 3 — HIGH MID",
-                dyneq_band3_enabled, dyneq_band3_solo,
-                dyneq_band3_freq, dyneq_band3_threshold, dyneq_band3_ratio,
-                dyneq_band3_q, dyneq_band3_mode, dyneq_band3_attack,
-                dyneq_band3_release, dyneq_band3_gain,
-                2);
+            dyneq_band_col!(
+                cx,
+                "BAND 3 — HIGH MID",
+                dyneq_band3_enabled,
+                dyneq_band3_solo,
+                dyneq_band3_freq,
+                dyneq_band3_threshold,
+                dyneq_band3_ratio,
+                dyneq_band3_q,
+                dyneq_band3_mode,
+                dyneq_band3_attack,
+                dyneq_band3_release,
+                dyneq_band3_gain,
+                2
+            );
 
-            dyneq_band_col!(cx, "BAND 4 — HIGH",
-                dyneq_band4_enabled, dyneq_band4_solo,
-                dyneq_band4_freq, dyneq_band4_threshold, dyneq_band4_ratio,
-                dyneq_band4_q, dyneq_band4_mode, dyneq_band4_attack,
-                dyneq_band4_release, dyneq_band4_gain,
-                3);
+            dyneq_band_col!(
+                cx,
+                "BAND 4 — HIGH",
+                dyneq_band4_enabled,
+                dyneq_band4_solo,
+                dyneq_band4_freq,
+                dyneq_band4_threshold,
+                dyneq_band4_ratio,
+                dyneq_band4_q,
+                dyneq_band4_mode,
+                dyneq_band4_attack,
+                dyneq_band4_release,
+                dyneq_band4_gain,
+                3
+            );
         })
         .height(Stretch(1.0))
         .width(Stretch(1.0))
@@ -1271,27 +1398,41 @@ fn build_transformer_controls(cx: &mut Context) {
         // Model + compression on one row
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "MODEL", Data::params, |p| &p.transformer_model);
-            components::create_ratio_slider(cx, "COMP", Data::params, |p| &p.transformer_compression);
+            components::create_ratio_slider(cx, "COMP", Data::params, |p| {
+                &p.transformer_compression
+            });
         });
         // Input stage: drive + saturation paired
         components::module_section(cx, "INPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "DRIVE", Data::params, |p| &p.transformer_input_drive);
-                components::create_param_slider(cx, "SAT", Data::params, |p| &p.transformer_input_saturation);
+                components::create_param_slider(cx, "DRIVE", Data::params, |p| {
+                    &p.transformer_input_drive
+                });
+                components::create_param_slider(cx, "SAT", Data::params, |p| {
+                    &p.transformer_input_saturation
+                });
             });
         });
         // Output stage: drive + saturation paired
         components::module_section(cx, "OUTPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "DRIVE", Data::params, |p| &p.transformer_output_drive);
-                components::create_param_slider(cx, "SAT", Data::params, |p| &p.transformer_output_saturation);
+                components::create_param_slider(cx, "DRIVE", Data::params, |p| {
+                    &p.transformer_output_drive
+                });
+                components::create_param_slider(cx, "SAT", Data::params, |p| {
+                    &p.transformer_output_saturation
+                });
             });
         });
         // Tone shaping: low/high response
         components::module_section(cx, "TONE", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "LOW", Data::params, |p| &p.transformer_low_response);
-                components::create_param_slider(cx, "HIGH", Data::params, |p| &p.transformer_high_response);
+                components::create_param_slider(cx, "LOW", Data::params, |p| {
+                    &p.transformer_low_response
+                });
+                components::create_param_slider(cx, "HIGH", Data::params, |p| {
+                    &p.transformer_high_response
+                });
             });
         });
     })
@@ -1312,7 +1453,9 @@ fn build_punch_controls(cx: &mut Context) {
             });
             components::module_row(cx, |cx| {
                 components::create_param_slider(cx, "SOFT", Data::params, |p| &p.punch_softness);
-                components::create_param_slider(cx, "OVSMP", Data::params, |p| &p.punch_oversampling);
+                components::create_param_slider(cx, "OVSMP", Data::params, |p| {
+                    &p.punch_oversampling
+                });
             });
         });
         components::module_section(cx, "TRANSIENTS", |cx| {

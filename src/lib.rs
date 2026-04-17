@@ -1,7 +1,7 @@
 use nih_plug::prelude::*;
+use std::sync::Arc;
 #[cfg(feature = "gui")]
 use vizia_plug::ViziaState;
-use std::sync::Arc;
 mod shaping;
 mod spectral;
 
@@ -13,7 +13,9 @@ use api5500::Api5500;
 #[cfg(feature = "buttercomp2")]
 mod buttercomp2;
 #[cfg(feature = "buttercomp2")]
-use buttercomp2::{ButterComp2, ButterComp2Model, FetCompressor, FetRatio, OpticalCompressor, VcaCompressor};
+use buttercomp2::{
+    ButterComp2, ButterComp2Model, FetCompressor, FetRatio, OpticalCompressor, VcaCompressor,
+};
 
 #[cfg(feature = "pultec")]
 mod pultec;
@@ -23,22 +25,22 @@ use pultec::PultecEQ;
 #[cfg(feature = "dynamic_eq")]
 mod dynamic_eq;
 #[cfg(feature = "dynamic_eq")]
-use dynamic_eq::{DynamicEQ, DynamicBandParams, DynamicMode};
+use dynamic_eq::{DynamicBandParams, DynamicEQ, DynamicMode};
 
 #[cfg(feature = "transformer")]
 mod transformer;
 #[cfg(feature = "transformer")]
-use transformer::{TransformerModule, TransformerModel};
+use transformer::{TransformerModel, TransformerModule};
 
 #[cfg(feature = "punch")]
 mod punch;
 #[cfg(feature = "punch")]
-use punch::{PunchModule, ClipMode, OversamplingFactor};
+use punch::{ClipMode, OversamplingFactor, PunchModule};
 
 #[cfg(feature = "gui")]
-mod editor;
-#[cfg(feature = "gui")]
 mod components;
+#[cfg(feature = "gui")]
+mod editor;
 #[cfg(feature = "gui")]
 mod styles;
 
@@ -53,13 +55,17 @@ fn rms_linear(channels: &[&mut [f32]]) -> f32 {
             n += 1;
         }
     }
-    if n == 0 { 0.0 } else { (sum_sq / n as f32).sqrt() }
+    if n == 0 {
+        0.0
+    } else {
+        (sum_sq / n as f32).sqrt()
+    }
 }
 
 /// Smoothing coefficient for auto-gain: ~5-second time constant at 86 buffers/sec.
 const AUTO_GAIN_SMOOTH: f32 = 0.9975;
 /// Maximum auto-gain correction: ±18 dB in linear.
-const AUTO_GAIN_MAX: f32 = 8.0;   // +18.06 dB
+const AUTO_GAIN_MAX: f32 = 8.0; // +18.06 dB
 const AUTO_GAIN_MIN: f32 = 0.125; // −18.06 dB
 
 /// Module identifiers for reordering
@@ -246,6 +252,13 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "buttercomp2")]
     #[id = "comp_model"]
     pub comp_model: EnumParam<ButterComp2Model>,
+
+    /// Sidechain HP corner (20..400 Hz). Shared across VCA and FET models —
+    /// both use linked peak/RMS detection and benefit equally from removing
+    /// low-frequency energy from the detector path. 20 Hz = effectively off.
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_sc_hp"]
+    pub comp_sc_hp_freq: FloatParam,
 
     // VCA model parameters
     #[id = "comp_vca_thresh"]
@@ -644,7 +657,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             lf_gain: FloatParam::new(
                 "LF Gain",
                 0.0,
@@ -666,7 +679,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             lmf_gain: FloatParam::new(
                 "LMF Gain",
                 0.0,
@@ -675,7 +688,7 @@ impl Default for BusChannelStripParams {
             .with_unit(" dB")
             .with_step_size(1.0)
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
-            
+
             lmf_q: FloatParam::new(
                 "LMF Q",
                 0.7,
@@ -699,7 +712,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             mf_gain: FloatParam::new(
                 "MF Gain",
                 0.0,
@@ -708,7 +721,7 @@ impl Default for BusChannelStripParams {
             .with_unit(" dB")
             .with_step_size(1.0)
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
-            
+
             mf_q: FloatParam::new(
                 "MF Q",
                 0.7,
@@ -732,7 +745,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             hmf_gain: FloatParam::new(
                 "HMF Gain",
                 0.0,
@@ -741,7 +754,7 @@ impl Default for BusChannelStripParams {
             .with_unit(" dB")
             .with_step_size(1.0)
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
-            
+
             hmf_q: FloatParam::new(
                 "HMF Q",
                 0.7,
@@ -765,7 +778,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             hf_gain: FloatParam::new(
                 "HF Gain",
                 0.0,
@@ -777,7 +790,7 @@ impl Default for BusChannelStripParams {
 
             // ButterComp2 Compressor Parameters
             comp_bypass: BoolParam::new("Comp Bypass", false),
-            
+
             comp_compress: FloatParam::new(
                 "Compress",
                 0.0,
@@ -785,7 +798,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             comp_output: FloatParam::new(
                 "Comp Output",
                 0.5, // 0.5 = unity gain
@@ -793,7 +806,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             comp_dry_wet: FloatParam::new(
                 "Comp Mix",
                 1.0, // 1.0 = fully wet
@@ -804,6 +817,20 @@ impl Default for BusChannelStripParams {
 
             #[cfg(feature = "buttercomp2")]
             comp_model: EnumParam::<ButterComp2Model>::new("Model", ButterComp2Model::default()),
+
+            // Default 20 Hz = filter is effectively off, matching legacy
+            // sessions exactly. Users crank it up to 80–160 Hz for mix-bus use.
+            comp_sc_hp_freq: FloatParam::new(
+                "SC HP",
+                20.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 400.0,
+                    factor: FloatRange::skew_factor(-1.5),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             // VCA model parameters
             vca_thresh: FloatParam::new(
@@ -923,7 +950,7 @@ impl Default for BusChannelStripParams {
 
             // Pultec EQ Parameters
             pultec_bypass: BoolParam::new("Pultec Bypass", false),
-            
+
             pultec_lf_boost_freq: FloatParam::new(
                 "LF Boost Freq",
                 60.0,
@@ -931,7 +958,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             pultec_lf_boost_gain: FloatParam::new(
                 "LF Boost",
                 0.0,
@@ -939,7 +966,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             // Independent low-cut frequency enables the classic Pultec
             // "trick": boost at e.g. 60 Hz, cut at e.g. 200 Hz for a tight
             // low end. Default 100 Hz is a neutral starting point; existing
@@ -960,7 +987,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             pultec_hf_boost_freq: FloatParam::new(
                 "HF Boost Freq",
                 10000.0,
@@ -972,7 +999,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             pultec_hf_boost_gain: FloatParam::new(
                 "HF Boost",
                 0.0,
@@ -980,7 +1007,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             pultec_hf_boost_bandwidth: FloatParam::new(
                 "HF Bandwidth",
                 0.5,
@@ -988,7 +1015,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             pultec_hf_cut_freq: FloatParam::new(
                 "HF Atten Freq",
                 10000.0,
@@ -1000,7 +1027,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
-            
+
             pultec_hf_cut_gain: FloatParam::new(
                 "HF Atten",
                 0.0,
@@ -1008,7 +1035,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             pultec_tube_drive: FloatParam::new(
                 "Tube Drive",
                 0.2, // Subtle tube character by default
@@ -1110,7 +1137,7 @@ impl Default for BusChannelStripParams {
 
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_enabled: BoolParam::new("DynEQ 1 On", true),
-            
+
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_detector_freq: FloatParam::new(
                 "DynEQ 1 Detector Freq",
@@ -1157,7 +1184,7 @@ impl Default for BusChannelStripParams {
             dyneq_band2_q: FloatParam::new("DynEQ 2 Q", 1.0, FloatRange::Skewed { min: 0.3, max: 8.0, factor: FloatRange::skew_factor(0.5) }).with_step_size(0.01),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band2_enabled: BoolParam::new("DynEQ 2 On", true),
-            
+
             #[cfg(feature = "dynamic_eq")]
             dyneq_band2_detector_freq: FloatParam::new(
                 "DynEQ 2 Detector Freq",
@@ -1268,9 +1295,9 @@ impl Default for BusChannelStripParams {
 
             // Transformer Module Parameters
             transformer_bypass: BoolParam::new("Transformer Bypass", false),
-            
+
             transformer_model: EnumParam::new("Transformer Model", TransformerModel::Vintage),
-            
+
             transformer_input_drive: FloatParam::new(
                 "Input Drive",
                 0.2, // Subtle drive by default
@@ -1278,7 +1305,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             transformer_input_saturation: FloatParam::new(
                 "Input Saturation",
                 0.3, // Gentle saturation
@@ -1286,15 +1313,15 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             transformer_output_drive: FloatParam::new(
-                "Output Drive", 
+                "Output Drive",
                 0.1, // Very subtle by default
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             transformer_output_saturation: FloatParam::new(
                 "Output Saturation",
                 0.4, // Moderate output coloration
@@ -1302,7 +1329,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             transformer_low_response: FloatParam::new(
                 "Low Response",
                 0.0, // Flat by default
@@ -1310,7 +1337,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             transformer_high_response: FloatParam::new(
                 "High Response",
                 0.0, // Flat by default
@@ -1318,7 +1345,7 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
-            
+
             transformer_compression: FloatParam::new(
                 "Transformer Compression",
                 0.3, // Gentle transformer loading
@@ -1454,12 +1481,12 @@ impl Default for BusChannelStripParams {
 /// enum definition; any reorder there requires updating this match.
 fn module_type_index(mt: ModuleType) -> usize {
     match mt {
-        ModuleType::Api5500EQ   => 0,
+        ModuleType::Api5500EQ => 0,
         ModuleType::ButterComp2 => 1,
-        ModuleType::PultecEQ    => 2,
-        ModuleType::DynamicEQ   => 3,
+        ModuleType::PultecEQ => 2,
+        ModuleType::DynamicEQ => 3,
         ModuleType::Transformer => 4,
-        ModuleType::Punch       => 5,
+        ModuleType::Punch => 5,
     }
 }
 
@@ -1513,14 +1540,16 @@ impl BusChannelStrip {
                     self.params.vca_ratio.smoothed.next(),
                     self.params.vca_atk.smoothed.next(),
                     self.params.vca_rel.smoothed.next(),
+                    self.params.comp_sc_hp_freq.value(),
                 );
                 self.vca_compressor.process(buffer);
             }
             ButterComp2Model::Optical => {
                 let thresh = self.params.opt_thresh.smoothed.next();
-                let speed  = self.params.opt_speed.smoothed.next();
+                let speed = self.params.opt_speed.smoothed.next();
                 let char_v = self.params.opt_char.smoothed.next();
-                self.optical_compressor.update_parameters(thresh, speed, char_v);
+                self.optical_compressor
+                    .update_parameters(thresh, speed, char_v);
                 self.optical_compressor.process(buffer, thresh);
             }
             ButterComp2Model::Fet => {
@@ -1531,6 +1560,7 @@ impl BusChannelStrip {
                     self.params.fet_release_ms.smoothed.next(),
                     self.params.fet_ratio.value(),
                     self.params.fet_auto_release.value(),
+                    self.params.comp_sc_hp_freq.value(),
                 );
                 self.fet_compressor.process(buffer);
             }
@@ -1574,19 +1604,20 @@ impl BusChannelStrip {
     }
 
     #[cfg(feature = "dynamic_eq")]
-    fn process_module_dynamic_eq(
-        &mut self,
-        buffer: &mut Buffer,
-        aux: &mut AuxiliaryBuffers,
-    ) {
+    fn process_module_dynamic_eq(&mut self, buffer: &mut Buffer, aux: &mut AuxiliaryBuffers) {
         // Sidechain ring accumulation — runs regardless of bypass so the
         // ANALYZE SC feature always reflects the live sidechain.
         if !aux.inputs.is_empty() {
             for channel_samples in aux.inputs[0].iter_samples() {
                 let mut mono = 0.0_f32;
                 let mut n = 0_usize;
-                for s in channel_samples { mono += *s; n += 1; }
-                if n > 0 { mono /= n as f32; }
+                for s in channel_samples {
+                    mono += *s;
+                    n += 1;
+                }
+                if n > 0 {
+                    mono /= n as f32;
+                }
                 self.sc_ring[self.sc_ring_pos] = mono;
                 self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
             }
@@ -1675,23 +1706,30 @@ impl BusChannelStrip {
                 mono += *s;
                 n += 1;
             }
-            if n > 0 { mono /= n as f32; }
+            if n > 0 {
+                mono /= n as f32;
+            }
             self.fft_ring[self.fft_ring_pos] = mono;
             self.fft_ring_pos += 1;
 
             if self.fft_ring_pos >= spectral::FFT_SIZE {
                 self.fft_ring_pos = 0;
-                for (dst, (&src, &win)) in self.fft_input.iter_mut()
+                for (dst, (&src, &win)) in self
+                    .fft_input
+                    .iter_mut()
                     .zip(self.fft_ring.iter().zip(self.fft_window.iter()))
                 {
                     *dst = src * win;
                 }
                 if let Some(ref fft) = self.fft_engine {
-                    if fft.process_with_scratch(
-                        &mut self.fft_input,
-                        &mut self.fft_output,
-                        &mut self.fft_scratch,
-                    ).is_ok() {
+                    if fft
+                        .process_with_scratch(
+                            &mut self.fft_input,
+                            &mut self.fft_output,
+                            &mut self.fft_scratch,
+                        )
+                        .is_ok()
+                    {
                         const SMOOTH_ALPHA: f32 = 0.8;
                         const SMOOTH_BETA: f32 = 1.0 - SMOOTH_ALPHA;
                         let scale = 2.0 / spectral::FFT_SIZE as f32;
@@ -1710,22 +1748,24 @@ impl BusChannelStrip {
                         if self.analysis_requested.swap(false, Ordering::Relaxed) {
                             for i in 0..spectral::FFT_SIZE {
                                 let ring_idx = (self.sc_ring_pos + i) % spectral::FFT_SIZE;
-                                self.sc_fft_input[i] =
-                                    self.sc_ring[ring_idx] * self.fft_window[i];
+                                self.sc_fft_input[i] = self.sc_ring[ring_idx] * self.fft_window[i];
                             }
-                            if fft.process_with_scratch(
-                                &mut self.sc_fft_input,
-                                &mut self.sc_fft_output,
-                                &mut self.fft_scratch,
-                            ).is_ok() {
+                            if fft
+                                .process_with_scratch(
+                                    &mut self.sc_fft_input,
+                                    &mut self.sc_fft_output,
+                                    &mut self.fft_scratch,
+                                )
+                                .is_ok()
+                            {
                                 let scale = 2.0 / spectral::FFT_SIZE as f32;
                                 let mut peak_overlap = 0.0_f32;
                                 let mut peak_bin = 1_usize;
 
                                 for i in 1..spectral::SPECTRUM_BINS {
                                     let main_mag = self.fft_output[i].norm() * scale;
-                                    let sc_mag   = self.sc_fft_output[i].norm() * scale;
-                                    let overlap  = main_mag * sc_mag;
+                                    let sc_mag = self.sc_fft_output[i].norm() * scale;
+                                    let overlap = main_mag * sc_mag;
                                     self.analysis_result.overlap_bins[i]
                                         .store(overlap.to_bits(), Ordering::Relaxed);
                                     if overlap > peak_overlap {
@@ -1737,29 +1777,32 @@ impl BusChannelStrip {
                                     .store(0_u32, Ordering::Relaxed);
 
                                 let target_freq =
-                                    peak_bin as f32 * self.sample_rate
-                                    / spectral::FFT_SIZE as f32;
+                                    peak_bin as f32 * self.sample_rate / spectral::FFT_SIZE as f32;
 
-                                let target_band: u32 =
-                                    if target_freq <  500.0 { 0 }
-                                    else if target_freq < 2000.0 { 1 }
-                                    else if target_freq < 6000.0 { 2 }
-                                    else { 3 };
+                                let target_band: u32 = if target_freq < 500.0 {
+                                    0
+                                } else if target_freq < 2000.0 {
+                                    1
+                                } else if target_freq < 6000.0 {
+                                    2
+                                } else {
+                                    3
+                                };
 
-                                let sc_mag_at_peak =
-                                    self.sc_fft_output[peak_bin].norm() * scale;
-                                let sc_db = 20.0
-                                    * sc_mag_at_peak.max(f32::MIN_POSITIVE).log10();
+                                let sc_mag_at_peak = self.sc_fft_output[peak_bin].norm() * scale;
+                                let sc_db = 20.0 * sc_mag_at_peak.max(f32::MIN_POSITIVE).log10();
                                 let suggested_threshold = (sc_db - 6.0).clamp(-60.0, 0.0);
 
-                                self.analysis_result.target_band
+                                self.analysis_result
+                                    .target_band
                                     .store(target_band, Ordering::Relaxed);
-                                self.analysis_result.target_freq
+                                self.analysis_result
+                                    .target_freq
                                     .store(target_freq.to_bits(), Ordering::Relaxed);
-                                self.analysis_result.target_threshold_db
+                                self.analysis_result
+                                    .target_threshold_db
                                     .store(suggested_threshold.to_bits(), Ordering::Relaxed);
-                                self.analysis_result.ready
-                                    .store(true, Ordering::Release);
+                                self.analysis_result.ready.store(true, Ordering::Release);
                             }
                         }
                     }
@@ -1793,48 +1836,55 @@ impl BusChannelStrip {
     /// When a feature is disabled the corresponding arm is a no-op — the
     /// module_order_* params remain host-visible regardless of feature set,
     /// so out-of-feature selections silently pass the signal through.
-    fn dispatch_module(
-        &mut self,
-        mt: ModuleType,
-        buffer: &mut Buffer,
-        aux: &mut AuxiliaryBuffers,
-    ) {
+    fn dispatch_module(&mut self, mt: ModuleType, buffer: &mut Buffer, aux: &mut AuxiliaryBuffers) {
         match mt {
             ModuleType::Api5500EQ => {
                 #[cfg(feature = "api5500")]
                 self.process_module_api5500(buffer);
                 #[cfg(not(feature = "api5500"))]
-                { let _ = buffer; }
+                {
+                    let _ = buffer;
+                }
             }
             ModuleType::ButterComp2 => {
                 #[cfg(feature = "buttercomp2")]
                 self.process_module_buttercomp(buffer);
                 #[cfg(not(feature = "buttercomp2"))]
-                { let _ = buffer; }
+                {
+                    let _ = buffer;
+                }
             }
             ModuleType::PultecEQ => {
                 #[cfg(feature = "pultec")]
                 self.process_module_pultec(buffer);
                 #[cfg(not(feature = "pultec"))]
-                { let _ = buffer; }
+                {
+                    let _ = buffer;
+                }
             }
             ModuleType::Transformer => {
                 #[cfg(feature = "transformer")]
                 self.process_module_transformer(buffer);
                 #[cfg(not(feature = "transformer"))]
-                { let _ = buffer; }
+                {
+                    let _ = buffer;
+                }
             }
             ModuleType::DynamicEQ => {
                 #[cfg(feature = "dynamic_eq")]
                 self.process_module_dynamic_eq(buffer, aux);
                 #[cfg(not(feature = "dynamic_eq"))]
-                { let _ = (buffer, aux); }
+                {
+                    let _ = (buffer, aux);
+                }
             }
             ModuleType::Punch => {
                 #[cfg(feature = "punch")]
                 self.process_module_punch(buffer);
                 #[cfg(not(feature = "punch"))]
-                { let _ = buffer; }
+                {
+                    let _ = buffer;
+                }
             }
         }
     }
@@ -1912,23 +1962,41 @@ impl Plugin for BusChannelStrip {
         // Reinitialize modules with the actual sample rate
         let sr = _buffer_config.sample_rate;
         #[cfg(feature = "api5500")]
-        { self.eq_api5500 = Api5500::new(sr); }
+        {
+            self.eq_api5500 = Api5500::new(sr);
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.compressor = ButterComp2::new(sr); }
+        {
+            self.compressor = ButterComp2::new(sr);
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.fet_compressor = FetCompressor::new(sr); }
+        {
+            self.fet_compressor = FetCompressor::new(sr);
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.vca_compressor = VcaCompressor::new(sr); }
+        {
+            self.vca_compressor = VcaCompressor::new(sr);
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.optical_compressor = OpticalCompressor::new(sr); }
+        {
+            self.optical_compressor = OpticalCompressor::new(sr);
+        }
         #[cfg(feature = "pultec")]
-        { self.pultec = PultecEQ::new(sr); }
+        {
+            self.pultec = PultecEQ::new(sr);
+        }
         #[cfg(feature = "dynamic_eq")]
-        { self.dynamic_eq = DynamicEQ::new(sr); }
+        {
+            self.dynamic_eq = DynamicEQ::new(sr);
+        }
         #[cfg(feature = "transformer")]
-        { self.transformer = TransformerModule::new(sr); }
+        {
+            self.transformer = TransformerModule::new(sr);
+        }
         #[cfg(feature = "punch")]
-        { self.punch = PunchModule::new(sr); }
+        {
+            self.punch = PunchModule::new(sr);
+        }
 
         // Initialize temporary buffers for module reordering
         let max_buffer_size = _buffer_config.max_buffer_size as usize;
@@ -1943,23 +2011,24 @@ impl Plugin for BusChannelStrip {
             use realfft::RealFftPlanner;
             let mut planner = RealFftPlanner::<f32>::new();
             let fft = planner.plan_fft_forward(spectral::FFT_SIZE);
-            self.fft_input     = fft.make_input_vec();
-            self.fft_output    = fft.make_output_vec();
-            self.fft_scratch   = fft.make_scratch_vec();
+            self.fft_input = fft.make_input_vec();
+            self.fft_output = fft.make_output_vec();
+            self.fft_scratch = fft.make_scratch_vec();
             // Sidechain analysis buffers (same FFT size, separate allocation).
-            self.sc_fft_input  = fft.make_input_vec();
+            self.sc_fft_input = fft.make_input_vec();
             self.sc_fft_output = fft.make_output_vec();
-            self.fft_engine    = Some(fft);
-            self.fft_ring      = vec![0.0_f32; spectral::FFT_SIZE];
-            self.fft_ring_pos  = 0;
-            self.sc_ring       = vec![0.0_f32; spectral::FFT_SIZE];
-            self.sc_ring_pos   = 0;
-            self.sample_rate   = sr;
+            self.fft_engine = Some(fft);
+            self.fft_ring = vec![0.0_f32; spectral::FFT_SIZE];
+            self.fft_ring_pos = 0;
+            self.sc_ring = vec![0.0_f32; spectral::FFT_SIZE];
+            self.sc_ring_pos = 0;
+            self.sample_rate = sr;
             // Hann window: w[n] = 0.5 * (1 - cos(2π*n / (N-1)))
             self.fft_window = (0..spectral::FFT_SIZE)
                 .map(|n| {
-                    0.5 * (1.0 - (std::f32::consts::TAU * n as f32
-                        / (spectral::FFT_SIZE - 1) as f32).cos())
+                    0.5 * (1.0
+                        - (std::f32::consts::TAU * n as f32 / (spectral::FFT_SIZE - 1) as f32)
+                            .cos())
                 })
                 .collect();
             self.fft_magnitude_smooth = vec![0.0_f32; spectral::SPECTRUM_BINS];
@@ -1972,19 +2041,33 @@ impl Plugin for BusChannelStrip {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
         #[cfg(feature = "buttercomp2")]
-        { self.compressor.reset(); }
+        {
+            self.compressor.reset();
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.fet_compressor.reset(); }
+        {
+            self.fet_compressor.reset();
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.vca_compressor.reset(); }
+        {
+            self.vca_compressor.reset();
+        }
         #[cfg(feature = "buttercomp2")]
-        { self.optical_compressor.reset(); }
+        {
+            self.optical_compressor.reset();
+        }
         #[cfg(feature = "dynamic_eq")]
-        { self.dynamic_eq.reset(); }
+        {
+            self.dynamic_eq.reset();
+        }
         #[cfg(feature = "transformer")]
-        { self.transformer.reset(); }
+        {
+            self.transformer.reset();
+        }
         #[cfg(feature = "punch")]
-        { self.punch.reset(); }
+        {
+            self.punch.reset();
+        }
     }
 
     fn process(
@@ -2058,10 +2141,6 @@ impl Plugin for BusChannelStrip {
 
         ProcessStatus::Normal
     }
-    
-    
-    
-    
 }
 
 impl ClapPlugin for BusChannelStrip {
@@ -2084,4 +2163,3 @@ impl Vst3Plugin for BusChannelStrip {
 
 nih_export_clap!(BusChannelStrip);
 nih_export_vst3!(BusChannelStrip);
-
