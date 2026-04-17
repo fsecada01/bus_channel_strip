@@ -29,6 +29,57 @@ const DENORMAL_FLUSH: f32 = 1.0e-20;
 // still track program dynamics meaningfully.
 const RMS_WINDOW_MS: f32 = 10.0;
 
+// Soft-knee width in dB, centered on the threshold. Smooths the discontinuity
+// at the threshold boundary into a quadratic transition, eliminating the
+// audible click that a hard-knee gain computer produces when the envelope
+// crosses the threshold. 6 dB is the standard "musical" default for general
+// dynamic processing.
+const KNEE_WIDTH_DB: f32 = 6.0;
+
+/// Soft-knee gain computer (Reiss 2012). Given the detector's dB-over-threshold
+/// value, the mode, and the compression ratio, returns the gain change in dB
+/// (negative = attenuation, positive = upward expansion). The transition region
+/// around the threshold is a quadratic that matches the linear region's slope
+/// at the knee boundary, yielding a C1-continuous input/output curve.
+fn compute_gain_change_db(over_db: f32, mode: DynamicMode, ratio: f32) -> f32 {
+    let half_knee = KNEE_WIDTH_DB * 0.5;
+    match mode {
+        DynamicMode::CompressDownward => {
+            let slope = 1.0 - 1.0 / ratio;
+            if over_db <= -half_knee {
+                0.0
+            } else if over_db >= half_knee {
+                -slope * over_db
+            } else {
+                let x = over_db + half_knee;
+                -slope * x * x / (2.0 * KNEE_WIDTH_DB)
+            }
+        }
+        DynamicMode::ExpandUpward => {
+            let slope = ratio - 1.0;
+            if over_db <= -half_knee {
+                0.0
+            } else if over_db >= half_knee {
+                slope * over_db
+            } else {
+                let x = over_db + half_knee;
+                slope * x * x / (2.0 * KNEE_WIDTH_DB)
+            }
+        }
+        DynamicMode::Gate => {
+            let slope = 1.0 - 1.0 / ratio;
+            if over_db >= half_knee {
+                0.0
+            } else if over_db <= -half_knee {
+                (slope * over_db).max(-96.0)
+            } else {
+                let u = half_knee - over_db;
+                (-slope * u * u / (2.0 * KNEE_WIDTH_DB)).max(-96.0)
+            }
+        }
+    }
+}
+
 #[inline(always)]
 fn flush_denormal(x: f32) -> f32 {
     if x.abs() < DENORMAL_FLUSH {
@@ -309,25 +360,7 @@ impl DynamicBand {
         let envelope_db = 20.0 * self.envelope.max(f32::MIN_POSITIVE).log10();
         let over_db = envelope_db - self.threshold_db;
 
-        let mut gain_change_db = 0.0_f32;
-        match self.mode {
-            DynamicMode::CompressDownward => {
-                if over_db > 0.0 {
-                    gain_change_db = -over_db * (1.0 - 1.0 / self.ratio);
-                }
-            }
-            DynamicMode::ExpandUpward => {
-                if over_db > 0.0 {
-                    gain_change_db = over_db * (self.ratio - 1.0);
-                }
-            }
-            DynamicMode::Gate => {
-                if over_db < 0.0 {
-                    // Clamp so we never apply more attenuation than threshold allows.
-                    gain_change_db = (over_db * (1.0 - 1.0 / self.ratio)).max(-96.0);
-                }
-            }
-        }
+        let gain_change_db = compute_gain_change_db(over_db, self.mode, self.ratio);
         self.gain_reduction_db = -gain_change_db;
 
         // Update EQ coefficients only when gain changes significantly.
@@ -803,6 +836,85 @@ mod tests {
         assert!(
             out.abs() < 0.01,
             "Gate should attenuate quiet signal, got {out}"
+        );
+    }
+
+    #[test]
+    fn test_soft_knee_compress_is_continuous_at_boundaries() {
+        // At over_db = -half_knee, quadratic region starts at 0 (matching
+        // the "no action" region). At +half_knee, the quadratic matches the
+        // linear region. Verifies C1 continuity at both knee boundaries.
+        let half_knee = KNEE_WIDTH_DB * 0.5;
+        let ratio = 4.0_f32;
+
+        // Lower boundary: both approaches should give ~0
+        let eps = 0.001_f32;
+        let below =
+            compute_gain_change_db(-half_knee - eps, DynamicMode::CompressDownward, ratio);
+        let at_lower =
+            compute_gain_change_db(-half_knee + eps, DynamicMode::CompressDownward, ratio);
+        assert!(below.abs() < 1e-5, "Below knee must be 0, got {below}");
+        assert!(at_lower.abs() < 1e-3, "Just above lower knee: {at_lower}");
+
+        // Upper boundary: quadratic and linear should agree
+        let below_upper = compute_gain_change_db(half_knee - eps, DynamicMode::CompressDownward, ratio);
+        let at_upper = compute_gain_change_db(half_knee + eps, DynamicMode::CompressDownward, ratio);
+        assert!(
+            (below_upper - at_upper).abs() < 1e-2,
+            "Knee continuity failed at upper boundary: {below_upper} vs {at_upper}"
+        );
+    }
+
+    #[test]
+    fn test_soft_knee_matches_hard_knee_far_above_threshold() {
+        // Well above threshold+knee, soft-knee should converge to hard-knee
+        // behaviour: gain_change = -slope * over_db for CompressDownward.
+        let ratio = 4.0_f32;
+        let slope = 1.0 - 1.0 / ratio;
+        let over_db = 20.0_f32; // way above knee
+        let expected = -slope * over_db;
+        let actual = compute_gain_change_db(over_db, DynamicMode::CompressDownward, ratio);
+        assert!(
+            (actual - expected).abs() < 1e-5,
+            "Far-above-threshold gain change: expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn test_soft_knee_is_monotonic_for_compress() {
+        // Across the knee, gain_change_db is monotonically decreasing (more
+        // attenuation as over_db rises).
+        let ratio = 4.0_f32;
+        let samples: Vec<f32> = (-200..=200).map(|i| i as f32 * 0.05).collect();
+        let mut prev = 0.0_f32;
+        for &over_db in &samples {
+            let gc = compute_gain_change_db(over_db, DynamicMode::CompressDownward, ratio);
+            assert!(
+                gc <= prev + 1e-5,
+                "Non-monotonic at over_db={over_db}: gc={gc}, prev={prev}"
+            );
+            prev = gc;
+        }
+    }
+
+    #[test]
+    fn test_soft_knee_gate_continuity() {
+        // Gate: above threshold+knee → 0. Below threshold-knee → -slope * over_db.
+        // Within knee → quadratic. Check continuity at both boundaries.
+        let half_knee = KNEE_WIDTH_DB * 0.5;
+        let ratio = 4.0_f32;
+        let eps = 0.001_f32;
+
+        let above = compute_gain_change_db(half_knee + eps, DynamicMode::Gate, ratio);
+        let at_upper = compute_gain_change_db(half_knee - eps, DynamicMode::Gate, ratio);
+        assert!(above.abs() < 1e-5, "Above knee gate must be 0, got {above}");
+        assert!(at_upper.abs() < 1e-3, "Just below upper knee gate: {at_upper}");
+
+        let at_lower = compute_gain_change_db(-half_knee + eps, DynamicMode::Gate, ratio);
+        let below_lower = compute_gain_change_db(-half_knee - eps, DynamicMode::Gate, ratio);
+        assert!(
+            (at_lower - below_lower).abs() < 1e-2,
+            "Gate knee continuity at lower boundary: {at_lower} vs {below_lower}"
         );
     }
 
