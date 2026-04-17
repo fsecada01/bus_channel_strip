@@ -644,7 +644,7 @@ impl Default for BusChannelStripParams {
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
 
             // API5500 EQ Parameters
-            eq_bypass: BoolParam::new("EQ Bypass", false),
+            eq_bypass: BoolParam::new("EQ Bypass", true),
 
             // Low Frequency (LF) - Shelving at 100Hz
             lf_freq: FloatParam::new(
@@ -790,7 +790,7 @@ impl Default for BusChannelStripParams {
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
             // ButterComp2 Compressor Parameters
-            comp_bypass: BoolParam::new("Comp Bypass", false),
+            comp_bypass: BoolParam::new("Comp Bypass", true),
 
             comp_compress: FloatParam::new(
                 "Compress",
@@ -950,7 +950,7 @@ impl Default for BusChannelStripParams {
             fet_auto_release: BoolParam::new("FET Auto Release", false),
 
             // Pultec EQ Parameters
-            pultec_bypass: BoolParam::new("Pultec Bypass", false),
+            pultec_bypass: BoolParam::new("Pultec Bypass", true),
 
             pultec_lf_boost_freq: FloatParam::new(
                 "LF Boost Freq",
@@ -1047,7 +1047,7 @@ impl Default for BusChannelStripParams {
 
             #[cfg(feature = "dynamic_eq")]
             // Dynamic EQ Parameters
-            dyneq_bypass: BoolParam::new("DynEQ Bypass", false),
+            dyneq_bypass: BoolParam::new("DynEQ Bypass", true),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 1 (Low) - 200Hz
@@ -1295,7 +1295,7 @@ impl Default for BusChannelStripParams {
             dyneq_band4_solo: BoolParam::new("DynEQ 4 Solo", false),
 
             // Transformer Module Parameters
-            transformer_bypass: BoolParam::new("Transformer Bypass", false),
+            transformer_bypass: BoolParam::new("Transformer Bypass", true),
 
             transformer_model: EnumParam::new("Transformer Model", TransformerModel::Vintage),
 
