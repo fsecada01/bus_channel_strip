@@ -689,11 +689,16 @@ fn build_fet_controls(cx: &mut Context) {
 
 fn build_pultec_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        // LOW FREQUENCY: boost freq + gain side-by-side, attenuation below
+        // LOW FREQUENCY: boost freq/gain on top row, independent cut
+        // freq/gain on bottom row. Independent cut freq enables the classic
+        // EQP-1A boost+cut trick (boost at 60 Hz, cut at 200 Hz → tight lows).
         components::module_section(cx, "LOW FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
                 components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.pultec_lf_boost_freq);
                 components::create_gain_slider(cx, "BOOST", Data::params, |p| &p.pultec_lf_boost_gain);
+            });
+            components::module_row(cx, |cx| {
+                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| &p.pultec_lf_cut_freq);
                 components::create_gain_slider(cx, "ATTEN", Data::params, |p| &p.pultec_lf_cut_gain);
             });
         });

@@ -53,9 +53,12 @@ impl PultecEQ {
     /// Update Pultec parameters
     /// 
     /// # Arguments
-    /// * `lf_boost_freq` - Low frequency boost center (20, 30, 60, 100 Hz)
+    /// * `lf_boost_freq` - Low frequency boost center (20..200 Hz)
     /// * `lf_boost_gain` - Low frequency boost amount (0.0 to 1.0)
-    /// * `lf_cut_gain` - Low frequency cut amount (0.0 to 1.0) 
+    /// * `lf_cut_freq` - Low frequency cut center, independent of boost — the
+    ///   Pultec "trick" is to set boost and cut at *different* frequencies so
+    ///   the overlap produces a scooped-then-boosted curve (20..200 Hz)
+    /// * `lf_cut_gain` - Low frequency cut amount (0.0 to 1.0)
     /// * `hf_boost_freq` - High frequency boost center (5, 8, 10, 12, 15, 20 kHz)
     /// * `hf_boost_gain` - High frequency boost amount (0.0 to 1.0)
     /// * `hf_boost_bandwidth` - High frequency boost Q/bandwidth (0.0 to 1.0)
@@ -66,6 +69,7 @@ impl PultecEQ {
         &mut self,
         lf_boost_freq: f32,
         lf_boost_gain: f32,
+        lf_cut_freq: f32,
         lf_cut_gain: f32,
         hf_boost_freq: f32,
         hf_boost_gain: f32,
@@ -91,13 +95,16 @@ impl PultecEQ {
             Type::LowShelf(lf_boost_db), self.sample_rate.hz(), safe_lf_freq.hz(), 0.9,
         ) { self.lf_boost_filter.update_coefficients(coeff); }
 
-        // Low Frequency Cut — simultaneous with boost (classic Pultec behavior).
+        // Low Frequency Cut — independent frequency from boost. This is the
+        // classic EQP-1A "trick": set boost at e.g. 60 Hz and cut at e.g.
+        // 200 Hz so the low-shelf cut attenuates the mud right above the
+        // boosted low-bass, leaving a tight, defined low end.
         let lf_cut_db = if lf_cut_gain > 0.01 {
             -(lf_cut_gain * lf_cut_gain * 6.0) // 0 to -6 dB quadratic curve
         } else { 0.0 };
-        let cut_freq = (lf_boost_freq * 0.6).clamp(20.0, 120.0);
+        let safe_lf_cut_freq = lf_cut_freq.clamp(20.0, 200.0);
         if let Ok(coeff) = Coefficients::<f32>::from_params(
-            Type::LowShelf(lf_cut_db), self.sample_rate.hz(), cut_freq.hz(), 1.2,
+            Type::LowShelf(lf_cut_db), self.sample_rate.hz(), safe_lf_cut_freq.hz(), 1.2,
         ) { self.lf_cut_filter.update_coefficients(coeff); }
 
         // High Frequency Boost — PeakingEQ, 0 dB when inactive.
@@ -162,8 +169,9 @@ mod tests {
     fn test_pultec_update_parameters_nominal_does_not_panic() {
         let mut eq = PultecEQ::new(44100.0);
         eq.update_parameters(
-            100.0, // lf_boost_freq
+            60.0,  // lf_boost_freq
             0.5,   // lf_boost_gain
+            200.0, // lf_cut_freq — classic trick: cut above the boost
             0.3,   // lf_cut_gain
             8000.0,// hf_boost_freq
             0.6,   // hf_boost_gain
@@ -172,6 +180,16 @@ mod tests {
             0.2,   // hf_cut_gain
             0.0,   // tube_drive
         );
+    }
+
+    #[test]
+    fn test_pultec_lf_cut_freq_clamping() {
+        // lf_cut_freq is clamped to [20, 200]; extreme values must not panic.
+        let mut eq = PultecEQ::new(44100.0);
+        // below range
+        eq.update_parameters(60.0, 0.5, 5.0, 0.5, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+        // above range
+        eq.update_parameters(60.0, 0.5, 10000.0, 0.5, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
     }
 
     #[test]
@@ -206,10 +224,10 @@ mod tests {
     fn test_pultec_tube_drive_clamping() {
         let mut eq = PultecEQ::new(44100.0);
         // tube_drive is clamped to [0.0, 1.0] in update_parameters
-        eq.update_parameters(100.0, 0.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 2.0);
+        eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 2.0);
         assert!((eq.tube_drive - 1.0).abs() < 1e-5, "tube_drive > 1.0 should clamp to 1.0");
 
-        eq.update_parameters(100.0, 0.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, -1.0);
+        eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, -1.0);
         assert!((eq.tube_drive - 0.0).abs() < 1e-5, "tube_drive < 0.0 should clamp to 0.0");
     }
 
@@ -217,16 +235,16 @@ mod tests {
     fn test_pultec_lf_boost_freq_clamping() {
         // safe_lf_freq is clamped to [30, 200] — extremely low freq should not panic
         let mut eq = PultecEQ::new(44100.0);
-        eq.update_parameters(1.0, 0.5, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
-        eq.update_parameters(500.0, 0.5, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+        eq.update_parameters(1.0, 0.5, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+        eq.update_parameters(500.0, 0.5, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
     }
 
     #[test]
     fn test_pultec_hf_freq_clamping() {
         let mut eq = PultecEQ::new(44100.0);
         // hf_boost_freq clamps to [3000, 20000]
-        eq.update_parameters(100.0, 0.5, 0.0, 100.0, 0.5, 0.5, 10000.0, 0.2, 0.0);
-        eq.update_parameters(100.0, 0.5, 0.0, 30000.0, 0.5, 0.5, 25000.0, 0.2, 0.0);
+        eq.update_parameters(100.0, 0.5, 100.0, 0.0, 100.0, 0.5, 0.5, 10000.0, 0.2, 0.0);
+        eq.update_parameters(100.0, 0.5, 100.0, 0.0, 30000.0, 0.5, 0.5, 25000.0, 0.2, 0.0);
     }
 
     #[test]
@@ -243,7 +261,7 @@ mod tests {
         // Gain values <= 0.01 should result in 0 dB (inactive sections).
         // Verify no panic when all gains are near zero.
         let mut eq = PultecEQ::new(44100.0);
-        eq.update_parameters(100.0, 0.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
+        eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
     }
 }
 

@@ -297,6 +297,8 @@ pub struct BusChannelStripParams {
     pub pultec_lf_boost_freq: FloatParam,
     #[id = "pultec_lf_boost_gain"]
     pub pultec_lf_boost_gain: FloatParam,
+    #[id = "pultec_lf_cut_freq"]
+    pub pultec_lf_cut_freq: FloatParam,
     #[id = "pultec_lf_cut_gain"]
     pub pultec_lf_cut_gain: FloatParam,
     #[id = "pultec_hf_boost_freq"]
@@ -938,6 +940,19 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
             
+            // Independent low-cut frequency enables the classic Pultec
+            // "trick": boost at e.g. 60 Hz, cut at e.g. 200 Hz for a tight
+            // low end. Default 100 Hz is a neutral starting point; existing
+            // sessions created before v0.5 load with this default, which
+            // will sound different from the old coupled (0.6*boost) behavior.
+            pultec_lf_cut_freq: FloatParam::new(
+                "LF Atten Freq",
+                100.0,
+                FloatRange::Linear { min: 20.0, max: 200.0 },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
+
             pultec_lf_cut_gain: FloatParam::new(
                 "LF Atten", // "Attenuation" like the original
                 0.0,
@@ -1527,6 +1542,7 @@ impl BusChannelStrip {
         self.pultec.update_parameters(
             self.params.pultec_lf_boost_freq.value(),
             self.params.pultec_lf_boost_gain.value(),
+            self.params.pultec_lf_cut_freq.value(),
             self.params.pultec_lf_cut_gain.value(),
             self.params.pultec_hf_boost_freq.value(),
             self.params.pultec_hf_boost_gain.value(),
