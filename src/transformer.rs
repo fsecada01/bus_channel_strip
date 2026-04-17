@@ -264,10 +264,12 @@ fn vintage_transformer_saturation(input: f32, amount: f32) -> f32 {
     // Warm, musical saturation with even harmonics
     let driven = input * (1.0 + amount * 2.0);
     let saturated = driven.tanh(); // Smooth saturation
-    
-    // Add subtle even harmonics
-    let harmonic = driven * driven * amount * 0.1;
-    
+
+    // Even-harmonic term. x*|x| is genuinely 2nd-order without the DC offset
+    // that x² introduces — x² is always ≥ 0, so it adds a positive bias that
+    // accumulates through downstream IIR stages and muddies low frequencies.
+    let harmonic = driven * driven.abs() * amount * 0.1;
+
     // Blend
     let wet = saturated + harmonic;
     input * (1.0 - amount * 0.7) + wet * (amount * 0.7)
@@ -365,6 +367,28 @@ mod tests {
                 assert!(a.is_finite(), "American finite: input={input}, amount={amount}, out={a}");
             }
         }
+    }
+
+    #[test]
+    fn test_vintage_saturation_no_dc_offset() {
+        // Vintage uses an even-harmonic term (2nd harmonic). The term must be
+        // x*|x| not x² — x² is always ≥ 0 and adds DC bias that accumulates
+        // in downstream IIR stages (audit finding #5).
+        // Feed a long symmetric signal; mean of the output must stay near zero.
+        let amount = 0.7_f32;
+        let mut sum = 0.0_f64;
+        let n = 4096;
+        for i in 0..n {
+            // Pure sinusoid at some arbitrary frequency — symmetric, zero mean
+            let t = i as f32 / n as f32;
+            let x = (t * std::f32::consts::TAU * 8.0).sin() * 0.7;
+            sum += vintage_transformer_saturation(x, amount) as f64;
+        }
+        let mean = sum / n as f64;
+        assert!(
+            mean.abs() < 1e-3,
+            "Vintage saturation must not inject DC; mean={mean}"
+        );
     }
 
     #[test]
