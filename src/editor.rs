@@ -31,6 +31,9 @@ pub enum AppEvent {
     CloseDynEq,
     /// Toggle the expand/collapse state of a DynEQ band (0–3). GUI-only state.
     ToggleDynEQBand(usize),
+    /// Set the chassis zoom level (percentage: 75, 100, 125, 150, 200).
+    /// Applied via toggle_class on the chassis root; CSS scales content widths.
+    SetZoom(u8),
     /// Request a one-shot sidechain masking analysis from the audio thread.
     #[cfg(feature = "dynamic_eq")]
     RequestAnalysis,
@@ -62,6 +65,9 @@ pub struct Data {
     pub analysis_requested: Arc<AtomicBool>,
     /// Shared with the audio thread — read after analysis completes.
     pub analysis_result: Arc<spectral::AnalysisResult>,
+    /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
+    /// Applied via toggle_class to the chassis root; CSS scales slot width + padding.
+    pub zoom_level: u8,
 }
 
 impl Model for Data {
@@ -81,6 +87,14 @@ impl Model for Data {
                     self.dyneq_band_expand[band].store(!current, Ordering::Relaxed);
                     self.dyneq_expand_gen = self.dyneq_expand_gen.wrapping_add(1);
                 }
+            }
+
+            AppEvent::SetZoom(level) => {
+                // Clamp to supported discrete levels. Unknown values fall back to 100.
+                self.zoom_level = match *level {
+                    75 | 100 | 125 | 150 | 200 => *level,
+                    _ => 100,
+                };
             }
 
             #[cfg(feature = "dynamic_eq")]
@@ -274,8 +288,36 @@ fn module_type_subtitle(mt: ModuleType) -> &'static str {
 // Editor Entry Points
 // ============================================================================
 
+/// Chassis sizing constants.
+///
+/// Slot width is fixed at 280px per design (at zoom 100%). With exactly 4
+/// slots visible + 4px gaps + paddings, the default window fits four modules
+/// horizontally; the remaining two scroll into view via the strip ScrollView.
+///
+/// Math (at zoom 100%):
+///   4 slots × 280 px           = 1120
+///   3 gaps between slots × 4px =   12
+///   Strip horizontal padding   =   32  (16 + 16)
+///   Chassis outer padding      =   28  (14 + 14, reactive: 14 × zoom/100)
+///   Scrollbar gutter + margin  =   28  (scrollbar ~12 + safety 16)
+///   Total                      ≈ 1220 px
+///
+/// At higher zoom levels the slot width grows (BASE × zoom/100) and the
+/// chassis padding grows linearly as well; the window stays at 1220 px and
+/// users scroll horizontally to reveal off-screen slots.
+pub const DEFAULT_WINDOW_WIDTH: u32 = 1220;
+pub const DEFAULT_WINDOW_HEIGHT: u32 = 820;
+
 pub(crate) fn default_state() -> Arc<ViziaState> {
-    ViziaState::new(|| (1820, 820))
+    // new_with_default_scale_factor persists the scale across sessions and
+    // multiplies window size by it. We keep the factor at 1.0 because the
+    // chassis content zoom is handled via toggle_class + CSS per zoom level,
+    // which keeps the window at a fixed size and lets the ScrollView reveal
+    // content that overflows. Visual zoom is a pure CSS concern.
+    ViziaState::new_with_default_scale_factor(
+        || (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
+        1.0,
+    )
 }
 
 pub(crate) fn create(
@@ -303,11 +345,12 @@ pub(crate) fn create(
             dyneq_expand_gen: 0,
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
+            zoom_level: 100,
         }
         .build(cx);
 
         VStack::new(cx, |cx| {
-            // Chassis header
+            // ── Chassis header ──────────────────────────────────────────────
             HStack::new(cx, |cx| {
                 Label::new(cx, "API").class("chassis-brand");
                 Label::new(cx, "Bus Channel Strip").class("chassis-title");
@@ -325,23 +368,36 @@ pub(crate) fn create(
                 })
                 .class("signal-flow-section");
 
+                // Zoom control band — discrete 75/100/125/150/200 buttons.
+                create_zoom_controls(cx);
+
                 create_master_section(cx);
             })
             .class("chassis-header")
             .height(Pixels(80.0))
             .width(Stretch(1.0));
 
-            // Strip view — hidden when DynEQ back view is open.
-            HStack::new(cx, |cx| {
-                for slot_idx in 0..6_usize {
-                    create_dynamic_module_slot(cx, slot_idx);
-                }
+            // ── Strip view ──────────────────────────────────────────────────
+            // Strip is wrapped in a horizontal ScrollView so that the default
+            // window (sized for 4 slots) reveals the other 2 via scroll while
+            // higher zoom levels keep every slot reachable.
+            ScrollView::new(cx, |cx| {
+                HStack::new(cx, |cx| {
+                    for slot_idx in 0..6_usize {
+                        create_dynamic_module_slot(cx, slot_idx);
+                    }
+                })
+                .class("lunchbox-slots")
+                .height(Stretch(1.0))
+                // Inner width is driven by the slot widths themselves (fixed
+                // 280px × 6 + gaps). Using Auto lets the HStack size to its
+                // children so ScrollView can detect overflow correctly.
+                .width(Auto)
+                .gap(Pixels(4.0));
             })
-            .class("lunchbox-slots")
+            .class("strip-scroll")
             .height(Stretch(1.0))
             .width(Stretch(1.0))
-            .min_width(Pixels(1720.0))
-            .gap(Pixels(4.0))
             .display(Data::dyneq_open.map(|o| {
                 if *o {
                     Display::None
@@ -350,7 +406,7 @@ pub(crate) fn create(
                 }
             }));
 
-            // DynEQ back view — hidden when strip is shown.
+            // ── DynEQ back view ─────────────────────────────────────────────
             build_dyneq_back_view(
                 cx,
                 spectrum_data.clone(),
@@ -359,12 +415,68 @@ pub(crate) fn create(
             );
         })
         .class("lunchbox-chassis")
+        // Zoom classes drive per-level CSS sizing. Only one is active at a time.
+        .toggle_class("zoom-75", Data::zoom_level.map(|z| *z == 75))
+        .toggle_class("zoom-100", Data::zoom_level.map(|z| *z == 100))
+        .toggle_class("zoom-125", Data::zoom_level.map(|z| *z == 125))
+        .toggle_class("zoom-150", Data::zoom_level.map(|z| *z == 150))
+        .toggle_class("zoom-200", Data::zoom_level.map(|z| *z == 200))
         .width(Stretch(1.0))
         .height(Stretch(1.0))
-        .min_width(Pixels(1780.0))
-        .min_height(Pixels(780.0))
-        .padding(Pixels(20.0));
+        // Reactive padding: scales with zoom so the chassis frame feels
+        // proportional. Base 14px at 100%, ramps 10→28px across 75→200%.
+        // CSS alone cannot drive this because Rust inline .padding() wins
+        // over stylesheet padding.
+        .padding(Data::zoom_level.map(|z| Pixels(14.0 * (*z as f32) / 100.0)));
     })
+}
+
+// Discrete zoom buttons (75/100/125/150/200%). Each button emits SetZoom on
+// press; the active level is styled via a reactive `zoom-btn-active` class so
+// users can see which step is current.
+fn create_zoom_controls(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        Label::new(cx, "ZOOM").class("zoom-label");
+        HStack::new(cx, |cx| {
+            for &level in &[75_u8, 100, 125, 150, 200] {
+                VStack::new(cx, |cx| {
+                    Label::new(
+                        cx,
+                        match level {
+                            75 => "75",
+                            100 => "100",
+                            125 => "125",
+                            150 => "150",
+                            _ => "200",
+                        },
+                    )
+                    .class("zoom-btn-label");
+                })
+                .class("zoom-btn")
+                .toggle_class(
+                    "zoom-btn-active",
+                    Data::zoom_level.map(move |z| *z == level),
+                )
+                .on_press(move |cx| cx.emit(AppEvent::SetZoom(level)))
+                .cursor(CursorIcon::Hand)
+                .width(Pixels(36.0))
+                .height(Pixels(24.0))
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0));
+            }
+        })
+        .gap(Pixels(2.0))
+        .height(Pixels(24.0))
+        .width(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+    })
+    .class("zoom-controls")
+    .height(Auto)
+    .width(Auto)
+    .gap(Pixels(4.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
 }
 
 fn create_master_section(cx: &mut Context) {
@@ -491,7 +603,10 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
                     theme.accent_color()
                 }
             }))
-            .width(Pixels(280.0))
+            // Reactive slot width: base × (zoom/100). Each slot rebuilds its
+            // width whenever Data::zoom_level changes, giving uniform scaling
+            // across the 6 slots without rebuilding the whole tree.
+            .width(Data::zoom_level.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
             .height(Stretch(1.0))
             .border_width(Pixels(3.0))
             .background_color(Color::rgb(42, 42, 42))
@@ -499,6 +614,10 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
         },
     );
 }
+
+/// Base slot width at 100% zoom, in logical pixels. All other zoom levels are
+/// derived as `BASE_SLOT_WIDTH_PX * zoom_level / 100` via a reactive lens.
+pub const BASE_SLOT_WIDTH_PX: f32 = 280.0;
 
 // ============================================================================
 // Bypass Buttons — dispatched by module type
@@ -1299,9 +1418,15 @@ fn build_dyneq_back_view(
         .bottom(Pixels(0.0));
 
         // ── Real-time spectral analyzer with masking overlay ──────────────────
+        // Uses Stretch so the canvas grows with the back-view container as the
+        // plugin window is resized by the host. SpectrumCanvas::draw already
+        // reads cx.bounds() every frame, so no additional plumbing is needed.
+        // min_height guards against the canvas disappearing on very short
+        // windows.
         SpectrumCanvas::new(cx, spectrum_data, analysis_result, gr_data)
             .class("dyneq-spectrum")
-            .height(Pixels(220.0))
+            .height(Stretch(2.0))
+            .min_height(Pixels(180.0))
             .width(Stretch(1.0))
             .top(Pixels(0.0))
             .bottom(Pixels(0.0));

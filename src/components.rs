@@ -70,7 +70,7 @@ impl ModuleTheme {
             Self::Pultec => Color::rgb(255, 215, 0),       // #ffd700
             Self::DynamicEq => Color::rgb(102, 204, 102),  // #66cc66
             Self::Transformer => Color::rgb(204, 102, 51), // #cc6633
-            Self::Punch => Color::rgb(0, 160, 255),        // #00a0ff
+            Self::Punch => Color::rgb(255, 51, 68),        // #ff3344 (red/orange per spec)
         }
     }
 }
