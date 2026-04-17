@@ -254,24 +254,33 @@ impl DynamicBand {
         self.solo_filter.update_bandpass(frequency, q, sr);
     }
 
-    fn process_sample(&mut self, input: f32) -> f32 {
+    /// Update the sidechain envelope from a detection input. This is called
+    /// with the **module input** (not the inter-band cascade signal) so that
+    /// band N's detection is not contaminated by EQ applied in bands 0..N-1.
+    fn update_envelope(&mut self, detection_input: f32) {
+        if !self.enabled {
+            return;
+        }
+        let sc = self.sidechain_filter.process(detection_input);
+        let det = sc.abs();
+        if det > self.envelope {
+            self.envelope = det + (self.envelope - det) * self.attack_coeff;
+        } else {
+            self.envelope = det + (self.envelope - det) * self.release_coeff;
+        }
+        self.envelope = flush_denormal(self.envelope);
+    }
+
+    /// Compute the dynamic gain from the current envelope, update the EQ
+    /// coefficient (with hysteresis to skip transcendentals on tiny changes),
+    /// and apply the filter + makeup gain to `input`. `input` is the **cascade
+    /// signal** — i.e., the output of the previous band's apply_eq.
+    fn apply_eq(&mut self, input: f32) -> f32 {
         if !self.enabled {
             return input;
         }
 
-        // 1. Sidechain detection — frequency-weighted envelope follower.
-        let sidechain_signal = self.sidechain_filter.process(input);
-        let detection_level = sidechain_signal.abs();
-
-        if detection_level > self.envelope {
-            self.envelope = detection_level + (self.envelope - detection_level) * self.attack_coeff;
-        } else {
-            self.envelope =
-                detection_level + (self.envelope - detection_level) * self.release_coeff;
-        }
-        self.envelope = flush_denormal(self.envelope);
-
-        // 2. Gain computation in dB.
+        // Gain computation in dB.
         // Guard: max with MIN_POSITIVE prevents log10(0) = -inf → NaN / Gate explosion.
         let envelope_db = 20.0 * self.envelope.max(f32::MIN_POSITIVE).log10();
         let over_db = envelope_db - self.threshold_db;
@@ -297,7 +306,7 @@ impl DynamicBand {
         }
         self.gain_reduction_db = -gain_change_db;
 
-        // 3. Update EQ coefficients only when gain changes significantly.
+        // Update EQ coefficients only when gain changes significantly.
         // update_peaking() runs cos()/sin()/powf() — expensive transcendental math.
         // With typical attack/release times, the envelope changes <0.025 dB/sample,
         // so a 0.05 dB hysteresis threshold means we recompute every ~2 samples
@@ -310,8 +319,17 @@ impl DynamicBand {
             self.last_gain_change_db = gain_change_db;
         }
 
-        // 4. Apply dynamic EQ and makeup gain.
         self.eq_filter.process(input) * self.make_up_gain
+    }
+
+    /// Convenience wrapper for tests and any caller that wants the old
+    /// "detection == EQ input" behavior. Production code (`DynamicEQ::process`)
+    /// calls `update_envelope` and `apply_eq` separately so detection taps the
+    /// dry module input while EQ sees the cascade.
+    #[cfg(test)]
+    fn process_sample(&mut self, input: f32) -> f32 {
+        self.update_envelope(input);
+        self.apply_eq(input)
     }
 
     fn reset(&mut self) {
@@ -389,35 +407,33 @@ impl DynamicEQ {
 
         for samples in buffer.iter_samples() {
             for sample in samples {
+                let dry = *sample;
+
+                // Detection always taps the dry module input. This decouples
+                // band N's detector from the cumulative EQ cascade of bands
+                // 0..N-1, so band gain changes can't starve or pump each
+                // other's detection. The single shared update_envelope path
+                // also keeps the non-soloed bands alive in solo mode.
+                for band in &mut self.bands {
+                    band.update_envelope(dry);
+                }
+
                 if any_solo {
-                    // Band-isolation mode: sum bandpass outputs of soloed bands.
-                    // Non-soloed bands are still needed for envelope updates so
-                    // they respond instantly when solo is released.
-                    let dry = *sample;
+                    // Solo mode: sum soloed bands' bandpass outputs.
                     let mut out = 0.0_f32;
                     for band in &mut self.bands {
                         if band.solo && band.enabled {
                             out += band.solo_filter.process(dry);
                         }
-                        // Keep sidechain/envelope alive for non-soloed bands.
-                        // (process_sample would apply EQ too; we just update envelope.)
-                        else if band.enabled {
-                            let sc = band.sidechain_filter.process(dry);
-                            let det = sc.abs();
-                            if det > band.envelope {
-                                band.envelope = det + (band.envelope - det) * band.attack_coeff;
-                            } else {
-                                band.envelope = det + (band.envelope - det) * band.release_coeff;
-                            }
-                            band.envelope = flush_denormal(band.envelope);
-                        }
                     }
                     *sample = out / solo_count;
                 } else {
-                    // Normal mode: cascade all enabled bands in series.
-                    let mut s = *sample;
+                    // Normal mode: cascade EQs in series (detection already
+                    // captured the dry input above, so cascade order only
+                    // affects spectral shaping, not sidechain interaction).
+                    let mut s = dry;
                     for band in &mut self.bands {
-                        s = band.process_sample(s);
+                        s = band.apply_eq(s);
                     }
                     *sample = s;
                 }
@@ -857,6 +873,120 @@ mod tests {
                 "Initial GR band {i} should be 0.0"
             );
         }
+    }
+
+    #[test]
+    fn test_dynamic_eq_detection_decoupled_from_cascade() {
+        // After the DEQ-5 refactor, each band's envelope updates from the
+        // pristine module input — not from the inter-band cascade. This means
+        // band 2's detected level should be independent of whether band 1 is
+        // heavily cutting or not. Verifies the invariant.
+        let sr = 44100.0_f32;
+        use nih_plug::buffer::Buffer;
+
+        let make_sine = |n: usize| {
+            let l: Vec<f32> = (0..n)
+                .map(|i| (std::f32::consts::TAU * 1000.0 * (i as f32) / sr).sin() * 0.5)
+                .collect();
+            let r = l.clone();
+            (l, r)
+        };
+
+        // Scenario A: band 0 disabled (no LF cut), band 1 detecting 1 kHz.
+        let (mut l_a, mut r_a) = make_sine(512);
+        let mut buf_a = Buffer::default();
+        unsafe {
+            buf_a.set_slices(512, |ss| {
+                ss.clear();
+                ss.push(&mut l_a);
+                ss.push(&mut r_a);
+            });
+        }
+        let mut deq_a = DynamicEQ::new(sr);
+        let params_a = [
+            DynamicBandParams {
+                mode: DynamicMode::CompressDownward,
+                detector_freq: 100.0,
+                freq: 100.0,
+                q: 1.0,
+                threshold_db: -18.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 100.0,
+                gain_db: 0.0,
+                enabled: false, // band 0 off
+                solo: false,
+            },
+            DynamicBandParams {
+                mode: DynamicMode::CompressDownward,
+                detector_freq: 1000.0,
+                freq: 1000.0,
+                q: 1.0,
+                threshold_db: -30.0,
+                ratio: 4.0,
+                attack_ms: 1.0,
+                release_ms: 100.0,
+                gain_db: 0.0,
+                enabled: true,
+                solo: false,
+            },
+            DynamicBandParams {
+                mode: DynamicMode::CompressDownward,
+                detector_freq: 1000.0,
+                freq: 1000.0,
+                q: 1.0,
+                threshold_db: -30.0,
+                ratio: 4.0,
+                attack_ms: 1.0,
+                release_ms: 100.0,
+                gain_db: 0.0,
+                enabled: false,
+                solo: false,
+            },
+            DynamicBandParams {
+                mode: DynamicMode::CompressDownward,
+                detector_freq: 1000.0,
+                freq: 1000.0,
+                q: 1.0,
+                threshold_db: -30.0,
+                ratio: 4.0,
+                attack_ms: 1.0,
+                release_ms: 100.0,
+                gain_db: 0.0,
+                enabled: false,
+                solo: false,
+            },
+        ];
+        deq_a.update_parameters(&params_a);
+        deq_a.process(&mut buf_a);
+        let gr_a = deq_a.get_gain_reduction_db()[1];
+
+        // Scenario B: band 0 cutting hard at 100 Hz. Band 1 still sees the
+        // full 1 kHz input because detection taps the dry signal.
+        let (mut l_b, mut r_b) = make_sine(512);
+        let mut buf_b = Buffer::default();
+        unsafe {
+            buf_b.set_slices(512, |ss| {
+                ss.clear();
+                ss.push(&mut l_b);
+                ss.push(&mut r_b);
+            });
+        }
+        let mut deq_b = DynamicEQ::new(sr);
+        let mut params_b = params_a;
+        params_b[0].enabled = true;
+        params_b[0].threshold_db = -60.0; // cut aggressively at 100 Hz
+        params_b[0].ratio = 20.0;
+        deq_b.update_parameters(&params_b);
+        deq_b.process(&mut buf_b);
+        let gr_b = deq_b.get_gain_reduction_db()[1];
+
+        // Band 1's gain reduction must be (essentially) identical in both
+        // scenarios — band 0's cascade shouldn't influence band 1's detection.
+        assert!(
+            (gr_a - gr_b).abs() < 0.1,
+            "Band 1 GR changed when band 0 cascade changed: {gr_a} vs {gr_b}"
+        );
     }
 
     #[test]
