@@ -23,6 +23,12 @@ use nih_plug::prelude::Enum;
 // error well below any audible level.
 const DENORMAL_FLUSH: f32 = 1.0e-20;
 
+// RMS integration window for sidechain detection. 10 ms is a conventional
+// trade-off: long enough to smooth out transient spikes that would cause
+// peak-style pumping, short enough that the envelope's attack/release can
+// still track program dynamics meaningfully.
+const RMS_WINDOW_MS: f32 = 10.0;
+
 #[inline(always)]
 fn flush_denormal(x: f32) -> f32 {
     if x.abs() < DENORMAL_FLUSH {
@@ -166,8 +172,10 @@ struct DynamicBand {
     eq_filter: BiquadPeak,        // dynamic EQ: gain changes with envelope
     solo_filter: BiquadPeak,      // bandpass for band-isolation solo mode
 
-    // Envelope
-    envelope: f32,
+    // Detection
+    rms_state: f32,    // one-pole lowpass state on squared bandpass output
+    rms_coeff: f32,    // smoothing coefficient for the RMS integrator
+    envelope: f32,     // peak-follower state driven by sqrt(rms_state)
     pub gain_reduction_db: f32,
     last_gain_change_db: f32, // hysteresis cache — avoids per-sample trig recompute
 
@@ -194,10 +202,14 @@ impl DynamicBand {
         let mut solo_filter = BiquadPeak::new();
         solo_filter.update_bandpass(1000.0, 1.0, sample_rate);
 
+        let rms_coeff = (-1.0 / (RMS_WINDOW_MS * 0.001 * sample_rate)).exp();
+
         Self {
             sidechain_filter,
             eq_filter: BiquadPeak::new(),
             solo_filter,
+            rms_state: 0.0,
+            rms_coeff,
             envelope: 0.0,
             gain_reduction_db: 0.0,
             last_gain_change_db: 0.0,
@@ -240,6 +252,9 @@ impl DynamicBand {
         // Standard exponential-decay IIR attack/release coefficients.
         self.attack_coeff = (-1.0 / (attack_ms.max(0.01) * 0.001 * sr)).exp();
         self.release_coeff = (-1.0 / (release_ms.max(0.01) * 0.001 * sr)).exp();
+        // RMS coefficient is derived from a fixed 10 ms window; recomputed here
+        // in case sample_rate changes between calls (cheap, runs once per buffer).
+        self.rms_coeff = (-1.0 / (RMS_WINDOW_MS * 0.001 * sr)).exp();
         self.make_up_gain = 10.0f32.powf(make_up_gain_db / 20.0);
         self.enabled = enabled;
         self.solo = solo;
@@ -257,12 +272,21 @@ impl DynamicBand {
     /// Update the sidechain envelope from a detection input. This is called
     /// with the **module input** (not the inter-band cascade signal) so that
     /// band N's detection is not contaminated by EQ applied in bands 0..N-1.
+    ///
+    /// Detection chain:
+    ///   BPF → square → RMS lowpass (10 ms) → sqrt → attack/release smoother.
+    /// RMS integration replaces peak-style abs() to avoid the harsh transient
+    /// pumping that peak detectors produce on program material.
     fn update_envelope(&mut self, detection_input: f32) {
         if !self.enabled {
             return;
         }
         let sc = self.sidechain_filter.process(detection_input);
-        let det = sc.abs();
+        let sc_sq = sc * sc;
+        self.rms_state = sc_sq + (self.rms_state - sc_sq) * self.rms_coeff;
+        self.rms_state = flush_denormal(self.rms_state);
+        let det = self.rms_state.max(0.0).sqrt();
+
         if det > self.envelope {
             self.envelope = det + (self.envelope - det) * self.attack_coeff;
         } else {
@@ -333,6 +357,7 @@ impl DynamicBand {
     }
 
     fn reset(&mut self) {
+        self.rms_state = 0.0;
         self.envelope = 0.0;
         self.gain_reduction_db = 0.0;
         self.last_gain_change_db = 0.0;
@@ -778,6 +803,50 @@ mod tests {
         assert!(
             out.abs() < 0.01,
             "Gate should attenuate quiet signal, got {out}"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_band_detection_is_rms_not_peak() {
+        // A steady sine of amplitude A driven into the detector should settle
+        // to env ≈ A/sqrt(2) (RMS) rather than A (peak). Confirms the detector
+        // performs RMS integration.
+        let sr = 44100.0_f32;
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(
+            DynamicMode::CompressDownward,
+            1000.0,
+            1000.0,
+            1.0,
+            -60.0, // threshold low enough to see detection without gain collapse
+            1.0,   // ratio 1.0 (no compression applied, just detection)
+            0.1,   // fast attack so envelope tracks
+            50.0,  // moderate release
+            0.0,
+            true,
+            false,
+        );
+        let amp = 0.5_f32;
+        // Let the detector settle: >> attack, release, and RMS window combined.
+        for n in 0..50_000 {
+            let phase = std::f32::consts::TAU * 1000.0 * (n as f32) / sr;
+            band.update_envelope(phase.sin() * amp);
+        }
+        let expected_rms = amp / std::f32::consts::SQRT_2;
+        let relative_error = (band.envelope - expected_rms).abs() / expected_rms;
+        assert!(
+            relative_error < 0.05,
+            "Envelope should settle near A/sqrt(2) = {expected_rms:.4}, got {:.4} \
+             (relative error {:.3})",
+            band.envelope,
+            relative_error
+        );
+        // And it must NOT be near the peak amplitude (which is what a peak
+        // detector would produce).
+        assert!(
+            band.envelope < amp * 0.85,
+            "Envelope {:.4} is too close to peak {amp}; detector looks peak-style",
+            band.envelope
         );
     }
 
