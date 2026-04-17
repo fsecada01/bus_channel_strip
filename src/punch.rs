@@ -215,82 +215,311 @@ impl TransientDetector {
 }
 
 // ============================================================================
-// Oversampler
+// Oversampler — Cascaded Halfband FIR
 // ============================================================================
+//
+// Replaces the previous linear-interpolation / boxcar-average design, which had
+// poor alias rejection (linear interp ≈ -13 dB at Nyquist, box filter ≈ -4 dB)
+// and caused audible intermodulation harshness when pushed.
+//
+// Design:
+//   - Each 2× stage is a 23-tap Kaiser-windowed halfband FIR (β=8.0, ~-80 dB
+//     stopband). Cascaded log₂(factor) times for 2×/4×/8×/16×.
+//   - Coefficients are computed once at `Oversampler::new()` (allocation-safe
+//     at init time) and shared across all stages.
+//   - Filter state is fixed-size `[f32; HB_NUM_TAPS]` — no heap activity in
+//     the audio path.
 
-/// Simple polyphase oversampler with linear interpolation and lowpass filtering
+const HB_NUM_TAPS: usize = 23;
+const MAX_OS_STAGES: usize = 4; // 2^4 = 16× max
+
+/// Modified Bessel function of the first kind, order 0.
+/// Series expansion — used for Kaiser window design at init time.
+fn bessel_i0(x: f32) -> f32 {
+    let mut sum = 1.0_f32;
+    let mut term = 1.0_f32;
+    let q = (x * x) * 0.25;
+    for k in 1..60 {
+        let k_f = k as f32;
+        term *= q / (k_f * k_f);
+        sum += term;
+        if sum.abs() > 0.0 && term.abs() / sum.abs() < 1.0e-9 {
+            break;
+        }
+    }
+    sum
+}
+
+/// Design a Kaiser-windowed halfband FIR (HB_NUM_TAPS, odd).
+/// β=8.0 → ~-80 dB stopband attenuation (good for 16-bit audio).
+/// Coefficients are normalized to unity DC gain.
+fn design_halfband_kaiser(beta: f32) -> [f32; HB_NUM_TAPS] {
+    let mut coeffs = [0.0_f32; HB_NUM_TAPS];
+    let m = (HB_NUM_TAPS - 1) as f32;
+    let center = (HB_NUM_TAPS - 1) / 2;
+    let denom = bessel_i0(beta);
+    let pi = core::f32::consts::PI;
+
+    for n in 0..HB_NUM_TAPS {
+        let offset = n as i32 - center as i32;
+
+        // Ideal halfband impulse: h[n] = sinc((n−center)/2) / 2
+        // Simplifies to 0.5 at center and 0 at non-zero even offsets (halfband
+        // property); odd offsets get a windowed sinc value.
+        let ideal = if offset == 0 {
+            0.5
+        } else if offset.unsigned_abs() % 2 == 0 {
+            0.0
+        } else {
+            let arg = offset as f32 * pi * 0.5;
+            arg.sin() / (offset as f32 * pi)
+        };
+
+        // Kaiser window
+        let normalized = (2.0 * n as f32 - m) / m;
+        let w_arg = 1.0 - normalized * normalized;
+        let window = if w_arg >= 0.0 {
+            bessel_i0(beta * w_arg.sqrt()) / denom
+        } else {
+            0.0
+        };
+
+        coeffs[n] = ideal * window;
+    }
+
+    // Normalize DC gain to exactly 1.0
+    let sum: f32 = coeffs.iter().sum();
+    if sum.abs() > f32::MIN_POSITIVE {
+        for c in &mut coeffs {
+            *c /= sum;
+        }
+    }
+    coeffs
+}
+
+/// Single halfband FIR stage: holds a circular delay line over HB_NUM_TAPS
+/// samples at the filter's operating rate (always the higher of the two rates
+/// the stage bridges).
+#[derive(Clone)]
+struct HalfbandFir {
+    delay: [f32; HB_NUM_TAPS],
+    pos: usize,
+}
+
+impl HalfbandFir {
+    fn new() -> Self {
+        Self {
+            delay: [0.0; HB_NUM_TAPS],
+            pos: 0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.delay = [0.0; HB_NUM_TAPS];
+        self.pos = 0;
+    }
+
+    /// Convolve the delay line with `coeffs`. Assumes delay[self.pos] is the
+    /// newest sample (i.e., the most recently pushed sample lives at `pos`).
+    #[inline]
+    fn convolve(&self, coeffs: &[f32; HB_NUM_TAPS]) -> f32 {
+        let mut sum = 0.0_f32;
+        let mut read = self.pos;
+        for k in 0..HB_NUM_TAPS {
+            sum += coeffs[k] * self.delay[read];
+            read = if read == 0 { HB_NUM_TAPS - 1 } else { read - 1 };
+        }
+        sum
+    }
+
+    /// 2× upsample of one input sample → two output samples.
+    /// Implementation: zero-stuff + FIR filter, with a ×2 gain compensation
+    /// for the energy halved by zero insertion.
+    #[inline]
+    fn upsample_2x(&mut self, x: f32, coeffs: &[f32; HB_NUM_TAPS]) -> (f32, f32) {
+        self.delay[self.pos] = x;
+        let y0 = self.convolve(coeffs);
+        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+
+        self.delay[self.pos] = 0.0;
+        let y1 = self.convolve(coeffs);
+        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+
+        (y0 * 2.0, y1 * 2.0)
+    }
+
+    /// 2× downsample of two input samples → one output sample.
+    /// Filters at the higher rate, then decimates (keeps only the even-phase
+    /// output; the odd-phase output is discarded but its sample must still be
+    /// pushed into the delay line for future convolutions).
+    #[inline]
+    fn downsample_2x(&mut self, y0: f32, y1: f32, coeffs: &[f32; HB_NUM_TAPS]) -> f32 {
+        self.delay[self.pos] = y0;
+        let x = self.convolve(coeffs);
+        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+
+        self.delay[self.pos] = y1;
+        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+
+        x
+    }
+}
+
+/// Cascaded halfband FIR oversampler.
+/// `up_stages[0]` operates at the base rate (1× → 2×), `up_stages[n-1]` at the
+/// highest rate (factor/2 → factor). `down_stages` mirror this.
 struct Oversampler {
     factor: usize,
+    num_stages: usize,
+    hb_coeffs: [f32; HB_NUM_TAPS],
+    up_stages: [HalfbandFir; MAX_OS_STAGES],
+    down_stages: [HalfbandFir; MAX_OS_STAGES],
     upsample_buffer: Vec<f32>,
     downsample_buffer: Vec<f32>,
-    // Simple FIR lowpass filter state (for anti-aliasing)
-    filter_state: [f32; 8],
 }
 
 impl Oversampler {
-    fn new(max_factor: usize, max_block_size: usize) -> Self {
+    fn new(_max_factor: usize, max_block_size: usize) -> Self {
         Self {
-            factor: max_factor,
-            upsample_buffer: vec![0.0; max_block_size * max_factor],
+            factor: 1,
+            num_stages: 0,
+            hb_coeffs: design_halfband_kaiser(8.0),
+            up_stages: [
+                HalfbandFir::new(),
+                HalfbandFir::new(),
+                HalfbandFir::new(),
+                HalfbandFir::new(),
+            ],
+            down_stages: [
+                HalfbandFir::new(),
+                HalfbandFir::new(),
+                HalfbandFir::new(),
+                HalfbandFir::new(),
+            ],
+            upsample_buffer: vec![0.0; max_block_size * (1 << MAX_OS_STAGES)],
             downsample_buffer: vec![0.0; max_block_size],
-            filter_state: [0.0; 8],
         }
     }
 
     fn set_factor(&mut self, factor: usize) {
+        let new_num_stages = match factor {
+            1 => 0,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            16 => 4,
+            _ => 0,
+        };
+        // Reset filter state only when the cascade depth changes; avoids
+        // introducing glitches on each buffer when factor is unchanged.
+        if new_num_stages != self.num_stages {
+            for s in &mut self.up_stages {
+                s.reset();
+            }
+            for s in &mut self.down_stages {
+                s.reset();
+            }
+        }
         self.factor = factor;
+        self.num_stages = new_num_stages;
     }
 
-    /// Upsample a single sample to the oversampled buffer
-    /// Returns a slice of the upsampled values
+    /// Upsample a single input sample to `factor` output samples.
+    /// Writes them into `upsample_buffer[idx*factor .. (idx+1)*factor]` and
+    /// returns that slice.
     #[inline]
     fn upsample(&mut self, input: f32, idx: usize) -> &[f32] {
         let start = idx * self.factor;
         let end = start + self.factor;
 
-        if self.factor == 1 {
+        if self.num_stages == 0 {
             self.upsample_buffer[start] = input;
-        } else {
-            // Linear interpolation from the previous *input* sample to the current input.
-            // filter_state[1] holds the previous input across consecutive upsample() calls.
-            let prev = self.filter_state[1];
-
-            for i in 0..self.factor {
-                let t = i as f32 / self.factor as f32;
-                self.upsample_buffer[start + i] = prev * (1.0 - t) + input * t;
-            }
-
-            // Store current input so the next call can use it as `prev`
-            self.filter_state[1] = input;
+            return &self.upsample_buffer[start..end];
         }
 
+        // Ping-pong through stack buffers so we never allocate on the audio thread.
+        let mut buf_a = [0.0_f32; 1 << MAX_OS_STAGES];
+        let mut buf_b = [0.0_f32; 1 << MAX_OS_STAGES];
+        buf_a[0] = input;
+        let mut count = 1_usize;
+
+        for stage_idx in 0..self.num_stages {
+            let stage = &mut self.up_stages[stage_idx];
+            if stage_idx % 2 == 0 {
+                for i in 0..count {
+                    let (y0, y1) = stage.upsample_2x(buf_a[i], &self.hb_coeffs);
+                    buf_b[2 * i] = y0;
+                    buf_b[2 * i + 1] = y1;
+                }
+            } else {
+                for i in 0..count {
+                    let (y0, y1) = stage.upsample_2x(buf_b[i], &self.hb_coeffs);
+                    buf_a[2 * i] = y0;
+                    buf_a[2 * i + 1] = y1;
+                }
+            }
+            count *= 2;
+        }
+
+        let out = if self.num_stages % 2 == 0 {
+            &buf_a[..count]
+        } else {
+            &buf_b[..count]
+        };
+        self.upsample_buffer[start..end].copy_from_slice(out);
         &self.upsample_buffer[start..end]
     }
 
-    /// Downsample from the oversampled buffer back to the original rate
+    /// Downsample `factor` input samples to a single output sample.
     #[inline]
     fn downsample(&mut self, processed: &[f32], idx: usize) -> f32 {
-        if self.factor == 1 {
-            processed[0]
-        } else {
-            // Simple averaging for downsampling
-            let sum: f32 = processed.iter().sum();
-            let result = sum / self.factor as f32;
-
-            // Very light IIR: pole at 0.05 is nearly transparent at audio
-            // frequencies but prevents highest-frequency aliasing. The old
-            // 0.3 pole had enough group delay to cause pumping artifacts.
-            let prev = self.filter_state[0];
-            let filtered = prev * 0.05 + result * 0.95;
-            self.filter_state[0] = filtered;
-
-            self.downsample_buffer[idx] = filtered;
-            filtered
+        if self.num_stages == 0 {
+            let r = processed[0];
+            self.downsample_buffer[idx] = r;
+            return r;
         }
+
+        let mut buf_a = [0.0_f32; 1 << MAX_OS_STAGES];
+        let mut buf_b = [0.0_f32; 1 << MAX_OS_STAGES];
+        let mut count = processed.len();
+        buf_a[..count].copy_from_slice(processed);
+
+        for stage_idx in 0..self.num_stages {
+            // Innermost (highest-rate) stage goes first: down_stages[n-1 - k].
+            let stage = &mut self.down_stages[self.num_stages - 1 - stage_idx];
+            let new_count = count / 2;
+            if stage_idx % 2 == 0 {
+                for i in 0..new_count {
+                    let y0 = buf_a[2 * i];
+                    let y1 = buf_a[2 * i + 1];
+                    buf_b[i] = stage.downsample_2x(y0, y1, &self.hb_coeffs);
+                }
+            } else {
+                for i in 0..new_count {
+                    let y0 = buf_b[2 * i];
+                    let y1 = buf_b[2 * i + 1];
+                    buf_a[i] = stage.downsample_2x(y0, y1, &self.hb_coeffs);
+                }
+            }
+            count = new_count;
+        }
+
+        let result = if self.num_stages % 2 == 0 {
+            buf_a[0]
+        } else {
+            buf_b[0]
+        };
+        self.downsample_buffer[idx] = result;
+        result
     }
 
     fn reset(&mut self) {
-        self.filter_state = [0.0; 8];
+        for s in &mut self.up_stages {
+            s.reset();
+        }
+        for s in &mut self.down_stages {
+            s.reset();
+        }
         self.downsample_buffer.fill(0.0);
     }
 }
@@ -380,9 +609,9 @@ pub struct PunchModule {
     sample_rate: f32,
 
     // Clipper parameters
-    clip_threshold: f32,      // -12dB to 0dB (stored as linear)
-    clip_mode: ClipMode,      // Hard / Soft / Cubic
-    softness: f32,            // 0.0 - 1.0
+    clip_threshold: f32, // -12dB to 0dB (stored as linear)
+    clip_mode: ClipMode, // Hard / Soft / Cubic
+    softness: f32,       // 0.0 - 1.0
     oversampling: OversamplingFactor,
 
     // Transient shaper parameters
@@ -426,11 +655,11 @@ impl PunchModule {
             oversampling: OversamplingFactor::X4,
 
             // Default transient shaper settings
-            attack: 0.2,       // +20% boost
-            sustain: 0.0,      // Neutral
-            attack_time: 5.0,  // 5ms
+            attack: 0.2,         // +20% boost
+            sustain: 0.0,        // Neutral
+            attack_time: 5.0,    // 5ms
             release_time: 100.0, // 100ms
-            sensitivity: 0.5,  // 50%
+            sensitivity: 0.5,    // 50%
 
             // Default global controls
             input_gain: 1.0,
@@ -602,13 +831,16 @@ impl PunchModule {
                 let output = mixed * self.output_gain;
 
                 // SAFETY: sample_ptr is valid and aligned (set above from NIH-plug buffer).
-                unsafe { *sample_ptr = output; }
+                unsafe {
+                    *sample_ptr = output;
+                }
             }
         }
 
         // Update metering (smoothed)
         self.current_gain_reduction = self.current_gain_reduction * 0.9 + max_gr * 0.1;
-        self.current_transient_activity = self.current_transient_activity * 0.9 + max_transient * 0.1;
+        self.current_transient_activity =
+            self.current_transient_activity * 0.9 + max_transient * 0.1;
     }
 
     /// Reset all internal state
@@ -751,7 +983,10 @@ mod tests {
 
         // After long sustained signal, transient activity should be very low
         // because fast and slow envelopes have converged
-        assert!(sustained < max_transient, "Sustained should be less than peak transient");
+        assert!(
+            sustained < max_transient,
+            "Sustained should be less than peak transient"
+        );
     }
 
     #[test]
@@ -778,18 +1013,18 @@ mod tests {
         let mut punch = PunchModule::new(44100.0);
 
         punch.update_parameters(
-            -3.0,                       // threshold
-            ClipMode::Soft,             // mode
-            0.5,                        // softness
-            OversamplingFactor::X4,     // oversampling
-            0.5,                        // attack
-            -0.2,                       // sustain
-            10.0,                       // attack_time
-            200.0,                      // release_time
-            0.7,                        // sensitivity
-            0.0,                        // input gain
-            0.0,                        // output gain
-            1.0,                        // mix
+            -3.0,                   // threshold
+            ClipMode::Soft,         // mode
+            0.5,                    // softness
+            OversamplingFactor::X4, // oversampling
+            0.5,                    // attack
+            -0.2,                   // sustain
+            10.0,                   // attack_time
+            200.0,                  // release_time
+            0.7,                    // sensitivity
+            0.0,                    // input gain
+            0.0,                    // output gain
+            1.0,                    // mix
         );
 
         assert_eq!(punch.clip_mode, ClipMode::Soft);
@@ -824,7 +1059,123 @@ mod tests {
 
         // All values should be reasonable
         for &val in upsampled {
-            assert!(val.abs() <= 1.5);
+            assert!(val.abs() <= 2.1);
         }
+    }
+
+    #[test]
+    fn test_halfband_kaiser_design_properties() {
+        let c = design_halfband_kaiser(8.0);
+        // Center tap should dominate and approach 0.5 after normalization
+        let center = HB_NUM_TAPS / 2;
+        assert!(c[center] > 0.4 && c[center] < 0.6);
+        // Halfband property: every other tap from center is zero.
+        for (n, &v) in c.iter().enumerate() {
+            let offset = n as i32 - center as i32;
+            if offset != 0 && offset.unsigned_abs() % 2 == 0 {
+                assert!(v.abs() < 1.0e-6, "tap {n} (offset {offset}) should be 0");
+            }
+        }
+        // DC gain normalized to 1.0
+        let sum: f32 = c.iter().sum();
+        assert!((sum - 1.0).abs() < 1.0e-5);
+        // Symmetric
+        for k in 0..center {
+            assert!((c[k] - c[HB_NUM_TAPS - 1 - k]).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn test_oversampler_dc_passthrough() {
+        // After filter settles, a DC input should pass through at ~unity gain
+        // through an upsample→downsample roundtrip.
+        let mut os = Oversampler::new(16, 256);
+        os.set_factor(4);
+
+        let mut last = 0.0;
+        for idx in 0..200 {
+            let up = os.upsample(1.0, idx);
+            let up_copy: [f32; 4] = [up[0], up[1], up[2], up[3]];
+            last = os.downsample(&up_copy, idx);
+        }
+        // After steady state, unity gain at DC.
+        assert!(
+            (last - 1.0).abs() < 0.01,
+            "DC roundtrip should be ~1.0, got {last}"
+        );
+    }
+
+    #[test]
+    fn test_oversampler_roundtrip_lowfreq_fidelity() {
+        // A 1 kHz sine at 44.1 kHz should roundtrip with minimal attenuation.
+        let mut os = Oversampler::new(16, 1024);
+        os.set_factor(4);
+        let sr = 44_100.0_f32;
+        let freq = 1_000.0_f32;
+        let two_pi = core::f32::consts::TAU;
+
+        // Warm up filters past the FIR group delay.
+        for idx in 0..200 {
+            let x = (two_pi * freq * idx as f32 / sr).sin();
+            let up = os.upsample(x, idx);
+            let up_copy: [f32; 4] = [up[0], up[1], up[2], up[3]];
+            let _ = os.downsample(&up_copy, idx);
+        }
+
+        // Measure peak magnitude of output over a full cycle.
+        let mut max_out: f32 = 0.0;
+        for idx in 200..400 {
+            let x = (two_pi * freq * idx as f32 / sr).sin();
+            let up = os.upsample(x, idx);
+            let up_copy: [f32; 4] = [up[0], up[1], up[2], up[3]];
+            let y = os.downsample(&up_copy, idx);
+            max_out = max_out.max(y.abs());
+        }
+        // Passband fidelity: 1 kHz is far below the halfband cutoff (Fs/4 =
+        // 11 kHz native), so magnitude should be essentially unity.
+        assert!(
+            max_out > 0.95 && max_out < 1.05,
+            "1 kHz roundtrip magnitude out of range: {max_out}"
+        );
+    }
+
+    /// Evaluate |H(e^{jw})| of the FIR at normalized radian frequency w.
+    fn fir_mag(coeffs: &[f32; HB_NUM_TAPS], w: f32) -> f32 {
+        let mut re = 0.0_f32;
+        let mut im = 0.0_f32;
+        for (n, &v) in coeffs.iter().enumerate() {
+            let phase = w * n as f32;
+            re += v * phase.cos();
+            im -= v * phase.sin();
+        }
+        (re * re + im * im).sqrt()
+    }
+
+    #[test]
+    fn test_halfband_freq_response() {
+        let c = design_halfband_kaiser(8.0);
+        let pi = core::f32::consts::PI;
+        // DC: unity passband
+        let h_dc = fir_mag(&c, 0.0);
+        assert!(
+            (h_dc - 1.0).abs() < 0.01,
+            "|H(0)| should be ~1.0, got {h_dc}"
+        );
+        // Cutoff (π/2): halfband filters pass through at exactly 0.5
+        let h_half = fir_mag(&c, pi * 0.5);
+        assert!(
+            (h_half - 0.5).abs() < 0.05,
+            "|H(π/2)| should be ~0.5, got {h_half}"
+        );
+        // Nyquist (π): halfband zero
+        let h_nyq = fir_mag(&c, pi);
+        assert!(h_nyq < 1.0e-4, "|H(π)| should be ~0, got {h_nyq}");
+        // Well into the stopband (0.8π): expect significant attenuation
+        // relative to linear interpolation's ~-13 dB at Nyquist.
+        let h_sb = fir_mag(&c, 0.8 * pi);
+        assert!(
+            h_sb < 0.1,
+            "|H(0.8π)| should be in stopband (<0.1), got {h_sb}"
+        );
     }
 }
