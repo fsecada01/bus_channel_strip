@@ -3,8 +3,11 @@
 // Key design decisions:
 //   - BiquadPeak replaces biquad::DirectForm1 everywhere so filter state
 //     is never reset when coefficients change (DirectForm1::new() zeroed state).
-//   - The sidechain detection filter is also a BiquadPeak (+6 dB peak at the
-//     detector frequency) so its state persists across buffer boundaries.
+//   - The sidechain detection filter is a BiquadPeak running in
+//     constant-0-dB-peak bandpass mode so out-of-band energy is rejected
+//     rather than leaking through at unity gain (a +6 dB peaking EQ used
+//     previously passed all out-of-band content, biasing detection toward
+//     low-frequency broadband energy).
 //   - Envelope detection uses a denormal guard (max with f32::MIN_POSITIVE)
 //     before log10() to prevent -inf / NaN when the signal is silent.
 //   - Solo mode routes only the soloed band(s) through a RBJ bandpass filter
@@ -76,6 +79,26 @@ impl BiquadPeak {
         self.b2 = (1.0 - alpha * a) * inv_a0;
         self.a1 = (-2.0 * cos_w0) * inv_a0;
         self.a2 = (1.0 - alpha / a) * inv_a0;
+    }
+
+    /// RBJ Cookbook constant-0-dB-peak bandpass — updates coefficients, preserves state.
+    /// Peak gain is exactly 1.0 at `freq_hz` regardless of Q, so the detected level
+    /// equals the actual signal energy in the band. Out-of-band content falls off
+    /// at ~6 dB/octave * Q. Used for sidechain detection so the envelope follower
+    /// is not contaminated by broadband low-frequency energy.
+    fn update_bandpass_unity(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
+        let freq_hz = freq_hz.clamp(20.0, sample_rate * 0.49);
+        let q = q.max(0.1);
+        let w0 = std::f32::consts::TAU * freq_hz / sample_rate;
+        let cos_w0 = w0.cos();
+        let sin_w0 = w0.sin();
+        let alpha = sin_w0 / (2.0 * q);
+        let inv_a0 = 1.0 / (1.0 + alpha);
+        self.b0 = alpha * inv_a0;
+        self.b1 = 0.0;
+        self.b2 = -alpha * inv_a0;
+        self.a1 = (-2.0 * cos_w0) * inv_a0;
+        self.a2 = (1.0 - alpha) * inv_a0;
     }
 
     /// RBJ Cookbook constant-skirt-gain bandpass — updates coefficients, preserves state.
@@ -166,7 +189,7 @@ struct DynamicBand {
 impl DynamicBand {
     fn new(sample_rate: f32) -> Self {
         let mut sidechain_filter = BiquadPeak::new();
-        sidechain_filter.update_peaking(1000.0, 1.0, 6.0, sample_rate);
+        sidechain_filter.update_bandpass_unity(1000.0, 1.0, sample_rate);
 
         let mut solo_filter = BiquadPeak::new();
         solo_filter.update_bandpass(1000.0, 1.0, sample_rate);
@@ -222,8 +245,10 @@ impl DynamicBand {
         self.solo = solo;
 
         // Update sidechain detection filter — state preserved, no reset.
+        // Unity-peak bandpass: detection level == actual in-band signal level,
+        // without pollution from out-of-band content like a peaking EQ would leak.
         self.sidechain_filter
-            .update_peaking(detector_freq, q, 6.0, sr);
+            .update_bandpass_unity(detector_freq, q, sr);
 
         // Update solo bandpass filter for this band's center frequency.
         self.solo_filter.update_bandpass(frequency, q, sr);
@@ -501,6 +526,51 @@ mod tests {
     }
 
     #[test]
+    fn test_biquad_bandpass_unity_rejects_out_of_band() {
+        // Verifies the detector shape fix: out-of-band content must be
+        // significantly attenuated relative to in-band content. The old
+        // +6 dB peaking detector passed out-of-band energy at 0 dB, which
+        // biased envelope detection toward broadband LF content.
+        let sr = 44100.0;
+        let detector_fc = 4000.0_f32;
+
+        let mut bp = BiquadPeak::new();
+        bp.update_bandpass_unity(detector_fc, 1.5, sr);
+
+        // Measure energy of a 100 Hz sine (8 kHz away from center) after detector
+        let mut low_peak = 0.0_f32;
+        for n in 0..8192 {
+            let phase = std::f32::consts::TAU * 100.0 * (n as f32) / sr;
+            let out = bp.process(phase.sin()).abs();
+            if n > 2048 && out > low_peak {
+                low_peak = out;
+            }
+        }
+
+        // Measure energy of a 4 kHz sine (at center) after detector
+        let mut bp2 = BiquadPeak::new();
+        bp2.update_bandpass_unity(detector_fc, 1.5, sr);
+        let mut center_peak = 0.0_f32;
+        for n in 0..8192 {
+            let phase = std::f32::consts::TAU * detector_fc * (n as f32) / sr;
+            let out = bp2.process(phase.sin()).abs();
+            if n > 2048 && out > center_peak {
+                center_peak = out;
+            }
+        }
+
+        assert!(
+            center_peak > 0.9,
+            "Center-frequency output should be ~unity, got {center_peak}"
+        );
+        assert!(
+            low_peak < 0.1 * center_peak,
+            "Out-of-band (100 Hz vs 4 kHz detector) must be <10% of center level, \
+             got low={low_peak}, center={center_peak}"
+        );
+    }
+
+    #[test]
     fn test_biquad_bandpass_update_does_not_panic() {
         let mut bq = BiquadPeak::new();
         bq.update_bandpass(1000.0, 1.0, 44100.0);
@@ -533,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_dynamic_band_envelope_flushes_to_zero_on_silence() {
-        let sr = 44100.0;
+        let sr = 44100.0_f32;
         let mut band = DynamicBand::new(sr);
         band.update_parameters(
             DynamicMode::CompressDownward,
@@ -548,10 +618,17 @@ mod tests {
             true,
             false,
         );
-        for _ in 0..1000 {
-            band.process_sample(1.0);
+        // Drive with a 1 kHz sine (matches detector center) so the bandpass
+        // detector actually passes the signal and envelope can build.
+        for n in 0..2000 {
+            let phase = std::f32::consts::TAU * 1000.0 * (n as f32) / sr;
+            band.process_sample(phase.sin());
         }
-        assert!(band.envelope > 0.1);
+        assert!(
+            band.envelope > 0.1,
+            "Envelope should build up under sustained in-band excitation, got {}",
+            band.envelope
+        );
         // At 10 ms release, envelope reaches ~e^-500 after ~220k silent samples —
         // guaranteed to cross the DENORMAL_FLUSH threshold well before the end.
         for _ in 0..500_000 {
