@@ -1,25 +1,35 @@
+use crate::oversampler::Oversampler;
 use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
 use nih_plug::buffer::Buffer;
 
+/// Oversampling factor for the tube saturation stage. 4× (2 halfband stages)
+/// brings the 2nd/3rd-order harmonic energy of a pushed signal below
+/// fold-back threshold while remaining cheap enough for an always-on EQ.
+const PULTEC_TUBE_OS_FACTOR: usize = 4;
+
 /// Pultec EQP-1A style EQ module
-/// 
+///
 /// Classic passive tube EQ with simultaneous boost/cut characteristics
 /// - Low frequency boost with optional simultaneous cut for unique curves
 /// - High frequency boost with separate bandwidth and cut controls
 /// - Tube-style saturation modeling
 pub struct PultecEQ {
     sample_rate: f32,
-    
+
     // Low frequency section - boost and cut can be used simultaneously
     lf_boost_filter: DirectForm1<f32>,
     lf_cut_filter: DirectForm1<f32>,
-    
+
     // High frequency section - separate boost and cut
     hf_boost_filter: DirectForm1<f32>,
     hf_cut_filter: DirectForm1<f32>,
-    
+
     // Tube saturation state
     tube_drive: f32,
+
+    // Per-channel oversamplers for the tube saturation nonlinearity.
+    tube_os_l: Oversampler,
+    tube_os_r: Oversampler,
 }
 
 impl PultecEQ {
@@ -36,22 +46,40 @@ impl PultecEQ {
                 sample_rate.hz(),
                 freq_hz.hz(),
                 0.707,
-            ).expect("0 dB PeakingEQ is always valid");
+            )
+            .expect("0 dB PeakingEQ is always valid");
             DirectForm1::<f32>::new(coeff)
+        };
+
+        // Oversamplers are used inline (one sample in → one sample out), so
+        // `max_block_size = 1` keeps their scratch buffers at 16 samples.
+        let make_os = || {
+            let mut os = Oversampler::new(PULTEC_TUBE_OS_FACTOR, 1);
+            os.set_factor(PULTEC_TUBE_OS_FACTOR);
+            os
         };
 
         Self {
             sample_rate,
             lf_boost_filter: flat_at(100.0),
-            lf_cut_filter:   flat_at(80.0),
+            lf_cut_filter: flat_at(80.0),
             hf_boost_filter: flat_at(8000.0),
-            hf_cut_filter:   flat_at(10000.0),
+            hf_cut_filter: flat_at(10000.0),
             tube_drive: 0.0,
+            tube_os_l: make_os(),
+            tube_os_r: make_os(),
         }
     }
-    
+
+    /// Reset filter and saturation state. Call on sample-rate change or
+    /// buffer discontinuity.
+    pub fn reset(&mut self) {
+        self.tube_os_l.reset();
+        self.tube_os_r.reset();
+    }
+
     /// Update Pultec parameters
-    /// 
+    ///
     /// # Arguments
     /// * `lf_boost_freq` - Low frequency boost center (20..200 Hz)
     /// * `lf_boost_gain` - Low frequency boost amount (0.0 to 1.0)
@@ -89,11 +117,18 @@ impl PultecEQ {
         // Low Frequency Boost — LowShelf, 0 dB when inactive.
         let lf_boost_db = if lf_boost_gain > 0.01 {
             lf_boost_gain * lf_boost_gain * 8.0 // 0–8 dB quadratic curve
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let safe_lf_freq = lf_boost_freq.clamp(30.0, 200.0);
         if let Ok(coeff) = Coefficients::<f32>::from_params(
-            Type::LowShelf(lf_boost_db), self.sample_rate.hz(), safe_lf_freq.hz(), 0.9,
-        ) { self.lf_boost_filter.update_coefficients(coeff); }
+            Type::LowShelf(lf_boost_db),
+            self.sample_rate.hz(),
+            safe_lf_freq.hz(),
+            0.9,
+        ) {
+            self.lf_boost_filter.update_coefficients(coeff);
+        }
 
         // Low Frequency Cut — independent frequency from boost. This is the
         // classic EQP-1A "trick": set boost at e.g. 60 Hz and cut at e.g.
@@ -101,36 +136,59 @@ impl PultecEQ {
         // boosted low-bass, leaving a tight, defined low end.
         let lf_cut_db = if lf_cut_gain > 0.01 {
             -(lf_cut_gain * lf_cut_gain * 6.0) // 0 to -6 dB quadratic curve
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let safe_lf_cut_freq = lf_cut_freq.clamp(20.0, 200.0);
         if let Ok(coeff) = Coefficients::<f32>::from_params(
-            Type::LowShelf(lf_cut_db), self.sample_rate.hz(), safe_lf_cut_freq.hz(), 1.2,
-        ) { self.lf_cut_filter.update_coefficients(coeff); }
+            Type::LowShelf(lf_cut_db),
+            self.sample_rate.hz(),
+            safe_lf_cut_freq.hz(),
+            1.2,
+        ) {
+            self.lf_cut_filter.update_coefficients(coeff);
+        }
 
         // High Frequency Boost — PeakingEQ, 0 dB when inactive.
         let hf_boost_db = if hf_boost_gain > 0.01 {
             hf_boost_gain * hf_boost_gain * 10.0 // 0–10 dB quadratic curve
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let hf_q = 0.6 + hf_boost_bandwidth * hf_boost_bandwidth * 1.4; // 0.6–2.0
         let safe_hf_freq = hf_boost_freq.clamp(3000.0, 20000.0);
         if let Ok(coeff) = Coefficients::<f32>::from_params(
-            Type::PeakingEQ(hf_boost_db), self.sample_rate.hz(), safe_hf_freq.hz(), hf_q,
-        ) { self.hf_boost_filter.update_coefficients(coeff); }
+            Type::PeakingEQ(hf_boost_db),
+            self.sample_rate.hz(),
+            safe_hf_freq.hz(),
+            hf_q,
+        ) {
+            self.hf_boost_filter.update_coefficients(coeff);
+        }
 
         // High Frequency Cut — HighShelf, 0 dB when inactive.
         let hf_cut_db = if hf_cut_gain > 0.01 {
             -(hf_cut_gain * hf_cut_gain * 8.0) // 0 to -8 dB quadratic curve
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         let safe_hf_cut_freq = hf_cut_freq.clamp(5000.0, 20000.0);
         if let Ok(coeff) = Coefficients::<f32>::from_params(
-            Type::HighShelf(hf_cut_db), self.sample_rate.hz(), safe_hf_cut_freq.hz(), 0.9,
-        ) { self.hf_cut_filter.update_coefficients(coeff); }
+            Type::HighShelf(hf_cut_db),
+            self.sample_rate.hz(),
+            safe_hf_cut_freq.hz(),
+            0.9,
+        ) {
+            self.hf_cut_filter.update_coefficients(coeff);
+        }
     }
-    
+
     /// Process audio buffer through Pultec EQ
     pub fn process(&mut self, buffer: &mut Buffer) {
-        for samples in buffer.iter_samples() {
-            for sample in samples {
+        let mut scratch = [0.0_f32; PULTEC_TUBE_OS_FACTOR];
+        for mut samples in buffer.iter_samples() {
+            for (ch, sample) in samples.iter_mut().enumerate() {
+                let ch = ch.min(1);
                 let mut s = *sample;
 
                 // Linear biquad chain. No inline clamps: stability is guaranteed
@@ -141,11 +199,24 @@ impl PultecEQ {
                 s = self.hf_boost_filter.run(s);
                 s = self.hf_cut_filter.run(s);
 
-                // Tube saturation — the one intentional nonlinearity in this module.
-                // TODO(#4): route this through an oversampled block to avoid aliasing.
+                // Tube saturation — the one intentional nonlinearity in this
+                // module. Run through a 4× halfband oversampler so the tanh
+                // harmonics do not fold back into the audible range.
                 if self.tube_drive > 0.01 {
                     let drive_amount = self.tube_drive * 0.3;
-                    s = s.tanh() * (1.0 + drive_amount * 0.2);
+                    let scale = 1.0 + drive_amount * 0.2;
+                    let os = if ch == 0 {
+                        &mut self.tube_os_l
+                    } else {
+                        &mut self.tube_os_r
+                    };
+                    {
+                        let up = os.upsample(s, 0);
+                        for i in 0..PULTEC_TUBE_OS_FACTOR {
+                            scratch[i] = up[i].tanh() * scale;
+                        }
+                    }
+                    s = os.downsample(&scratch[..PULTEC_TUBE_OS_FACTOR], 0);
                 }
 
                 *sample = s;
@@ -169,16 +240,16 @@ mod tests {
     fn test_pultec_update_parameters_nominal_does_not_panic() {
         let mut eq = PultecEQ::new(44100.0);
         eq.update_parameters(
-            60.0,  // lf_boost_freq
-            0.5,   // lf_boost_gain
-            200.0, // lf_cut_freq — classic trick: cut above the boost
-            0.3,   // lf_cut_gain
-            8000.0,// hf_boost_freq
-            0.6,   // hf_boost_gain
-            0.5,   // hf_boost_bandwidth
-            10000.0,// hf_cut_freq
-            0.2,   // hf_cut_gain
-            0.0,   // tube_drive
+            60.0,    // lf_boost_freq
+            0.5,     // lf_boost_gain
+            200.0,   // lf_cut_freq — classic trick: cut above the boost
+            0.3,     // lf_cut_gain
+            8000.0,  // hf_boost_freq
+            0.6,     // hf_boost_gain
+            0.5,     // hf_boost_bandwidth
+            10000.0, // hf_cut_freq
+            0.2,     // hf_cut_gain
+            0.0,     // tube_drive
         );
     }
 
@@ -225,10 +296,16 @@ mod tests {
         let mut eq = PultecEQ::new(44100.0);
         // tube_drive is clamped to [0.0, 1.0] in update_parameters
         eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 2.0);
-        assert!((eq.tube_drive - 1.0).abs() < 1e-5, "tube_drive > 1.0 should clamp to 1.0");
+        assert!(
+            (eq.tube_drive - 1.0).abs() < 1e-5,
+            "tube_drive > 1.0 should clamp to 1.0"
+        );
 
         eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, -1.0);
-        assert!((eq.tube_drive - 0.0).abs() < 1e-5, "tube_drive < 0.0 should clamp to 0.0");
+        assert!(
+            (eq.tube_drive - 0.0).abs() < 1e-5,
+            "tube_drive < 0.0 should clamp to 0.0"
+        );
     }
 
     #[test]
@@ -263,5 +340,31 @@ mod tests {
         let mut eq = PultecEQ::new(44100.0);
         eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 0.0);
     }
-}
 
+    /// Hit the tube oversampler with a push-the-boundaries signal and verify
+    /// the output stays finite and bounded — guards against FIR state
+    /// corruption or overflow from the tanh·scale blend.
+    #[test]
+    fn test_pultec_tube_saturation_oversampled_bounded() {
+        let mut eq = PultecEQ::new(44100.0);
+        // Drive the tube stage hard while leaving EQ mostly flat.
+        eq.update_parameters(100.0, 0.0, 100.0, 0.0, 8000.0, 0.0, 0.5, 10000.0, 0.0, 1.0);
+        // Run 2048 samples of a sine at ~0.3·Nyquist directly through the
+        // oversampled saturation block.
+        let mut os = Oversampler::new(PULTEC_TUBE_OS_FACTOR, 1);
+        os.set_factor(PULTEC_TUBE_OS_FACTOR);
+        let mut scratch = [0.0_f32; PULTEC_TUBE_OS_FACTOR];
+        let drive_amount = eq.tube_drive * 0.3;
+        let scale = 1.0 + drive_amount * 0.2;
+        for i in 0..2048 {
+            let x = (2.0 * core::f32::consts::PI * 0.3 * i as f32).sin();
+            let up = os.upsample(x, 0);
+            for k in 0..PULTEC_TUBE_OS_FACTOR {
+                scratch[k] = up[k].tanh() * scale;
+            }
+            let y = os.downsample(&scratch[..PULTEC_TUBE_OS_FACTOR], 0);
+            assert!(y.is_finite(), "non-finite sample {y} at i={i}");
+            assert!(y.abs() < 2.0, "implausibly large sample {y} at i={i}");
+        }
+    }
+}

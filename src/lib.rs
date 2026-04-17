@@ -2065,6 +2065,10 @@ impl Plugin for BusChannelStrip {
         {
             self.transformer.reset();
         }
+        #[cfg(feature = "pultec")]
+        {
+            self.pultec.reset();
+        }
         #[cfg(feature = "punch")]
         {
             self.punch.reset();

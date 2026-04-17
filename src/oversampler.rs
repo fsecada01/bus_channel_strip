@@ -195,10 +195,12 @@ impl Oversampler {
         self.num_stages = new_num_stages;
     }
 
+    #[allow(dead_code)]
     pub fn factor(&self) -> usize {
         self.factor
     }
 
+    #[allow(dead_code)]
     pub fn num_stages(&self) -> usize {
         self.num_stages
     }

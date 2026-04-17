@@ -1,6 +1,13 @@
+use crate::oversampler::Oversampler;
 use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
+
+/// Oversampling factor for the FET All-Buttons second-harmonic saturation.
+/// 4× is enough to keep 2nd/3rd-harmonic of full-bandwidth content out of the
+/// audible fold-back zone; the saturation is only engaged in All-Buttons
+/// mode so the CPU cost is localised.
+const FET_ALL_BUTTONS_OS_FACTOR: usize = 4;
 
 // ============================================================================
 // Sidechain HP Filter constants
@@ -120,6 +127,10 @@ pub struct FetCompressor {
     sc_hp_l: DirectForm1<f32>,
     sc_hp_r: DirectForm1<f32>,
     cached_sc_hp_hz: f32,
+    // Per-channel oversamplers for the All-Buttons saturation stage. Only
+    // active when `cached_ratio == FetRatio::All` — other ratios bypass them.
+    sat_os_l: Oversampler,
+    sat_os_r: Oversampler,
 }
 
 impl FetCompressor {
@@ -154,6 +165,16 @@ impl FetCompressor {
             sc_hp_l: DirectForm1::<f32>::new(flat_hp),
             sc_hp_r: DirectForm1::<f32>::new(flat_hp),
             cached_sc_hp_hz: f32::NAN,
+            sat_os_l: {
+                let mut os = Oversampler::new(FET_ALL_BUTTONS_OS_FACTOR, 1);
+                os.set_factor(FET_ALL_BUTTONS_OS_FACTOR);
+                os
+            },
+            sat_os_r: {
+                let mut os = Oversampler::new(FET_ALL_BUTTONS_OS_FACTOR, 1);
+                os.set_factor(FET_ALL_BUTTONS_OS_FACTOR);
+                os
+            },
         };
         s.recompute_coefficients(0.2, 250.0, false);
         s
@@ -224,6 +245,8 @@ impl FetCompressor {
         self.envelope_db = 0.0;
         self.fast_env_db = 0.0;
         self.envelope_fast_db = 0.0;
+        self.sat_os_l.reset();
+        self.sat_os_r.reset();
     }
 
     /// Process one stereo sample pair with linked peak detection.
@@ -318,10 +341,33 @@ impl FetCompressor {
         let mut out_l = driven_l * gr_linear;
         let mut out_r = driven_r * gr_linear;
 
-        // Stage 5 — All-Buttons second-harmonic injection (odd-order saturation, asymmetric).
+        // Stage 5 — All-Buttons second-harmonic injection (odd-order
+        // saturation, asymmetric). Run through a 4× halfband oversampler so
+        // the `x²·sign(x)` nonlinearity's 3rd-harmonic energy doesn't alias
+        // into the audible band for content near Nyquist.
         if is_all_buttons {
-            out_l += FET_ALL_BUTTONS_SAT * out_l * out_l * out_l.signum();
-            out_r += FET_ALL_BUTTONS_SAT * out_r * out_r * out_r.signum();
+            let mut scratch_l = [0.0_f32; FET_ALL_BUTTONS_OS_FACTOR];
+            let mut scratch_r = [0.0_f32; FET_ALL_BUTTONS_OS_FACTOR];
+            {
+                let up_l = self.sat_os_l.upsample(out_l, 0);
+                for i in 0..FET_ALL_BUTTONS_OS_FACTOR {
+                    let x = up_l[i];
+                    scratch_l[i] = x + FET_ALL_BUTTONS_SAT * x * x * x.signum();
+                }
+            }
+            out_l = self
+                .sat_os_l
+                .downsample(&scratch_l[..FET_ALL_BUTTONS_OS_FACTOR], 0);
+            {
+                let up_r = self.sat_os_r.upsample(out_r, 0);
+                for i in 0..FET_ALL_BUTTONS_OS_FACTOR {
+                    let x = up_r[i];
+                    scratch_r[i] = x + FET_ALL_BUTTONS_SAT * x * x * x.signum();
+                }
+            }
+            out_r = self
+                .sat_os_r
+                .downsample(&scratch_r[..FET_ALL_BUTTONS_OS_FACTOR], 0);
         }
 
         // Stage 6 — Output makeup gain.
@@ -1016,6 +1062,32 @@ mod tests {
             fet.envelope_db >= FET_ALL_BUTTONS_GR_CAP,
             "All-Buttons GR cap violated: envelope_db = {}",
             fet.envelope_db
+        );
+    }
+
+    /// All-Buttons saturation runs through a halfband oversampler. Hit it
+    /// with a high-frequency sine that would aggressively alias at native
+    /// rate and verify output stays finite — the saturation should still
+    /// produce audible harmonics, but the energy should not fold back.
+    #[test]
+    fn test_fet_all_buttons_saturation_oversampled_bounded() {
+        let mut fet = FetCompressor::new(44100.0);
+        fet.update_parameters(6.0, 0.0, 0.001, 50.0, FetRatio::All, false, 20.0);
+        // Sweep a sine at ~0.35·Nyquist through 4096 samples — high enough
+        // that a naive native-rate x²·sign(x) would alias visibly.
+        let mut max_abs = 0.0_f32;
+        for i in 0..4096 {
+            let x = (2.0 * core::f32::consts::PI * 0.35 * i as f32).sin() * 0.7;
+            let (l, r) = fet.process_sample(x, x);
+            assert!(l.is_finite() && r.is_finite(), "non-finite at i={i}: {l},{r}");
+            max_abs = max_abs.max(l.abs()).max(r.abs());
+        }
+        // Saturation should produce a bounded output — under 1.5 in linear
+        // for this input level (0.7 amplitude input, All-Buttons saturation
+        // coefficient 0.15 → max growth ~x + 0.15·x² ≈ 1.1·|x|).
+        assert!(
+            max_abs < 1.5,
+            "All-Buttons saturation blew up: max |out| = {max_abs}"
         );
     }
 
