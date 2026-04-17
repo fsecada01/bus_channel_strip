@@ -2,6 +2,7 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 #[cfg(feature = "gui")]
 use vizia_plug::ViziaState;
+mod oversampler;
 mod shaping;
 mod spectral;
 
