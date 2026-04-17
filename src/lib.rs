@@ -1434,6 +1434,396 @@ impl Default for BusChannelStripParams {
     }
 }
 
+/// Compact 0..6 index for ModuleType — used for duplicate-detection when
+/// dispatching modules in user-chosen order. Keep in lock-step with the
+/// enum definition; any reorder there requires updating this match.
+fn module_type_index(mt: ModuleType) -> usize {
+    match mt {
+        ModuleType::Api5500EQ   => 0,
+        ModuleType::ButterComp2 => 1,
+        ModuleType::PultecEQ    => 2,
+        ModuleType::DynamicEQ   => 3,
+        ModuleType::Transformer => 4,
+        ModuleType::Punch       => 5,
+    }
+}
+
+impl BusChannelStrip {
+    // ── Per-module processing helpers ────────────────────────────────────────
+    // Each helper is idempotent-safe to call zero or one times per buffer:
+    //   • update_parameters() advances smoothers/coefficients even when bypassed
+    //   • the bypass gate skips the actual DSP work
+    // The module_order dispatch loop in process() calls each helper at most
+    // once per buffer (duplicates are deduplicated).
+
+    #[cfg(feature = "api5500")]
+    fn process_module_api5500(&mut self, buffer: &mut Buffer) {
+        self.eq_api5500.update_parameters(
+            self.params.lf_freq.value(),
+            self.params.lf_gain.value(),
+            self.params.lmf_freq.value(),
+            self.params.lmf_gain.value(),
+            self.params.lmf_q.value(),
+            self.params.mf_freq.value(),
+            self.params.mf_gain.value(),
+            self.params.mf_q.value(),
+            self.params.hmf_freq.value(),
+            self.params.hmf_gain.value(),
+            self.params.hmf_q.value(),
+            self.params.hf_freq.value(),
+            self.params.hf_gain.value(),
+        );
+        if !self.params.eq_bypass.value() {
+            self.eq_api5500.process(buffer);
+        }
+    }
+
+    #[cfg(feature = "buttercomp2")]
+    fn process_module_buttercomp(&mut self, buffer: &mut Buffer) {
+        if self.params.comp_bypass.value() {
+            return;
+        }
+        match self.params.comp_model.value() {
+            ButterComp2Model::Classic => {
+                self.compressor.update_parameters(
+                    self.params.comp_compress.value(),
+                    self.params.comp_output.value(),
+                    self.params.comp_dry_wet.value(),
+                );
+                self.compressor.process(buffer);
+            }
+            ButterComp2Model::Vca => {
+                self.vca_compressor.update_parameters(
+                    self.params.vca_thresh.smoothed.next(),
+                    self.params.vca_ratio.smoothed.next(),
+                    self.params.vca_atk.smoothed.next(),
+                    self.params.vca_rel.smoothed.next(),
+                );
+                self.vca_compressor.process(buffer);
+            }
+            ButterComp2Model::Optical => {
+                let thresh = self.params.opt_thresh.smoothed.next();
+                let speed  = self.params.opt_speed.smoothed.next();
+                let char_v = self.params.opt_char.smoothed.next();
+                self.optical_compressor.update_parameters(thresh, speed, char_v);
+                self.optical_compressor.process(buffer, thresh);
+            }
+            ButterComp2Model::Fet => {
+                self.fet_compressor.update_parameters(
+                    self.params.fet_input_db.smoothed.next(),
+                    self.params.fet_output_db.smoothed.next(),
+                    self.params.fet_attack_ms.smoothed.next(),
+                    self.params.fet_release_ms.smoothed.next(),
+                    self.params.fet_ratio.value(),
+                    self.params.fet_auto_release.value(),
+                );
+                self.fet_compressor.process(buffer);
+            }
+        }
+    }
+
+    #[cfg(feature = "pultec")]
+    fn process_module_pultec(&mut self, buffer: &mut Buffer) {
+        self.pultec.update_parameters(
+            self.params.pultec_lf_boost_freq.value(),
+            self.params.pultec_lf_boost_gain.value(),
+            self.params.pultec_lf_cut_gain.value(),
+            self.params.pultec_hf_boost_freq.value(),
+            self.params.pultec_hf_boost_gain.value(),
+            self.params.pultec_hf_boost_bandwidth.value(),
+            self.params.pultec_hf_cut_freq.value(),
+            self.params.pultec_hf_cut_gain.value(),
+            self.params.pultec_tube_drive.value(),
+        );
+        if !self.params.pultec_bypass.value() {
+            self.pultec.process(buffer);
+        }
+    }
+
+    #[cfg(feature = "transformer")]
+    fn process_module_transformer(&mut self, buffer: &mut Buffer) {
+        self.transformer.update_parameters(
+            self.params.transformer_model.value(),
+            self.params.transformer_input_drive.value(),
+            self.params.transformer_input_saturation.value(),
+            self.params.transformer_output_drive.value(),
+            self.params.transformer_output_saturation.value(),
+            self.params.transformer_low_response.value(),
+            self.params.transformer_high_response.value(),
+            self.params.transformer_compression.value(),
+        );
+        if !self.params.transformer_bypass.value() {
+            self.transformer.process(buffer);
+        }
+    }
+
+    #[cfg(feature = "dynamic_eq")]
+    fn process_module_dynamic_eq(
+        &mut self,
+        buffer: &mut Buffer,
+        aux: &mut AuxiliaryBuffers,
+    ) {
+        // Sidechain ring accumulation — runs regardless of bypass so the
+        // ANALYZE SC feature always reflects the live sidechain.
+        if !aux.inputs.is_empty() {
+            for channel_samples in aux.inputs[0].iter_samples() {
+                let mut mono = 0.0_f32;
+                let mut n = 0_usize;
+                for s in channel_samples { mono += *s; n += 1; }
+                if n > 0 { mono /= n as f32; }
+                self.sc_ring[self.sc_ring_pos] = mono;
+                self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
+            }
+        } else {
+            for _ in 0..buffer.samples() {
+                self.sc_ring[self.sc_ring_pos] = 0.0;
+                self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
+            }
+        }
+
+        let dyneq_params = [
+            DynamicBandParams {
+                mode: self.params.dyneq_band1_mode.value(),
+                detector_freq: self.params.dyneq_band1_detector_freq.value(),
+                freq: self.params.dyneq_band1_freq.value(),
+                q: self.params.dyneq_band1_q.value(),
+                threshold_db: self.params.dyneq_band1_threshold.value(),
+                ratio: self.params.dyneq_band1_ratio.value(),
+                attack_ms: self.params.dyneq_band1_attack.value(),
+                release_ms: self.params.dyneq_band1_release.value(),
+                gain_db: self.params.dyneq_band1_gain.value(),
+                enabled: self.params.dyneq_band1_enabled.value(),
+                solo: self.params.dyneq_band1_solo.value(),
+            },
+            DynamicBandParams {
+                mode: self.params.dyneq_band2_mode.value(),
+                detector_freq: self.params.dyneq_band2_detector_freq.value(),
+                freq: self.params.dyneq_band2_freq.value(),
+                q: self.params.dyneq_band2_q.value(),
+                threshold_db: self.params.dyneq_band2_threshold.value(),
+                ratio: self.params.dyneq_band2_ratio.value(),
+                attack_ms: self.params.dyneq_band2_attack.value(),
+                release_ms: self.params.dyneq_band2_release.value(),
+                gain_db: self.params.dyneq_band2_gain.value(),
+                enabled: self.params.dyneq_band2_enabled.value(),
+                solo: self.params.dyneq_band2_solo.value(),
+            },
+            DynamicBandParams {
+                mode: self.params.dyneq_band3_mode.value(),
+                detector_freq: self.params.dyneq_band3_detector_freq.value(),
+                freq: self.params.dyneq_band3_freq.value(),
+                q: self.params.dyneq_band3_q.value(),
+                threshold_db: self.params.dyneq_band3_threshold.value(),
+                ratio: self.params.dyneq_band3_ratio.value(),
+                attack_ms: self.params.dyneq_band3_attack.value(),
+                release_ms: self.params.dyneq_band3_release.value(),
+                gain_db: self.params.dyneq_band3_gain.value(),
+                enabled: self.params.dyneq_band3_enabled.value(),
+                solo: self.params.dyneq_band3_solo.value(),
+            },
+            DynamicBandParams {
+                mode: self.params.dyneq_band4_mode.value(),
+                detector_freq: self.params.dyneq_band4_detector_freq.value(),
+                freq: self.params.dyneq_band4_freq.value(),
+                q: self.params.dyneq_band4_q.value(),
+                threshold_db: self.params.dyneq_band4_threshold.value(),
+                ratio: self.params.dyneq_band4_ratio.value(),
+                attack_ms: self.params.dyneq_band4_attack.value(),
+                release_ms: self.params.dyneq_band4_release.value(),
+                gain_db: self.params.dyneq_band4_gain.value(),
+                enabled: self.params.dyneq_band4_enabled.value(),
+                solo: self.params.dyneq_band4_solo.value(),
+            },
+        ];
+        self.dynamic_eq.update_parameters(&dyneq_params);
+
+        if !self.params.dyneq_bypass.value() {
+            self.dynamic_eq.process(buffer);
+        }
+
+        // Publish per-band gain reduction to the GUI display (Relaxed — display only).
+        {
+            use std::sync::atomic::Ordering;
+            let gr = self.dynamic_eq.get_gain_reduction_db();
+            for (i, &db) in gr.iter().enumerate() {
+                self.gr_data.bands[i].store(db.to_bits(), Ordering::Relaxed);
+            }
+        }
+
+        // Accumulate post-DynEQ samples into the FFT ring buffer.
+        // All buffers are pre-allocated in initialize() — no audio-thread alloc.
+        for channel_samples in buffer.iter_samples() {
+            let mut mono = 0.0_f32;
+            let mut n = 0_usize;
+            for s in channel_samples {
+                mono += *s;
+                n += 1;
+            }
+            if n > 0 { mono /= n as f32; }
+            self.fft_ring[self.fft_ring_pos] = mono;
+            self.fft_ring_pos += 1;
+
+            if self.fft_ring_pos >= spectral::FFT_SIZE {
+                self.fft_ring_pos = 0;
+                for (dst, (&src, &win)) in self.fft_input.iter_mut()
+                    .zip(self.fft_ring.iter().zip(self.fft_window.iter()))
+                {
+                    *dst = src * win;
+                }
+                if let Some(ref fft) = self.fft_engine {
+                    if fft.process_with_scratch(
+                        &mut self.fft_input,
+                        &mut self.fft_output,
+                        &mut self.fft_scratch,
+                    ).is_ok() {
+                        const SMOOTH_ALPHA: f32 = 0.8;
+                        const SMOOTH_BETA: f32 = 1.0 - SMOOTH_ALPHA;
+                        let scale = 2.0 / spectral::FFT_SIZE as f32;
+                        for (smooth, bin) in self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS]
+                            .iter_mut()
+                            .zip(self.fft_output[..spectral::SPECTRUM_BINS].iter())
+                        {
+                            let mag = bin.norm() * scale;
+                            *smooth = *smooth * SMOOTH_ALPHA + mag * SMOOTH_BETA;
+                        }
+                        self.spectrum_data.write_from_slice(
+                            &self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS],
+                        );
+
+                        use std::sync::atomic::Ordering;
+                        if self.analysis_requested.swap(false, Ordering::Relaxed) {
+                            for i in 0..spectral::FFT_SIZE {
+                                let ring_idx = (self.sc_ring_pos + i) % spectral::FFT_SIZE;
+                                self.sc_fft_input[i] =
+                                    self.sc_ring[ring_idx] * self.fft_window[i];
+                            }
+                            if fft.process_with_scratch(
+                                &mut self.sc_fft_input,
+                                &mut self.sc_fft_output,
+                                &mut self.fft_scratch,
+                            ).is_ok() {
+                                let scale = 2.0 / spectral::FFT_SIZE as f32;
+                                let mut peak_overlap = 0.0_f32;
+                                let mut peak_bin = 1_usize;
+
+                                for i in 1..spectral::SPECTRUM_BINS {
+                                    let main_mag = self.fft_output[i].norm() * scale;
+                                    let sc_mag   = self.sc_fft_output[i].norm() * scale;
+                                    let overlap  = main_mag * sc_mag;
+                                    self.analysis_result.overlap_bins[i]
+                                        .store(overlap.to_bits(), Ordering::Relaxed);
+                                    if overlap > peak_overlap {
+                                        peak_overlap = overlap;
+                                        peak_bin = i;
+                                    }
+                                }
+                                self.analysis_result.overlap_bins[0]
+                                    .store(0_u32, Ordering::Relaxed);
+
+                                let target_freq =
+                                    peak_bin as f32 * self.sample_rate
+                                    / spectral::FFT_SIZE as f32;
+
+                                let target_band: u32 =
+                                    if target_freq <  500.0 { 0 }
+                                    else if target_freq < 2000.0 { 1 }
+                                    else if target_freq < 6000.0 { 2 }
+                                    else { 3 };
+
+                                let sc_mag_at_peak =
+                                    self.sc_fft_output[peak_bin].norm() * scale;
+                                let sc_db = 20.0
+                                    * sc_mag_at_peak.max(f32::MIN_POSITIVE).log10();
+                                let suggested_threshold = (sc_db - 6.0).clamp(-60.0, 0.0);
+
+                                self.analysis_result.target_band
+                                    .store(target_band, Ordering::Relaxed);
+                                self.analysis_result.target_freq
+                                    .store(target_freq.to_bits(), Ordering::Relaxed);
+                                self.analysis_result.target_threshold_db
+                                    .store(suggested_threshold.to_bits(), Ordering::Relaxed);
+                                self.analysis_result.ready
+                                    .store(true, Ordering::Release);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "punch")]
+    fn process_module_punch(&mut self, buffer: &mut Buffer) {
+        self.punch.update_parameters(
+            self.params.punch_threshold.value(),
+            self.params.punch_clip_mode.value(),
+            self.params.punch_softness.value(),
+            self.params.punch_oversampling.value(),
+            self.params.punch_attack.value(),
+            self.params.punch_sustain.value(),
+            self.params.punch_attack_time.value(),
+            self.params.punch_release_time.value(),
+            self.params.punch_sensitivity.value(),
+            self.params.punch_input_gain.value(),
+            self.params.punch_output_gain.value(),
+            self.params.punch_mix.value(),
+        );
+        if !self.params.punch_bypass.value() {
+            self.punch.process(buffer);
+        }
+    }
+
+    /// Dispatch a single module by type, honoring feature flags.
+    /// When a feature is disabled the corresponding arm is a no-op — the
+    /// module_order_* params remain host-visible regardless of feature set,
+    /// so out-of-feature selections silently pass the signal through.
+    fn dispatch_module(
+        &mut self,
+        mt: ModuleType,
+        buffer: &mut Buffer,
+        aux: &mut AuxiliaryBuffers,
+    ) {
+        match mt {
+            ModuleType::Api5500EQ => {
+                #[cfg(feature = "api5500")]
+                self.process_module_api5500(buffer);
+                #[cfg(not(feature = "api5500"))]
+                { let _ = buffer; }
+            }
+            ModuleType::ButterComp2 => {
+                #[cfg(feature = "buttercomp2")]
+                self.process_module_buttercomp(buffer);
+                #[cfg(not(feature = "buttercomp2"))]
+                { let _ = buffer; }
+            }
+            ModuleType::PultecEQ => {
+                #[cfg(feature = "pultec")]
+                self.process_module_pultec(buffer);
+                #[cfg(not(feature = "pultec"))]
+                { let _ = buffer; }
+            }
+            ModuleType::Transformer => {
+                #[cfg(feature = "transformer")]
+                self.process_module_transformer(buffer);
+                #[cfg(not(feature = "transformer"))]
+                { let _ = buffer; }
+            }
+            ModuleType::DynamicEQ => {
+                #[cfg(feature = "dynamic_eq")]
+                self.process_module_dynamic_eq(buffer, aux);
+                #[cfg(not(feature = "dynamic_eq"))]
+                { let _ = (buffer, aux); }
+            }
+            ModuleType::Punch => {
+                #[cfg(feature = "punch")]
+                self.process_module_punch(buffer);
+                #[cfg(not(feature = "punch"))]
+                { let _ = buffer; }
+            }
+        }
+    }
+}
+
 impl Plugin for BusChannelStrip {
     const NAME: &'static str = "Bus Channel Strip";
     const VENDOR: &'static str = "Francis Secada";
@@ -1584,7 +1974,7 @@ impl Plugin for BusChannelStrip {
     fn process(
         &mut self,
         buffer: &mut Buffer,
-        _aux: &mut AuxiliaryBuffers,
+        aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // Global bypass — pass audio through untouched.
@@ -1600,357 +1990,27 @@ impl Plugin for BusChannelStrip {
             0.0
         };
 
-        // Process enabled modules based on feature flags
-
-        // 1) API5500 EQ Module
-        #[cfg(feature = "api5500")]
-        {
-            self.eq_api5500.update_parameters(
-                self.params.lf_freq.value(),
-                self.params.lf_gain.value(),
-                self.params.lmf_freq.value(),
-                self.params.lmf_gain.value(),
-                self.params.lmf_q.value(),
-                self.params.mf_freq.value(),
-                self.params.mf_gain.value(),
-                self.params.mf_q.value(),
-                self.params.hmf_freq.value(),
-                self.params.hmf_gain.value(),
-                self.params.hmf_q.value(),
-                self.params.hf_freq.value(),
-                self.params.hf_gain.value(),
-            );
-
-            if !self.params.eq_bypass.value() {
-                self.eq_api5500.process(buffer);
+        // Dispatch modules in user-chosen order.
+        // Each of the six module_order_N params selects which module lands
+        // in slot N. Duplicates are deduplicated: if the user puts API5500
+        // in two slots, the module only runs once. Any slot whose feature
+        // is disabled at build time becomes a no-op inside dispatch_module.
+        let order = [
+            self.params.module_order_1.value(),
+            self.params.module_order_2.value(),
+            self.params.module_order_3.value(),
+            self.params.module_order_4.value(),
+            self.params.module_order_5.value(),
+            self.params.module_order_6.value(),
+        ];
+        let mut seen = [false; 6];
+        for mt in order {
+            let idx = module_type_index(mt);
+            if seen[idx] {
+                continue;
             }
-        }
-
-        // 2) ButterComp2 Compressor Module
-        #[cfg(feature = "buttercomp2")]
-        {
-            if !self.params.comp_bypass.value() {
-                match self.params.comp_model.value() {
-                    ButterComp2Model::Classic => {
-                        // Classic Airwindows ButterComp2 algorithm.
-                        self.compressor.update_parameters(
-                            self.params.comp_compress.value(),
-                            self.params.comp_output.value(),
-                            self.params.comp_dry_wet.value(),
-                        );
-                        self.compressor.process(buffer);
-                    }
-                    ButterComp2Model::Vca => {
-                        // VCA bus compressor — SSL G-Bus style RMS/soft-knee.
-                        self.vca_compressor.update_parameters(
-                            self.params.vca_thresh.smoothed.next(),
-                            self.params.vca_ratio.smoothed.next(),
-                            self.params.vca_atk.smoothed.next(),
-                            self.params.vca_rel.smoothed.next(),
-                        );
-                        self.vca_compressor.process(buffer);
-                    }
-                    ButterComp2Model::Optical => {
-                        // Optical compressor — LA-2A style opto-cell model.
-                        let thresh = self.params.opt_thresh.smoothed.next();
-                        let speed  = self.params.opt_speed.smoothed.next();
-                        let char_v = self.params.opt_char.smoothed.next();
-                        self.optical_compressor.update_parameters(thresh, speed, char_v);
-                        self.optical_compressor.process(buffer, thresh);
-                    }
-                    ButterComp2Model::Fet => {
-                        // 1176-style FET compressor — pure Rust, no FFI.
-                        // update_parameters() is called once per buffer; it only recomputes
-                        // coefficients when values change, so the per-buffer .value()/.smoothed calls
-                        // are the intended usage pattern here.
-                        self.fet_compressor.update_parameters(
-                            self.params.fet_input_db.smoothed.next(),
-                            self.params.fet_output_db.smoothed.next(),
-                            self.params.fet_attack_ms.smoothed.next(),
-                            self.params.fet_release_ms.smoothed.next(),
-                            self.params.fet_ratio.value(),
-                            self.params.fet_auto_release.value(),
-                        );
-                        self.fet_compressor.process(buffer);
-                    }
-                }
-            }
-        }
-
-        // 3) Pultec EQ Module
-        #[cfg(feature = "pultec")]
-        {
-            self.pultec.update_parameters(
-                self.params.pultec_lf_boost_freq.value(),
-                self.params.pultec_lf_boost_gain.value(),
-                self.params.pultec_lf_cut_gain.value(),
-                self.params.pultec_hf_boost_freq.value(),
-                self.params.pultec_hf_boost_gain.value(),
-                self.params.pultec_hf_boost_bandwidth.value(),
-                self.params.pultec_hf_cut_freq.value(),
-                self.params.pultec_hf_cut_gain.value(),
-                self.params.pultec_tube_drive.value(),
-            );
-            
-            if !self.params.pultec_bypass.value() {
-                self.pultec.process(buffer);
-            }
-        }
-
-        // 4) Transformer Module  
-        #[cfg(feature = "transformer")]
-        {
-            self.transformer.update_parameters(
-                self.params.transformer_model.value(),
-                self.params.transformer_input_drive.value(),
-                self.params.transformer_input_saturation.value(),
-                self.params.transformer_output_drive.value(),
-                self.params.transformer_output_saturation.value(),
-                self.params.transformer_low_response.value(),
-                self.params.transformer_high_response.value(),
-                self.params.transformer_compression.value(),
-            );
-            
-            if !self.params.transformer_bypass.value() {
-                self.transformer.process(buffer);
-            }
-        }
-
-        // 5) Dynamic EQ Module
-        #[cfg(feature = "dynamic_eq")]
-        {
-            // ── Sidechain ring accumulation ───────────────────────────────────
-            // Accumulate sidechain mono mix-down into sc_ring (circular, FFT_SIZE).
-            // When no sidechain is connected the ring fills with silence so the
-            // analysis still runs — it just reports zero overlap.
-            if !_aux.inputs.is_empty() {
-                for channel_samples in _aux.inputs[0].iter_samples() {
-                    let mut mono = 0.0_f32;
-                    let mut n = 0_usize;
-                    for s in channel_samples { mono += *s; n += 1; }
-                    if n > 0 { mono /= n as f32; }
-                    self.sc_ring[self.sc_ring_pos] = mono;
-                    self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
-                }
-            } else {
-                for _ in 0..buffer.samples() {
-                    self.sc_ring[self.sc_ring_pos] = 0.0;
-                    self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
-                }
-            }
-
-            // All params now carry real physical units — no normalization mapping needed.
-            let dyneq_params = [
-                DynamicBandParams {
-                    mode: self.params.dyneq_band1_mode.value(),
-                    detector_freq: self.params.dyneq_band1_detector_freq.value(),
-                    freq: self.params.dyneq_band1_freq.value(),
-                    q: self.params.dyneq_band1_q.value(),
-                    threshold_db: self.params.dyneq_band1_threshold.value(),
-                    ratio: self.params.dyneq_band1_ratio.value(),
-                    attack_ms: self.params.dyneq_band1_attack.value(),
-                    release_ms: self.params.dyneq_band1_release.value(),
-                    gain_db: self.params.dyneq_band1_gain.value(),
-                    enabled: self.params.dyneq_band1_enabled.value(),
-                    solo: self.params.dyneq_band1_solo.value(),
-                },
-                DynamicBandParams {
-                    mode: self.params.dyneq_band2_mode.value(),
-                    detector_freq: self.params.dyneq_band2_detector_freq.value(),
-                    freq: self.params.dyneq_band2_freq.value(),
-                    q: self.params.dyneq_band2_q.value(),
-                    threshold_db: self.params.dyneq_band2_threshold.value(),
-                    ratio: self.params.dyneq_band2_ratio.value(),
-                    attack_ms: self.params.dyneq_band2_attack.value(),
-                    release_ms: self.params.dyneq_band2_release.value(),
-                    gain_db: self.params.dyneq_band2_gain.value(),
-                    enabled: self.params.dyneq_band2_enabled.value(),
-                    solo: self.params.dyneq_band2_solo.value(),
-                },
-                DynamicBandParams {
-                    mode: self.params.dyneq_band3_mode.value(),
-                    detector_freq: self.params.dyneq_band3_detector_freq.value(),
-                    freq: self.params.dyneq_band3_freq.value(),
-                    q: self.params.dyneq_band3_q.value(),
-                    threshold_db: self.params.dyneq_band3_threshold.value(),
-                    ratio: self.params.dyneq_band3_ratio.value(),
-                    attack_ms: self.params.dyneq_band3_attack.value(),
-                    release_ms: self.params.dyneq_band3_release.value(),
-                    gain_db: self.params.dyneq_band3_gain.value(),
-                    enabled: self.params.dyneq_band3_enabled.value(),
-                    solo: self.params.dyneq_band3_solo.value(),
-                },
-                DynamicBandParams {
-                    mode: self.params.dyneq_band4_mode.value(),
-                    detector_freq: self.params.dyneq_band4_detector_freq.value(),
-                    freq: self.params.dyneq_band4_freq.value(),
-                    q: self.params.dyneq_band4_q.value(),
-                    threshold_db: self.params.dyneq_band4_threshold.value(),
-                    ratio: self.params.dyneq_band4_ratio.value(),
-                    attack_ms: self.params.dyneq_band4_attack.value(),
-                    release_ms: self.params.dyneq_band4_release.value(),
-                    gain_db: self.params.dyneq_band4_gain.value(),
-                    enabled: self.params.dyneq_band4_enabled.value(),
-                    solo: self.params.dyneq_band4_solo.value(),
-                },
-            ];
-            self.dynamic_eq.update_parameters(&dyneq_params);
-
-            if !self.params.dyneq_bypass.value() {
-                self.dynamic_eq.process(buffer);
-            }
-
-            // Publish per-band gain reduction to the GUI display (Relaxed — display only).
-            {
-                use std::sync::atomic::Ordering;
-                let gr = self.dynamic_eq.get_gain_reduction_db();
-                for (i, &db) in gr.iter().enumerate() {
-                    self.gr_data.bands[i].store(db.to_bits(), Ordering::Relaxed);
-                }
-            }
-
-            // Accumulate post-DynEQ samples into the FFT ring buffer.
-            // All buffers are pre-allocated in initialize() — no audio-thread alloc.
-            for channel_samples in buffer.iter_samples() {
-                let mut mono = 0.0_f32;
-                let mut n = 0_usize;
-                for s in channel_samples {
-                    mono += *s;
-                    n += 1;
-                }
-                if n > 0 { mono /= n as f32; }
-                self.fft_ring[self.fft_ring_pos] = mono;
-                self.fft_ring_pos += 1;
-
-                if self.fft_ring_pos >= spectral::FFT_SIZE {
-                    self.fft_ring_pos = 0;
-                    // Apply Hann window — iterator zip lets LLVM auto-vectorize (AVX).
-                    for (dst, (&src, &win)) in self.fft_input.iter_mut()
-                        .zip(self.fft_ring.iter().zip(self.fft_window.iter()))
-                    {
-                        *dst = src * win;
-                    }
-                    // FFT (no allocation — scratch is pre-allocated).
-                    if let Some(ref fft) = self.fft_engine {
-                        if fft.process_with_scratch(
-                            &mut self.fft_input,
-                            &mut self.fft_output,
-                            &mut self.fft_scratch,
-                        ).is_ok() {
-                            const SMOOTH_ALPHA: f32 = 0.8;
-                            const SMOOTH_BETA: f32 = 1.0 - SMOOTH_ALPHA;
-                            let scale = 2.0 / spectral::FFT_SIZE as f32;
-                            // Exponential smoothing — iterator pattern aids vectorization.
-                            for (smooth, bin) in self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS]
-                                .iter_mut()
-                                .zip(self.fft_output[..spectral::SPECTRUM_BINS].iter())
-                            {
-                                let mag = bin.norm() * scale;
-                                *smooth = *smooth * SMOOTH_ALPHA + mag * SMOOTH_BETA;
-                            }
-                            // Publish lock-free to the GUI thread.
-                            self.spectrum_data.write_from_slice(
-                                &self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS],
-                            );
-
-                            // ── One-shot masking analysis trigger ─────────────
-                            // Triggered by GUI; runs once per FFT frame when requested.
-                            // All buffers are pre-allocated — no audio-thread allocation.
-                            use std::sync::atomic::Ordering;
-                            if self.analysis_requested.swap(false, Ordering::Relaxed) {
-                                // Snapshot sc_ring in chronological order into sc_fft_input.
-                                // sc_ring is circular; sc_ring_pos points to the OLDEST entry.
-                                for i in 0..spectral::FFT_SIZE {
-                                    let ring_idx = (self.sc_ring_pos + i) % spectral::FFT_SIZE;
-                                    self.sc_fft_input[i] =
-                                        self.sc_ring[ring_idx] * self.fft_window[i];
-                                }
-                                if fft.process_with_scratch(
-                                    &mut self.sc_fft_input,
-                                    &mut self.sc_fft_output,
-                                    &mut self.fft_scratch,
-                                ).is_ok() {
-                                    let scale = 2.0 / spectral::FFT_SIZE as f32;
-                                    let mut peak_overlap = 0.0_f32;
-                                    let mut peak_bin = 1_usize; // skip DC
-
-                                    for i in 1..spectral::SPECTRUM_BINS {
-                                        let main_mag = self.fft_output[i].norm() * scale;
-                                        let sc_mag   = self.sc_fft_output[i].norm() * scale;
-                                        let overlap  = main_mag * sc_mag;
-                                        self.analysis_result.overlap_bins[i]
-                                            .store(overlap.to_bits(), Ordering::Relaxed);
-                                        if overlap > peak_overlap {
-                                            peak_overlap = overlap;
-                                            peak_bin = i;
-                                        }
-                                    }
-                                    // Clear DC bin for display.
-                                    self.analysis_result.overlap_bins[0]
-                                        .store(0_u32, Ordering::Relaxed);
-
-                                    // Bin → Hz. sr / FFT_SIZE = bin width.
-                                    let target_freq =
-                                        peak_bin as f32 * self.sample_rate
-                                        / spectral::FFT_SIZE as f32;
-
-                                    // Map frequency to the most appropriate DynEQ band.
-                                    // Bands are ordered by their parameter range centers:
-                                    //   0 (LOW):      20–2000 Hz  → <  500 Hz
-                                    //   1 (LOW MID): 200–5000 Hz  → <  2 kHz
-                                    //   2 (HIGH MID): 1–15 kHz    → <  6 kHz
-                                    //   3 (HIGH):     3–20 kHz    → ≥  6 kHz
-                                    let target_band: u32 =
-                                        if target_freq <  500.0 { 0 }
-                                        else if target_freq < 2000.0 { 1 }
-                                        else if target_freq < 6000.0 { 2 }
-                                        else { 3 };
-
-                                    // Threshold: SC level at peak bin − 6 dB headroom.
-                                    let sc_mag_at_peak =
-                                        self.sc_fft_output[peak_bin].norm() * scale;
-                                    let sc_db = 20.0
-                                        * sc_mag_at_peak.max(f32::MIN_POSITIVE).log10();
-                                    let suggested_threshold = (sc_db - 6.0).clamp(-60.0, 0.0);
-
-                                    self.analysis_result.target_band
-                                        .store(target_band, Ordering::Relaxed);
-                                    self.analysis_result.target_freq
-                                        .store(target_freq.to_bits(), Ordering::Relaxed);
-                                    self.analysis_result.target_threshold_db
-                                        .store(suggested_threshold.to_bits(), Ordering::Relaxed);
-                                    // Release — all stores above visible before this.
-                                    self.analysis_result.ready
-                                        .store(true, Ordering::Release);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 6) Punch Module (Clipper + Transient Shaper)
-        #[cfg(feature = "punch")]
-        {
-            self.punch.update_parameters(
-                self.params.punch_threshold.value(),
-                self.params.punch_clip_mode.value(),
-                self.params.punch_softness.value(),
-                self.params.punch_oversampling.value(),
-                self.params.punch_attack.value(),
-                self.params.punch_sustain.value(),
-                self.params.punch_attack_time.value(),
-                self.params.punch_release_time.value(),
-                self.params.punch_sensitivity.value(),
-                self.params.punch_input_gain.value(),
-                self.params.punch_output_gain.value(),
-                self.params.punch_mix.value(),
-            );
-
-            if !self.params.punch_bypass.value() {
-                self.punch.process(buffer);
-            }
+            seen[idx] = true;
+            self.dispatch_module(mt, buffer, aux);
         }
 
         // 7) Auto-gain compensation (before master trim so it doesn't fight the user's gain knob).
