@@ -199,6 +199,21 @@ impl BiquadPeak {
 
 // ── DynamicMode ───────────────────────────────────────────────────────────────
 
+/// Dynamic processing mode for a single band. The display labels are chosen
+/// to expose the operational direction of each mode in a way that parallels
+/// pro-audio compressor/expander/gate terminology.
+///
+/// - `CompressDownward` — reduce gain of signal *above* threshold.
+///   Like a classic compressor, but applied per-band via the peaking EQ.
+/// - `ExpandUpward` — boost gain of signal *above* threshold.
+///   Accentuates the band when the band's content is loud.
+/// - `Gate` — reduce gain of signal *below* threshold (downward expansion).
+///   Despite the name, this is a ratio-controlled downward expander, not a
+///   hard-mute gate: with ratio=1.5 it is a subtle expander, with ratio=20
+///   it behaves as a gate for practical purposes. Attenuation is clamped at
+///   -96 dB so extreme silence doesn't push the peaking EQ into numerical
+///   corner cases. No hold or hysteresis — it responds purely to the
+///   instantaneous envelope level through the attack/release smoother.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum DynamicMode {
     #[name = "Compress Down"]
@@ -526,7 +541,14 @@ impl DynamicEQ {
             }
 
             let (l_out, r_out) = if any_solo {
-                // Solo mode: sum soloed bands' bandpass outputs, per channel.
+                // Solo mode: route only the soloed bands' content to the
+                // output, through a constant-skirt bandpass (not the peaking
+                // EQ / cascade). This is deliberately a *different* signal
+                // path from the non-solo cascade — solo is for monitoring
+                // what's in each band, not for any processing reduction.
+                // All bands still run update_envelope() above so soloing
+                // doesn't freeze the un-soloed bands' envelope state, which
+                // would cause a click when solo is released.
                 let mut ol = 0.0_f32;
                 let mut or_ = 0.0_f32;
                 for band in &mut self.bands {
