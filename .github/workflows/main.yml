@@ -164,11 +164,11 @@ jobs:
 
       - name: Build xtask
         run: |
-          cargo +nightly build --package xtask
+          cargo +nightly build --locked --package xtask
 
       - name: Build and bundle plugins
         run: |
-          cargo +nightly run --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features ${{ matrix.features }}
+          cargo +nightly run --locked --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features ${{ matrix.features }}
 
       - name: Create archive name
         id: archive
