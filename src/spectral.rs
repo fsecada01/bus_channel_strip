@@ -153,7 +153,10 @@ mod tests {
     fn test_spectrum_data_new_not_dirty() {
         let sd = SpectrumData::new();
         let mut out = vec![0.0_f32; SPECTRUM_BINS];
-        assert!(!sd.read_into_slice(&mut out), "Fresh SpectrumData must not be dirty");
+        assert!(
+            !sd.read_into_slice(&mut out),
+            "Fresh SpectrumData must not be dirty"
+        );
     }
 
     #[test]
@@ -163,7 +166,10 @@ mod tests {
         sd.write_from_slice(&input);
 
         let mut out = vec![0.0_f32; SPECTRUM_BINS];
-        assert!(sd.read_into_slice(&mut out), "Should detect new data after write");
+        assert!(
+            sd.read_into_slice(&mut out),
+            "Should detect new data after write"
+        );
         for (i, (&expected, &actual)) in input.iter().zip(out.iter()).enumerate() {
             assert!(
                 (expected - actual).abs() < 1e-7,
@@ -182,7 +188,10 @@ mod tests {
         let second = sd.read_into_slice(&mut out);
 
         assert!(first, "First read should see pending data");
-        assert!(!second, "Second read should see no new data (dirty flag cleared)");
+        assert!(
+            !second,
+            "Second read should see no new data (dirty flag cleared)"
+        );
     }
 
     #[test]
@@ -224,7 +233,11 @@ mod tests {
     fn test_f32_bit_roundtrip_normal_values() {
         for &v in &[-1.0_f32, -0.5, 0.0, f32::MIN_POSITIVE, 0.5, 1.0, 100.0] {
             let recovered = f32::from_bits(v.to_bits());
-            assert_eq!(v.to_bits(), recovered.to_bits(), "bit roundtrip failed for {v}");
+            assert_eq!(
+                v.to_bits(),
+                recovered.to_bits(),
+                "bit roundtrip failed for {v}"
+            );
         }
     }
 
@@ -233,21 +246,30 @@ mod tests {
     #[test]
     fn test_analysis_result_default_not_ready() {
         let ar = AnalysisResult::new();
-        assert!(!ar.ready.load(Ordering::Relaxed), "AnalysisResult should not be ready by default");
+        assert!(
+            !ar.ready.load(Ordering::Relaxed),
+            "AnalysisResult should not be ready by default"
+        );
     }
 
     #[test]
     fn test_analysis_result_default_freq_is_1khz() {
         let ar = AnalysisResult::new();
         let freq = f32::from_bits(ar.target_freq.load(Ordering::Relaxed));
-        assert!((freq - 1000.0).abs() < 0.1, "Default target_freq should be 1000 Hz, got {freq}");
+        assert!(
+            (freq - 1000.0).abs() < 0.1,
+            "Default target_freq should be 1000 Hz, got {freq}"
+        );
     }
 
     #[test]
     fn test_analysis_result_default_threshold_is_minus_18db() {
         let ar = AnalysisResult::new();
         let thresh = f32::from_bits(ar.target_threshold_db.load(Ordering::Relaxed));
-        assert!((thresh - (-18.0)).abs() < 0.1, "Default threshold should be -18 dB, got {thresh}");
+        assert!(
+            (thresh - (-18.0)).abs() < 0.1,
+            "Default threshold should be -18 dB, got {thresh}"
+        );
     }
 
     #[test]
@@ -263,10 +285,7 @@ mod tests {
         let grd = GainReductionData::new();
         for (i, band) in grd.bands.iter().enumerate() {
             let val = f32::from_bits(band.load(Ordering::Relaxed));
-            assert!(
-                val == 0.0,
-                "Band {i} should be 0.0 dB at init, got {val}"
-            );
+            assert!(val == 0.0, "Band {i} should be 0.0 dB at init, got {val}");
         }
     }
 
@@ -276,7 +295,10 @@ mod tests {
         let test_db = 3.5_f32;
         grd.bands[2].store(test_db.to_bits(), Ordering::Relaxed);
         let recovered = f32::from_bits(grd.bands[2].load(Ordering::Relaxed));
-        assert!((recovered - test_db).abs() < 1e-6, "GR write/read: expected {test_db}, got {recovered}");
+        assert!(
+            (recovered - test_db).abs() < 1e-6,
+            "GR write/read: expected {test_db}, got {recovered}"
+        );
     }
 
     // ── Constants ─────────────────────────────────────────────────────────────

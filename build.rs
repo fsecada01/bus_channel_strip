@@ -13,11 +13,7 @@ fn set_build_date_env() {
     // Try PowerShell (Windows)
     if date_str.is_none() {
         if let Ok(output) = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "(Get-Date).ToString('yyyyMMdd')",
-            ])
+            .args(["-NoProfile", "-Command", "(Get-Date).ToString('yyyyMMdd')"])
             .output()
         {
             if output.status.success() {
@@ -61,10 +57,7 @@ fn main() {
 
     let mut build = cc::Build::new();
 
-    build
-        .cpp(true)
-        .include("cpp")
-        .file("cpp/buttercomp2.cpp");
+    build.cpp(true).include("cpp").file("cpp/buttercomp2.cpp");
 
     // Manually parse flags from BINDGEN_EXTRA_CLANG_ARGS.
     // This is to work around a bug in how cc-rs parses CXXFLAGS with quoted paths.
@@ -89,9 +82,7 @@ fn main() {
         // MSVC-specific settings
         build.flag("/std:c++17").flag("/EHsc");
     } else if target.contains("windows-gnu") {
-        build
-            .flag("-static-libgcc")
-            .flag("-static-libstdc++");
+        build.flag("-static-libgcc").flag("-static-libstdc++");
     } else if target.contains("apple-darwin") {
         build
             .flag("-mmacosx-version-min=10.9")

@@ -1,8 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, Json};
 
 use crate::{
     claude,
@@ -16,9 +12,10 @@ pub async fn suggest(
     Json(req): Json<SuggestRequest>,
 ) -> Result<Json<SuggestResponse>, (StatusCode, String)> {
     // Resolve profile if requested
-    let profile = req.profile_id.as_deref().and_then(|id| {
-        state.profiles.iter().find(|p| p.id == id).cloned()
-    });
+    let profile = req
+        .profile_id
+        .as_deref()
+        .and_then(|id| state.profiles.iter().find(|p| p.id == id).cloned());
 
     if req.profile_id.is_some() && profile.is_none() {
         return Err((
@@ -28,14 +25,9 @@ pub async fn suggest(
     }
 
     // Call Claude
-    let result = claude::suggest(
-        &state.api_key,
-        &state.client,
-        &req,
-        profile.as_ref(),
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let result = claude::suggest(&state.api_key, &state.client, &req, profile.as_ref())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(SuggestResponse {
         summary: result.summary,

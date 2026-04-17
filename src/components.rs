@@ -1,8 +1,8 @@
 // src/components.rs
 // Reusable UI components for the Bus Channel Strip editor
 
-use std::sync::Arc;
 use nih_plug::prelude::*;
+use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
 use vizia_plug::widgets::*;
 
@@ -12,7 +12,7 @@ use crate::BusChannelStripParams;
 // In morphorm, height(Auto) on a leaf node (no children) resolves to 0, not
 // text-content height. Labels inside Auto-height VStacks MUST use explicit
 // Pixels heights to avoid collapsing to 0 and overflowing onto sibling views.
-const PARAM_LABEL_H: f32 = 16.0;  // height for all parameter labels (12px font + padding)
+const PARAM_LABEL_H: f32 = 16.0; // height for all parameter labels (12px font + padding)
 
 // ── Reusable structural helpers ───────────────────────────────────────────────
 
@@ -54,34 +54,30 @@ pub enum ModuleTheme {
 impl ModuleTheme {
     pub fn class_name(self) -> &'static str {
         match self {
-            Self::Api5500     => "api5500-theme",
+            Self::Api5500 => "api5500-theme",
             Self::ButterComp2 => "buttercomp2-theme",
-            Self::Pultec      => "pultec-theme",
-            Self::DynamicEq   => "dynamic-eq-theme",
+            Self::Pultec => "pultec-theme",
+            Self::DynamicEq => "dynamic-eq-theme",
             Self::Transformer => "transformer-theme",
-            Self::Punch       => "punch-theme",
+            Self::Punch => "punch-theme",
         }
     }
 
     pub fn accent_color(self) -> Color {
         match self {
-            Self::Api5500     => Color::rgb(64,  160, 208), // #40a0d0
-            Self::ButterComp2 => Color::rgb(255, 150, 64),  // #ff9640
-            Self::Pultec      => Color::rgb(255, 215, 0),   // #ffd700
-            Self::DynamicEq   => Color::rgb(102, 204, 102), // #66cc66
-            Self::Transformer => Color::rgb(204, 102, 51),  // #cc6633
-            Self::Punch       => Color::rgb(0,   160, 255), // #00a0ff
+            Self::Api5500 => Color::rgb(64, 160, 208),     // #40a0d0
+            Self::ButterComp2 => Color::rgb(255, 150, 64), // #ff9640
+            Self::Pultec => Color::rgb(255, 215, 0),       // #ffd700
+            Self::DynamicEq => Color::rgb(102, 204, 102),  // #66cc66
+            Self::Transformer => Color::rgb(204, 102, 51), // #cc6633
+            Self::Punch => Color::rgb(0, 160, 255),        // #00a0ff
         }
     }
 }
 
 // Enhanced parameter slider with consistent styling
-pub fn create_param_slider<P, L, F>(
-    cx: &mut Context,
-    label: &str,
-    lens: L,
-    param_map: F,
-) where
+pub fn create_param_slider<P, L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
+where
     P: Param + 'static,
     L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &P,
@@ -106,11 +102,8 @@ pub fn create_param_slider<P, L, F>(
 // Removed problematic raw param slider function for now
 
 // Reusable bypass button component
-pub fn create_bypass_button<F>(
-    cx: &mut Context,
-    _label: &str,
-    param_map: F,
-) where
+pub fn create_bypass_button<F>(cx: &mut Context, _label: &str, param_map: F)
+where
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
     // Create the button with proper lens binding
@@ -126,10 +119,8 @@ pub fn create_bypass_button<F>(
 /// convention: the checked/lit state (param=true = enabled) appears DARK like
 /// normal operation, while the unchecked state (disabled) appears lit/red.
 /// This matches the bypass button convention where dark = normal/processing.
-pub fn create_on_button<F>(
-    cx: &mut Context,
-    param_map: F,
-) where
+pub fn create_on_button<F>(cx: &mut Context, param_map: F)
+where
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
     ParamButton::new(cx, crate::editor::Data::params, param_map)
@@ -143,12 +134,8 @@ pub fn create_on_button<F>(
 /// Inline labeled toggle button for BoolParam controls inside a module's control surface.
 /// Renders a label above a full-width button, matching the slider layout so heights
 /// stay consistent when mixed with param sliders in the same row.
-pub fn create_bool_button<L, F>(
-    cx: &mut Context,
-    label: &str,
-    lens: L,
-    param_map: F,
-) where
+pub fn create_bool_button<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
+where
     L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
@@ -171,12 +158,8 @@ pub fn create_bool_button<L, F>(
 
 // Specialized components for common parameter types
 
-pub fn create_frequency_slider<L, F>(
-    cx: &mut Context,
-    label: &str,
-    lens: L,
-    param_map: F,
-) where
+pub fn create_frequency_slider<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
+where
     L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
@@ -199,12 +182,8 @@ pub fn create_frequency_slider<L, F>(
     .bottom(Pixels(0.0));
 }
 
-pub fn create_gain_slider<L, F>(
-    cx: &mut Context,
-    label: &str,
-    lens: L,
-    param_map: F,
-) where
+pub fn create_gain_slider<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
+where
     L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
@@ -227,12 +206,8 @@ pub fn create_gain_slider<L, F>(
     .bottom(Pixels(0.0));
 }
 
-pub fn create_ratio_slider<L, F>(
-    cx: &mut Context,
-    label: &str,
-    lens: L,
-    param_map: F,
-) where
+pub fn create_ratio_slider<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
+where
     L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
@@ -254,4 +229,3 @@ pub fn create_ratio_slider<L, F>(
     .top(Pixels(0.0))
     .bottom(Pixels(0.0));
 }
-

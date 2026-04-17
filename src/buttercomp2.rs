@@ -1079,7 +1079,10 @@ mod tests {
         for i in 0..4096 {
             let x = (2.0 * core::f32::consts::PI * 0.35 * i as f32).sin() * 0.7;
             let (l, r) = fet.process_sample(x, x);
-            assert!(l.is_finite() && r.is_finite(), "non-finite at i={i}: {l},{r}");
+            assert!(
+                l.is_finite() && r.is_finite(),
+                "non-finite at i={i}: {l},{r}"
+            );
             max_abs = max_abs.max(l.abs()).max(r.abs());
         }
         // Saturation should produce a bounded output — under 1.5 in linear

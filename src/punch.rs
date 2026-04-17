@@ -215,7 +215,6 @@ impl TransientDetector {
     }
 }
 
-
 // ============================================================================
 // Clipper Algorithms
 // ============================================================================
@@ -588,7 +587,7 @@ fn linear_to_db(linear: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oversampler::{HB_NUM_TAPS, design_halfband_kaiser};
+    use crate::oversampler::{design_halfband_kaiser, HB_NUM_TAPS};
 
     #[test]
     fn test_hard_clip_basic() {

@@ -9,8 +9,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use tower::ServiceBuilder;
 use models::{Profile, ProfilesFile};
+use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::normalize_path::NormalizePathLayer;
 use tracing::info;
@@ -75,10 +75,10 @@ async fn main() -> Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/profiles",     get(routes::profiles::list_profiles))
+        .route("/profiles", get(routes::profiles::list_profiles))
         .route("/profiles/:id", get(routes::profiles::get_profile))
-        .route("/suggest",      post(routes::suggest::suggest))
-        .route("/health",       get(health))
+        .route("/suggest", post(routes::suggest::suggest))
+        .route("/health", get(health))
         .with_state(state)
         .layer(
             ServiceBuilder::new()

@@ -109,11 +109,19 @@ impl HalfbandFir {
     pub fn upsample_2x(&mut self, x: f32, coeffs: &[f32; HB_NUM_TAPS]) -> (f32, f32) {
         self.delay[self.pos] = x;
         let y0 = self.convolve(coeffs);
-        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+        self.pos = if self.pos + 1 == HB_NUM_TAPS {
+            0
+        } else {
+            self.pos + 1
+        };
 
         self.delay[self.pos] = 0.0;
         let y1 = self.convolve(coeffs);
-        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+        self.pos = if self.pos + 1 == HB_NUM_TAPS {
+            0
+        } else {
+            self.pos + 1
+        };
 
         (y0 * 2.0, y1 * 2.0)
     }
@@ -123,10 +131,18 @@ impl HalfbandFir {
     pub fn downsample_2x(&mut self, y0: f32, y1: f32, coeffs: &[f32; HB_NUM_TAPS]) -> f32 {
         self.delay[self.pos] = y0;
         let x = self.convolve(coeffs);
-        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+        self.pos = if self.pos + 1 == HB_NUM_TAPS {
+            0
+        } else {
+            self.pos + 1
+        };
 
         self.delay[self.pos] = y1;
-        self.pos = if self.pos + 1 == HB_NUM_TAPS { 0 } else { self.pos + 1 };
+        self.pos = if self.pos + 1 == HB_NUM_TAPS {
+            0
+        } else {
+            self.pos + 1
+        };
 
         x
     }

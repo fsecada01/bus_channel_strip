@@ -4,12 +4,13 @@ use axum::{
     Json,
 };
 
-use crate::{models::{Profile, ProfileSummary}, AppState};
+use crate::{
+    models::{Profile, ProfileSummary},
+    AppState,
+};
 
 /// GET /profiles — list all profiles (id, display_name, entity_type, era, genre_gates, description)
-pub async fn list_profiles(
-    State(state): State<AppState>,
-) -> Json<Vec<ProfileSummary>> {
+pub async fn list_profiles(State(state): State<AppState>) -> Json<Vec<ProfileSummary>> {
     let summaries = state
         .profiles
         .iter()

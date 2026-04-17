@@ -21,13 +21,8 @@ impl Filter {
             FilterType::HighShelf => Type::HighShelf(gain),
         };
 
-        let coeff = Coefficients::<f32>::from_params(
-            filter_type,
-            sample_rate.hz(),
-            freq.hz(),
-            q,
-        )
-        .expect("Failed to create filter coefficients");
+        let coeff = Coefficients::<f32>::from_params(filter_type, sample_rate.hz(), freq.hz(), q)
+            .expect("Failed to create filter coefficients");
 
         Self {
             filter: DirectForm1::<f32>::new(coeff),
@@ -35,20 +30,22 @@ impl Filter {
     }
 
     /// Update filter parameters without recreating the filter structure
-    pub fn update_parameters(&mut self, sample_rate: f32, filter_type: FilterType, freq: f32, q: f32, gain: f32) {
+    pub fn update_parameters(
+        &mut self,
+        sample_rate: f32,
+        filter_type: FilterType,
+        freq: f32,
+        q: f32,
+        gain: f32,
+    ) {
         let filter_type = match filter_type {
             FilterType::Bell => Type::PeakingEQ(gain),
             FilterType::LowShelf => Type::LowShelf(gain),
             FilterType::HighShelf => Type::HighShelf(gain),
         };
 
-        let coeff = Coefficients::<f32>::from_params(
-            filter_type,
-            sample_rate.hz(),
-            freq.hz(),
-            q,
-        )
-        .expect("Failed to create filter coefficients");
+        let coeff = Coefficients::<f32>::from_params(filter_type, sample_rate.hz(), freq.hz(), q)
+            .expect("Failed to create filter coefficients");
 
         // Update coefficients without clearing filter memory
         self.filter.update_coefficients(coeff);
@@ -140,7 +137,10 @@ mod tests {
     fn test_sigmoid_antisymmetric() {
         // sigmoid(-x) == -sigmoid(x)
         for &x in &[0.1, 1.0, 5.0, 50.0] {
-            assert!((sigmoid(x) + sigmoid(-x)).abs() < 1e-6, "sigmoid not antisymmetric at {x}");
+            assert!(
+                (sigmoid(x) + sigmoid(-x)).abs() < 1e-6,
+                "sigmoid not antisymmetric at {x}"
+            );
         }
     }
 
@@ -165,7 +165,10 @@ mod tests {
         let x = 0.5_f32;
         let expected = x.tanh();
         let result = tanh_saturation(x, 0.0);
-        assert!((result - expected).abs() < 1e-5, "drive=0 expected {expected}, got {result}");
+        assert!(
+            (result - expected).abs() < 1e-5,
+            "drive=0 expected {expected}, got {result}"
+        );
     }
 
     #[test]
@@ -177,7 +180,10 @@ mod tests {
         let no_drive = tanh_saturation(x, 0.0).abs();
         let full_drive = tanh_saturation(x, 1.0).abs();
         // At large amplitude the drive denominator (1 + drive*0.5) dominates, reducing output
-        assert!(full_drive < no_drive, "At large amplitude, high drive should reduce output via 1/(1+drive*0.5)");
+        assert!(
+            full_drive < no_drive,
+            "At large amplitude, high drive should reduce output via 1/(1+drive*0.5)"
+        );
     }
 
     #[test]
@@ -194,7 +200,10 @@ mod tests {
     fn test_exp_curve_zero_amount_is_identity() {
         for &x in &[0.0, 0.25, 0.5, 0.75, 1.0] {
             let result = exp_curve(x, 0.0);
-            assert!((result - x).abs() < 1e-5, "exp_curve({x}, 0) should equal {x}, got {result}");
+            assert!(
+                (result - x).abs() < 1e-5,
+                "exp_curve({x}, 0) should equal {x}, got {result}"
+            );
         }
     }
 
@@ -217,7 +226,10 @@ mod tests {
     #[test]
     fn test_poly_log_curve_zero_params_identity() {
         let result = poly_log_curve(0.5, 0.0, 0.0);
-        assert!((result - 0.5).abs() < 1e-5, "zero params should be identity");
+        assert!(
+            (result - 0.5).abs() < 1e-5,
+            "zero params should be identity"
+        );
     }
 
     #[test]
@@ -244,14 +256,20 @@ mod tests {
     fn test_soft_knee_below_threshold_passes_through() {
         let input = 0.3_f32;
         let result = soft_knee_compress(input, 0.5, 4.0, 0.1);
-        assert!((result - input).abs() < 1e-5, "below threshold: expected {input}, got {result}");
+        assert!(
+            (result - input).abs() < 1e-5,
+            "below threshold: expected {input}, got {result}"
+        );
     }
 
     #[test]
     fn test_soft_knee_above_threshold_reduces_signal() {
         let input = 0.8_f32;
         let result = soft_knee_compress(input, 0.5, 4.0, 0.1);
-        assert!(result < input, "above threshold: signal should be compressed");
+        assert!(
+            result < input,
+            "above threshold: signal should be compressed"
+        );
         assert!(result > 0.0, "compressed signal should be positive");
     }
 
@@ -272,7 +290,10 @@ mod tests {
         let ratio = 4.0_f32;
         let result = soft_knee_compress(input, threshold, ratio, 0.0);
         let expected = threshold + (input - threshold) / ratio;
-        assert!((result - expected).abs() < 1e-5, "zero knee: expected {expected}, got {result}");
+        assert!(
+            (result - expected).abs() < 1e-5,
+            "zero knee: expected {expected}, got {result}"
+        );
     }
 
     // ── Filter ────────────────────────────────────────────────────────────────
