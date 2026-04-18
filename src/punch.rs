@@ -16,8 +16,14 @@
 //! ```
 
 use crate::oversampler::Oversampler;
+use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
+
+/// Minimum wet-path HPF cutoff. Below this the filter is effectively bypassed
+/// (DC-blocking only). Simon-Phillips-style parallel drum submix typically
+/// sets this between 120 Hz and 400 Hz to leave low end to the dry path.
+const WET_HPF_MIN_HZ: f32 = 20.0;
 
 // ============================================================================
 // Clipping Mode Enum
@@ -316,12 +322,19 @@ pub struct PunchModule {
     input_gain: f32,  // Linear gain
     output_gain: f32, // Linear gain
     mix: f32,         // 0.0 - 1.0 dry/wet
+    wet_hpf_hz: f32,  // HPF cutoff on wet path only (20 Hz = effectively off)
 
     // Internal state - per channel (stereo)
     transient_detector_l: TransientDetector,
     transient_detector_r: TransientDetector,
     oversampler_l: Oversampler,
     oversampler_r: Oversampler,
+
+    // Parallel-path HPF — applied to the clipped/shaped wet signal only so
+    // Simon-Phillips-style drum submix blends punch/attack energy on top of
+    // an unfiltered dry without muddying the low end.
+    wet_hpf_l: DirectForm1<f32>,
+    wet_hpf_r: DirectForm1<f32>,
 
     // Metering (for GUI)
     current_gain_reduction: f32,
@@ -336,6 +349,14 @@ impl PunchModule {
 
     /// Create a new Punch module instance
     pub fn new(sample_rate: f32) -> Self {
+        let hpf_coeffs = Coefficients::<f32>::from_params(
+            Type::HighPass,
+            sample_rate.hz(),
+            WET_HPF_MIN_HZ.hz(),
+            0.707,
+        )
+        .expect("HighPass with defaults is always valid");
+
         Self {
             sample_rate,
 
@@ -356,12 +377,16 @@ impl PunchModule {
             input_gain: 1.0,
             output_gain: 1.0,
             mix: 1.0,
+            wet_hpf_hz: WET_HPF_MIN_HZ,
 
             // Initialize per-channel state
             transient_detector_l: TransientDetector::new(sample_rate),
             transient_detector_r: TransientDetector::new(sample_rate),
             oversampler_l: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
             oversampler_r: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
+
+            wet_hpf_l: DirectForm1::<f32>::new(hpf_coeffs),
+            wet_hpf_r: DirectForm1::<f32>::new(hpf_coeffs),
 
             // Metering
             current_gain_reduction: 0.0,
@@ -388,6 +413,7 @@ impl PunchModule {
         input_gain_db: f32,
         output_gain_db: f32,
         mix: f32,
+        wet_hpf_hz: f32,
     ) {
         // Convert dB to linear
         self.clip_threshold = db_to_linear(clip_threshold_db);
@@ -404,6 +430,23 @@ impl PunchModule {
         self.input_gain = db_to_linear(input_gain_db);
         self.output_gain = db_to_linear(output_gain_db);
         self.mix = mix.clamp(0.0, 1.0);
+
+        // Recompute HPF coefficients only when cutoff changes, preserving
+        // filter state across parameter updates (update_coefficients keeps
+        // the state delay line intact → no clicks).
+        let new_hpf = wet_hpf_hz.clamp(WET_HPF_MIN_HZ, 1000.0);
+        if (new_hpf - self.wet_hpf_hz).abs() > 0.01 {
+            self.wet_hpf_hz = new_hpf;
+            if let Ok(coeff) = Coefficients::<f32>::from_params(
+                Type::HighPass,
+                self.sample_rate.hz(),
+                new_hpf.hz(),
+                0.707,
+            ) {
+                self.wet_hpf_l.update_coefficients(coeff);
+                self.wet_hpf_r.update_coefficients(coeff);
+            }
+        }
 
         // Update oversamplers
         let os_factor = self.oversampling.factor();
@@ -517,8 +560,18 @@ impl PunchModule {
 
                 let processed = oversampler.downsample(&temp_os_buffer[..os_factor], sample_idx);
 
-                // 5. Mix and output
-                let mixed = dry * (1.0 - self.mix) + processed * self.mix;
+                // 5. Apply wet-path HPF so the parallel blend adds attack/punch
+                //    without muddying the dry signal's low end. When cutoff is
+                //    at its minimum the filter is effectively a DC-block only.
+                let wet_hpf = if ch_idx == 0 {
+                    &mut self.wet_hpf_l
+                } else {
+                    &mut self.wet_hpf_r
+                };
+                let wet = wet_hpf.run(processed);
+
+                // 6. Mix and output
+                let mixed = dry * (1.0 - self.mix) + wet * self.mix;
                 let output = mixed * self.output_gain;
 
                 // SAFETY: sample_ptr is valid and aligned (set above from NIH-plug buffer).
@@ -717,6 +770,7 @@ mod tests {
             0.0,                    // input gain
             0.0,                    // output gain
             1.0,                    // mix
+            20.0,                   // wet HPF (off)
         );
 
         assert_eq!(punch.clip_mode, ClipMode::Soft);

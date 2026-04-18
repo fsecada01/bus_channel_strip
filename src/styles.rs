@@ -31,11 +31,13 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .chassis-header {
-    background: linear-gradient(180deg, #262a33, #1b1f27 70%, #151922);
+    background: linear-gradient(180deg, #2d323c 0%, #24282f 35%, #1b1f27 75%, #151922 100%);
     border-bottom: 2px solid #373c46;
-    border-top: 1px solid #3a4050;
-    padding: 10px 14px;
+    border-top: 1px solid #4a5162;
+    padding: 10px 18px;
     border-radius: 8px 8px 0 0;
+    gap: 14px;
+    alignment: center;
 }
 
 .chassis-brand {
@@ -53,10 +55,11 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .master-controls {
-    background: linear-gradient(145deg, #141820, #1a1f28);
-    padding: 8px 14px;
+    background: linear-gradient(180deg, rgba(20, 24, 32, 0.55), rgba(14, 17, 22, 0.6));
+    padding: 6px 12px;
     border-radius: 6px;
-    border: 1px solid #3a4050;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    alignment: center;
 }
 
 .master-label {
@@ -76,9 +79,13 @@ pub const COMPONENT_STYLES: &str = r#"
     border-radius: 8px;
 }
 
+/* Opaque fill is REQUIRED: ScrollView with transparent inner content causes
+   Skia to composite translated text over stale pixels during horizontal
+   scroll, producing a ghost/smear trail at the head and tail of the strip.
+   Solid fill matches the .strip-scroll rail midpoint so the seam is invisible. */
 .lunchbox-slots {
     padding: 16px;
-    background-color: transparent;
+    background-color: #141821;
     border-radius: 0;
 }
 
@@ -223,12 +230,13 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #ff6b78;
 }
 
-/* Signal flow indicator — reads as a recessed label block */
+/* Signal flow indicator — subtle pill that blends into the chassis header
+   gradient instead of reading as a separate framed block. */
 .signal-flow-section {
     padding: 6px 14px;
-    background: linear-gradient(145deg, #0e1217, #151a21);
+    background: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
     border-radius: 6px;
-    border: 1px solid #2a303a;
+    border: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .signal-flow-label {
@@ -259,9 +267,9 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .zoom-controls {
     padding: 4px 8px;
-    background: linear-gradient(145deg, #0e1217, #151a21);
+    background: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
     border-radius: 6px;
-    border: 1px solid #2a303a;
+    border: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .zoom-label {
@@ -274,8 +282,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .zoom-btn {
-    background: linear-gradient(145deg, #222730, #2a303c);
-    border: 1px solid #353b47;
+    background: linear-gradient(180deg, #222730, #1b1f27);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     cursor: pointer;
     display: flex;
@@ -283,13 +291,13 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .zoom-btn:hover {
-    background: linear-gradient(145deg, #2c323e, #363d4c);
-    border-color: #4a5160;
+    background: linear-gradient(180deg, #2a303c, #232833);
+    border-color: rgba(255, 255, 255, 0.12);
 }
 
 .zoom-btn-active {
-    background: linear-gradient(145deg, #2d4a60, #376078) !important;
-    border-color: #5a9fc8 !important;
+    background: linear-gradient(180deg, #3a6888, #2a4e68) !important;
+    border-color: rgba(138, 197, 232, 0.55) !important;
 }
 
 .zoom-btn-label {
@@ -411,6 +419,74 @@ pub const COMPONENT_STYLES: &str = r#"
     background: linear-gradient(145deg, #6b2222, #5c1a1a);
     border-color: #8a3a3a;
     color: #ffffff;
+}
+
+/* ── Active-LED button (module bypass) ─────────────────────────────────────
+   Hardware power-LED convention: lit green when the module is processing,
+   dark when bypassed. The BoolParam semantics are inverted (bypass=true means
+   OFF), so the CSS applies the lit style to the UNCHECKED state and the dark
+   style to :checked. Used for all six module bypass toggles; SOLO buttons
+   keep the standard .bypass-button treatment. */
+.active-led-button {
+    background: linear-gradient(145deg, #2c8a2c, #1e7024);
+    border: 1px solid #4dbd4d;
+    border-radius: 4px;
+    color: #f5fff5;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    cursor: pointer;
+    min-width: 60px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.active-led-button:hover {
+    background: linear-gradient(145deg, #35a035, #24842a);
+    border-color: #66d866;
+}
+
+.active-led-button:checked {
+    background: linear-gradient(145deg, #1c1f24, #14171c);
+    border-color: #2d3138;
+    color: #6a7280;
+}
+
+.active-led-button:checked:hover {
+    background: linear-gradient(145deg, #22262c, #191d23);
+    border-color: #3a4050;
+    color: #8a93a0;
+}
+
+/* Always-visible status LED: small glowing dot in the module header.
+   Same color semantics as .active-led-button (green = active, dark = bypassed)
+   but shaped as a round indicator and sized for header placement. Empty-label
+   so the :checked state only reads as color change, not text. Still clickable
+   (vizia CSS lacks pointer-events: none) — that's fine, double-toggle is
+   harmless since it targets the same bypass param. */
+.module-led-indicator {
+    background: radial-gradient(circle at 35% 35%, #6ee46e, #2c8a2c 60%, #1e7024);
+    border: 1px solid #4dbd4d;
+    border-radius: 7px;
+    width: 14px;
+    height: 14px;
+    min-width: 14px;
+    min-height: 14px;
+    padding: 0;
+    color: transparent;
+    font-size: 1px;
+}
+.module-led-indicator:hover {
+    border-color: #7ce87c;
+}
+.module-led-indicator:checked {
+    background: radial-gradient(circle at 35% 35%, #2a2e36, #16181d 60%, #0d0f13);
+    border-color: #2d3138;
+}
+.module-led-indicator:checked:hover {
+    border-color: #3a4050;
 }
 
 /* Band ON button — inverted convention vs bypass buttons.
@@ -788,56 +864,49 @@ scrollbar .thumb:hover {
     }
 }
 
-/* ── Zoom scaling ──────────────────────────────────────────────────────────
-   The chassis carries one of .zoom-75, .zoom-100, .zoom-125, .zoom-150,
-   .zoom-200 at any time (see editor.rs toggle_class). Slot widths already
-   scale reactively in Rust (Data::zoom_level.map), so these rules only
-   scale what CSS can actually drive — font sizes, padding, gap — and only
-   where the Rust side does NOT set the same property inline.
+/* Zoom: content-only scaling. vizia-plug does not support runtime host-window
+   resize, so zoom buttons toggle a .zoom-N class on the chassis root and CSS
+   scales fonts per level. Slot width and chassis padding are scaled from Rust
+   via a reactive lens; widget heights are intentionally left constant so the
+   strip row stays vertically stable under zoom. */
+.zoom-75 .module-name        { font-size: 11px; }
+.zoom-75 .module-type        { font-size: 10px; }
+.zoom-75 .section-label      { font-size: 9px;  }
+.zoom-75 .param-label        { font-size: 9px;  }
+.zoom-75 .dyneq-param-label  { font-size: 9px;  }
+.zoom-75 .dyneq-band-title   { font-size: 10px; }
+.zoom-75 .chassis-brand      { font-size: 13px; }
+.zoom-75 .chassis-title      { font-size: 10px; }
+.zoom-75 .signal-flow-hint   { font-size: 9px;  }
 
-   Note: vizia inline Rust props (.padding, .gap, .width, .height) win
-   over CSS rules regardless of specificity or !important, so zoom scaling
-   is deliberately partial. The reactive slot width carries the heavy
-   lifting visually; these rules amplify the feel at the type/label layer.
-*/
+.zoom-125 .module-name       { font-size: 18px; }
+.zoom-125 .module-type       { font-size: 15px; }
+.zoom-125 .section-label     { font-size: 14px; }
+.zoom-125 .param-label       { font-size: 14px; }
+.zoom-125 .dyneq-param-label { font-size: 14px; }
+.zoom-125 .dyneq-band-title  { font-size: 15px; }
+.zoom-125 .chassis-brand     { font-size: 22px; }
+.zoom-125 .chassis-title     { font-size: 16px; }
+.zoom-125 .signal-flow-hint  { font-size: 13px; }
 
-.zoom-75 .module-name           { font-size: 13px; }
-.zoom-75 .module-type           { font-size: 11px; }
-.zoom-75 .param-label           { font-size: 10px; }
-.zoom-75 .section-label         { font-size: 10px; }
-.zoom-75 .dyneq-param-label     { font-size: 9px; }
-.zoom-75 .dyneq-band-title      { font-size: 10px; }
-.zoom-75 .chassis-brand         { font-size: 20px; }
-.zoom-75 .chassis-title         { font-size: 15px; }
-.zoom-75 .signal-flow-hint      { font-size: 9px; }
+.zoom-150 .module-name       { font-size: 22px; }
+.zoom-150 .module-type       { font-size: 18px; }
+.zoom-150 .section-label     { font-size: 16px; }
+.zoom-150 .param-label       { font-size: 16px; }
+.zoom-150 .dyneq-param-label { font-size: 16px; }
+.zoom-150 .dyneq-band-title  { font-size: 18px; }
+.zoom-150 .chassis-brand     { font-size: 26px; }
+.zoom-150 .chassis-title     { font-size: 19px; }
+.zoom-150 .signal-flow-hint  { font-size: 15px; }
 
-/* 100% is the reference; no overrides needed. */
-
-.zoom-125 .module-name          { font-size: 17px; }
-.zoom-125 .module-type          { font-size: 14px; }
-.zoom-125 .param-label          { font-size: 14px; }
-.zoom-125 .section-label        { font-size: 13px; }
-.zoom-125 .dyneq-param-label    { font-size: 13px; }
-.zoom-125 .dyneq-band-title     { font-size: 13px; }
-.zoom-125 .chassis-brand        { font-size: 28px; }
-.zoom-125 .chassis-title        { font-size: 21px; }
-
-.zoom-150 .module-name          { font-size: 20px; }
-.zoom-150 .module-type          { font-size: 16px; }
-.zoom-150 .param-label          { font-size: 15px; }
-.zoom-150 .section-label        { font-size: 15px; }
-.zoom-150 .dyneq-param-label    { font-size: 14px; }
-.zoom-150 .dyneq-band-title     { font-size: 15px; }
-.zoom-150 .chassis-brand        { font-size: 32px; }
-.zoom-150 .chassis-title        { font-size: 24px; }
-
-.zoom-200 .module-name          { font-size: 26px; }
-.zoom-200 .module-type          { font-size: 19px; }
-.zoom-200 .param-label          { font-size: 18px; }
-.zoom-200 .section-label        { font-size: 18px; }
-.zoom-200 .dyneq-param-label    { font-size: 16px; }
-.zoom-200 .dyneq-band-title     { font-size: 18px; }
-.zoom-200 .chassis-brand        { font-size: 40px; }
-.zoom-200 .chassis-title        { font-size: 30px; }
+.zoom-200 .module-name       { font-size: 28px; }
+.zoom-200 .module-type       { font-size: 23px; }
+.zoom-200 .section-label     { font-size: 20px; }
+.zoom-200 .param-label       { font-size: 20px; }
+.zoom-200 .dyneq-param-label { font-size: 20px; }
+.zoom-200 .dyneq-band-title  { font-size: 23px; }
+.zoom-200 .chassis-brand     { font-size: 34px; }
+.zoom-200 .chassis-title     { font-size: 25px; }
+.zoom-200 .signal-flow-hint  { font-size: 19px; }
 
 "#;

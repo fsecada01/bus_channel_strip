@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
-use vizia_plug::widgets::{ParamSlider, RawParamEvent};
+use vizia_plug::widgets::{ParamButton, ParamButtonExt, ParamSlider, RawParamEvent};
 use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
 use crate::components::{self, ModuleTheme};
@@ -91,6 +91,11 @@ impl Model for Data {
 
             AppEvent::SetZoom(level) => {
                 // Clamp to supported discrete levels. Unknown values fall back to 100.
+                // NOTE: vizia-plug does not support runtime host-window resize
+                // (cx.set_user_scale_factor / WindowEvent::SetSize aren't wired
+                // into baseview), so zoom only rescales content within the
+                // fixed window — slot widths grow, fonts grow via CSS classes,
+                // ScrollView reveals off-screen slots.
                 self.zoom_level = match *level {
                     75 | 100 | 125 | 150 | 200 => *level,
                     _ => 100,
@@ -351,11 +356,21 @@ pub(crate) fn create(
 
         VStack::new(cx, |cx| {
             // ── Chassis header ──────────────────────────────────────────────
+            // Three-zone band: brand title (left) | signal-flow hint (center,
+            // flexible) | zoom + master (right). The inner pills share the
+            // same translucent fill so the whole header reads as one gradient
+            // surface rather than a row of clunky boxes.
             HStack::new(cx, |cx| {
-                Label::new(cx, "API").class("chassis-brand");
-                Label::new(cx, "Bus Channel Strip").class("chassis-title");
+                HStack::new(cx, |cx| {
+                    Label::new(cx, "API").class("chassis-brand");
+                    Label::new(cx, "Bus Channel Strip").class("chassis-title");
+                })
+                .width(Auto)
+                .height(Auto)
+                .gap(Pixels(12.0))
+                .alignment(Alignment::Center);
 
-                // Signal flow / reorder hint
+                // Signal flow / reorder hint — centered, takes remaining space.
                 VStack::new(cx, |cx| {
                     Label::new(cx, "SIGNAL FLOW").class("signal-flow-label");
                     Label::new(
@@ -366,7 +381,9 @@ pub(crate) fn create(
                     Label::new(cx, "DSP order: module_order_1 \u{2192} module_order_5")
                         .class("signal-flow-params");
                 })
-                .class("signal-flow-section");
+                .class("signal-flow-section")
+                .left(Stretch(1.0))
+                .right(Stretch(1.0));
 
                 // Zoom control band — discrete 75/100/125/150/200 buttons.
                 create_zoom_controls(cx);
@@ -415,7 +432,6 @@ pub(crate) fn create(
             );
         })
         .class("lunchbox-chassis")
-        // Zoom classes drive per-level CSS sizing. Only one is active at a time.
         .toggle_class("zoom-75", Data::zoom_level.map(|z| *z == 75))
         .toggle_class("zoom-100", Data::zoom_level.map(|z| *z == 100))
         .toggle_class("zoom-125", Data::zoom_level.map(|z| *z == 125))
@@ -423,11 +439,13 @@ pub(crate) fn create(
         .toggle_class("zoom-200", Data::zoom_level.map(|z| *z == 200))
         .width(Stretch(1.0))
         .height(Stretch(1.0))
-        // Reactive padding: scales with zoom so the chassis frame feels
-        // proportional. Base 14px at 100%, ramps 10→28px across 75→200%.
-        // CSS alone cannot drive this because Rust inline .padding() wins
-        // over stylesheet padding.
         .padding(Data::zoom_level.map(|z| Pixels(14.0 * (*z as f32) / 100.0)));
+        // vizia-plug doesn't support runtime host-window resize
+        // (set_user_scale_factor / WindowEvent::SetSize aren't wired into
+        // baseview). Zoom rescales content within the fixed window: slot
+        // widths scale via reactive lens, fonts scale via CSS zoom-N rules,
+        // and the strip ScrollView reveals off-screen slots when content
+        // grows past the window width.
     })
 }
 
@@ -564,24 +582,35 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
                 .width(Stretch(1.0));
 
                 // ── Module header ────────────────────────────────────────────
-                VStack::new(cx, |cx| {
-                    Label::new(cx, module_type_name(mt))
-                        .class("module-name")
-                        // Name turns bright yellow when this slot is selected.
-                        .color(Data::drag_slot.map(move |ds| {
-                            if *ds == Some(slot_idx) {
-                                Color::rgb(255, 220, 50)
-                            } else {
-                                theme.accent_color()
-                            }
-                        }));
-                    Label::new(cx, module_type_subtitle(mt)).class("module-type");
+                HStack::new(cx, |cx| {
+                    VStack::new(cx, |cx| {
+                        Label::new(cx, module_type_name(mt))
+                            .class("module-name")
+                            // Name turns bright yellow when this slot is selected.
+                            .color(Data::drag_slot.map(move |ds| {
+                                if *ds == Some(slot_idx) {
+                                    Color::rgb(255, 220, 50)
+                                } else {
+                                    theme.accent_color()
+                                }
+                            }));
+                        Label::new(cx, module_type_subtitle(mt)).class("module-type");
+                    })
+                    .height(Auto)
+                    .width(Stretch(1.0));
+
+                    // Always-visible LED status dot: green when the module is
+                    // active, dark when bypassed. Clicking it toggles bypass
+                    // (vizia CSS lacks pointer-events:none, so we accept the
+                    // double-toggle-path and make both lead to the same result).
+                    build_led_indicator_for_type(cx, mt);
                 })
                 .class("module-header")
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0))
                 .height(Auto)
-                .width(Stretch(1.0));
+                .width(Stretch(1.0))
+                .gap(Pixels(6.0));
 
                 // ── Bypass button ────────────────────────────────────────────
                 build_bypass_button_for_type(cx, mt);
@@ -603,9 +632,8 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
                     theme.accent_color()
                 }
             }))
-            // Reactive slot width: base × (zoom/100). Each slot rebuilds its
-            // width whenever Data::zoom_level changes, giving uniform scaling
-            // across the 6 slots without rebuilding the whole tree.
+            // Slot width scales with the chassis zoom level. Content that
+            // overflows the window is reachable via the strip ScrollView.
             .width(Data::zoom_level.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
             .height(Stretch(1.0))
             .border_width(Pixels(3.0))
@@ -623,27 +651,64 @@ pub const BASE_SLOT_WIDTH_PX: f32 = 280.0;
 // Bypass Buttons — dispatched by module type
 // ============================================================================
 
-fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
+fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
-            components::create_bypass_button(cx, "BYPASS", |p| &p.eq_bypass);
+            ParamButton::new(cx, Data::params, |p| &p.eq_bypass)
+                .with_label("")
+                .class("module-led-indicator");
         }
         ModuleType::ButterComp2 => {
-            components::create_bypass_button(cx, "BYPASS", |p| &p.comp_bypass);
+            ParamButton::new(cx, Data::params, |p| &p.comp_bypass)
+                .with_label("")
+                .class("module-led-indicator");
         }
         ModuleType::PultecEQ => {
-            components::create_bypass_button(cx, "BYPASS", |p| &p.pultec_bypass);
+            ParamButton::new(cx, Data::params, |p| &p.pultec_bypass)
+                .with_label("")
+                .class("module-led-indicator");
         }
         ModuleType::DynamicEQ => {
             #[cfg(feature = "dynamic_eq")]
-            components::create_bypass_button(cx, "BYPASS", |p| &p.dyneq_bypass);
+            ParamButton::new(cx, Data::params, |p| &p.dyneq_bypass)
+                .with_label("")
+                .class("module-led-indicator");
         }
         ModuleType::Transformer => {
-            components::create_bypass_button(cx, "BYPASS", |p| &p.transformer_bypass);
+            ParamButton::new(cx, Data::params, |p| &p.transformer_bypass)
+                .with_label("")
+                .class("module-led-indicator");
         }
         ModuleType::Punch => {
             #[cfg(feature = "punch")]
-            components::create_bypass_button(cx, "BYPASS", |p| &p.punch_bypass);
+            ParamButton::new(cx, Data::params, |p| &p.punch_bypass)
+                .with_label("")
+                .class("module-led-indicator");
+        }
+    }
+}
+
+fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
+    match mt {
+        ModuleType::Api5500EQ => {
+            components::create_active_led_button(cx, |p| &p.eq_bypass);
+        }
+        ModuleType::ButterComp2 => {
+            components::create_active_led_button(cx, |p| &p.comp_bypass);
+        }
+        ModuleType::PultecEQ => {
+            components::create_active_led_button(cx, |p| &p.pultec_bypass);
+        }
+        ModuleType::DynamicEQ => {
+            #[cfg(feature = "dynamic_eq")]
+            components::create_active_led_button(cx, |p| &p.dyneq_bypass);
+        }
+        ModuleType::Transformer => {
+            components::create_active_led_button(cx, |p| &p.transformer_bypass);
+        }
+        ModuleType::Punch => {
+            #[cfg(feature = "punch")]
+            components::create_active_led_button(cx, |p| &p.punch_bypass);
         }
     }
 }
@@ -761,15 +826,17 @@ fn build_buttercomp2_controls(cx: &mut Context) {
     .bottom(Pixels(0.0));
 }
 
-/// Classic ButterComp2 control surface — Compress, Output, Dry/Wet.
-/// Height: Auto — 3 sliders + spacer row with 6px gaps.
+/// Classic ButterComp2 control surface — Compress, Output, SC HP, Dry/Wet.
 fn build_classic_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
         components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.comp_output);
-        components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
-        // Spacer to match 4-slider VCA height.
-        Element::new(cx).height(Pixels(46.0));
+        components::module_row(cx, |cx| {
+            components::create_frequency_slider(cx, "SC HP", Data::params, |p| {
+                &p.comp_sc_hp_freq
+            });
+            components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
+        });
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -801,7 +868,7 @@ fn build_vca_controls(cx: &mut Context) {
     .bottom(Pixels(0.0));
 }
 
-/// Optical model control surface — Threshold, Character, Attack, Release, Mix.
+/// Optical model control surface — Threshold, Character, Speed, SC HP, Mix.
 fn build_optical_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
@@ -809,7 +876,12 @@ fn build_optical_controls(cx: &mut Context) {
             components::create_param_slider(cx, "CHAR %", Data::params, |p| &p.opt_char);
         });
         components::create_param_slider(cx, "SPEED", Data::params, |p| &p.opt_speed);
-        components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+        components::module_row(cx, |cx| {
+            components::create_frequency_slider(cx, "SC HP", Data::params, |p| {
+                &p.comp_sc_hp_freq
+            });
+            components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+        });
     })
     .gap(Pixels(6.0))
     .height(Auto)
@@ -1595,7 +1667,12 @@ fn build_punch_controls(cx: &mut Context) {
                 components::create_gain_slider(cx, "IN", Data::params, |p| &p.punch_input_gain);
                 components::create_gain_slider(cx, "OUT", Data::params, |p| &p.punch_output_gain);
             });
-            components::create_param_slider(cx, "MIX", Data::params, |p| &p.punch_mix);
+            components::module_row(cx, |cx| {
+                components::create_param_slider(cx, "MIX", Data::params, |p| &p.punch_mix);
+                components::create_frequency_slider(cx, "WET HPF", Data::params, |p| {
+                    &p.punch_wet_hpf_hz
+                });
+            });
         });
     })
     .gap(Pixels(4.0))

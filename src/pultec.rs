@@ -115,8 +115,10 @@ impl PultecEQ {
         // no clicks) and avoids creating new DirectForm1 objects on the audio thread.
 
         // Low Frequency Boost — LowShelf, 0 dB when inactive.
+        // +12 dB max matches real EQP-1A spec; quadratic curve keeps the first
+        // third of slider travel subtle for fine-tuning.
         let lf_boost_db = if lf_boost_gain > 0.01 {
-            lf_boost_gain * lf_boost_gain * 8.0 // 0–8 dB quadratic curve
+            lf_boost_gain * lf_boost_gain * 12.0 // 0–12 dB quadratic curve
         } else {
             0.0
         };
@@ -134,8 +136,11 @@ impl PultecEQ {
         // classic EQP-1A "trick": set boost at e.g. 60 Hz and cut at e.g.
         // 200 Hz so the low-shelf cut attenuates the mud right above the
         // boosted low-bass, leaving a tight, defined low end.
+        // Real EQP-1A offers up to ~-15 dB attenuation; the previous -6 dB cap
+        // left the low-mid scoop too subtle to achieve the classic tight-low
+        // sound. Quadratic curve keeps fine control at low slider positions.
         let lf_cut_db = if lf_cut_gain > 0.01 {
-            -(lf_cut_gain * lf_cut_gain * 6.0) // 0 to -6 dB quadratic curve
+            -(lf_cut_gain * lf_cut_gain * 15.0) // 0 to -15 dB quadratic curve
         } else {
             0.0
         };

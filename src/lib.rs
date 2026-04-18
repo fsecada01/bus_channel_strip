@@ -537,6 +537,12 @@ pub struct BusChannelStripParams {
     #[id = "punch_mix"]
     pub punch_mix: FloatParam,
 
+    /// Wet-path HPF cutoff (Hz). Applies only to the clipped/shaped signal,
+    /// not the dry, so parallel drum blends add attack/punch without muddying
+    /// the low end. 20 Hz = effectively off; 120–400 Hz suits drum submix.
+    #[id = "punch_wet_hpf"]
+    pub punch_wet_hpf_hz: FloatParam,
+
     // Module Ordering Parameters
     #[id = "module_order_1"]
     pub module_order_1: EnumParam<ModuleType>,
@@ -859,6 +865,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: 0.1, max: 100.0 },
             )
             .with_unit(" ms")
+            .with_step_size(0.1)
+            .with_value_to_string(formatters::v2s_f32_rounded(1))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             vca_rel: FloatParam::new(
@@ -867,6 +875,8 @@ impl Default for BusChannelStripParams {
                 FloatRange::Linear { min: 10.0, max: 1000.0 },
             )
             .with_unit(" ms")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             // Optical model parameters
@@ -928,6 +938,8 @@ impl Default for BusChannelStripParams {
                 },
             )
             .with_unit(" ms")
+            .with_step_size(0.01)
+            .with_value_to_string(formatters::v2s_f32_rounded(2))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             #[cfg(feature = "buttercomp2")]
@@ -941,6 +953,8 @@ impl Default for BusChannelStripParams {
                 },
             )
             .with_unit(" ms")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0))
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             #[cfg(feature = "buttercomp2")]
@@ -1464,6 +1478,20 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            #[cfg(feature = "punch")]
+            punch_wet_hpf_hz: FloatParam::new(
+                "Punch Wet HPF",
+                20.0, // Off by default — full-range parallel
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 1000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                },
+            )
+            .with_unit(" Hz")
+            .with_step_size(1.0)
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+
             // Module Ordering Parameters (default signal chain)
             // Default order matches the standard 500-series layout:
             // EQ -> Comp -> Pultec -> Transformer -> Punch  (DynamicEQ in reserve slot 6)
@@ -1827,6 +1855,7 @@ impl BusChannelStrip {
             self.params.punch_input_gain.value(),
             self.params.punch_output_gain.value(),
             self.params.punch_mix.value(),
+            self.params.punch_wet_hpf_hz.value(),
         );
         if !self.params.punch_bypass.value() {
             self.punch.process(buffer);

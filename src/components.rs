@@ -115,6 +115,24 @@ where
         .bottom(Pixels(0.0));
 }
 
+/// Hardware-LED-style bypass button. Visual convention is inverted from the
+/// underlying BoolParam: when the module is ACTIVE (bypass=false) the button
+/// is lit green; when BYPASSED (bypass=true, i.e. ParamButton :checked) it
+/// appears dark/off. Label reads "ACTIVE" in both states — users read the
+/// color, not the text, matching how outboard gear works.
+pub fn create_active_led_button<F>(cx: &mut Context, param_map: F)
+where
+    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
+{
+    ParamButton::new(cx, crate::editor::Data::params, param_map)
+        .with_label("ACTIVE")
+        .class("active-led-button")
+        .height(Pixels(28.0))
+        .width(Stretch(1.0))
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+}
+
 /// Band enable button. Uses the "on-button" CSS class which inverts the visual
 /// convention: the checked/lit state (param=true = enabled) appears DARK like
 /// normal operation, while the unchecked state (disabled) appears lit/red.
