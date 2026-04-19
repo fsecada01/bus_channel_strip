@@ -1,5 +1,6 @@
 use crate::oversampler::Oversampler;
-use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
+use crate::shaping::biquad_coeffs;
+use biquad::{Biquad, DirectForm1, Type};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
 
@@ -137,13 +138,8 @@ impl FetCompressor {
     pub fn new(sample_rate: f32) -> Self {
         // Filters are initialised at the "off" frequency; update_parameters()
         // will reconfigure them before first use.
-        let flat_hp = Coefficients::<f32>::from_params(
-            Type::HighPass,
-            sample_rate.hz(),
-            SC_HP_OFF_HZ.hz(),
-            SC_HP_Q,
-        )
-        .expect("20 Hz HP at any sample rate is always valid");
+        let flat_hp = biquad_coeffs(Type::HighPass, sample_rate, SC_HP_OFF_HZ, SC_HP_Q)
+            .expect("20 Hz HP at any sample rate is always valid");
         let mut s = Self {
             sample_rate,
             envelope_db: 0.0,
@@ -228,12 +224,7 @@ impl FetCompressor {
         if hp_changed {
             self.cached_sc_hp_hz = sc_hp_hz;
             let hz = sc_hp_hz.clamp(SC_HP_OFF_HZ, 800.0);
-            if let Ok(c) = Coefficients::<f32>::from_params(
-                Type::HighPass,
-                self.sample_rate.hz(),
-                hz.hz(),
-                SC_HP_Q,
-            ) {
+            if let Ok(c) = biquad_coeffs(Type::HighPass, self.sample_rate, hz, SC_HP_Q) {
                 self.sc_hp_l.update_coefficients(c);
                 self.sc_hp_r.update_coefficients(c);
             }
@@ -439,13 +430,8 @@ pub struct VcaCompressor {
 
 impl VcaCompressor {
     pub fn new(sample_rate: f32) -> Self {
-        let flat_hp = Coefficients::<f32>::from_params(
-            Type::HighPass,
-            sample_rate.hz(),
-            SC_HP_OFF_HZ.hz(),
-            SC_HP_Q,
-        )
-        .expect("20 Hz HP at any sample rate is always valid");
+        let flat_hp = biquad_coeffs(Type::HighPass, sample_rate, SC_HP_OFF_HZ, SC_HP_Q)
+            .expect("20 Hz HP at any sample rate is always valid");
         let mut s = Self {
             sample_rate,
             rms_sq: 0.0,
@@ -504,12 +490,7 @@ impl VcaCompressor {
         if hp_changed {
             self.cached_sc_hp_hz = sc_hp_hz;
             let hz = sc_hp_hz.clamp(SC_HP_OFF_HZ, 800.0);
-            if let Ok(c) = Coefficients::<f32>::from_params(
-                Type::HighPass,
-                self.sample_rate.hz(),
-                hz.hz(),
-                SC_HP_Q,
-            ) {
+            if let Ok(c) = biquad_coeffs(Type::HighPass, self.sample_rate, hz, SC_HP_Q) {
                 self.sc_hp_l.update_coefficients(c);
                 self.sc_hp_r.update_coefficients(c);
             }
@@ -1037,15 +1018,27 @@ mod tests {
 
     #[test]
     fn test_fet_compressor_loud_signal_is_attenuated() {
-        let mut fet = FetCompressor::new(44100.0);
+        // Drive the SC above its 20 Hz HPF corner with a 200 Hz sine. A DC
+        // signal here would be filtered to ~0 by the SC HPF and bypass the
+        // detector entirely — this test exercises true gain reduction.
+        let sr = 44_100.0_f32;
+        let mut fet = FetCompressor::new(sr);
         // +6 dB input drive → effective_threshold = -6 dBFS; 0 dBFS signal engages GR
         fet.update_parameters(6.0, 0.0, 0.001, 100.0, FetRatio::R4, false, 20.0);
-        for _ in 0..2000 {
-            fet.process_sample(1.0, 1.0);
+        let omega = 2.0 * core::f32::consts::PI * 200.0 / sr;
+        let mut peak = 0.0_f32;
+        for i in 0..4000 {
+            let x = (omega * i as f32).sin();
+            let (out_l, _) = fet.process_sample(x, x);
+            if i > 2000 {
+                peak = peak.max(out_l.abs());
+            }
         }
-        let (out_l, _) = fet.process_sample(1.0, 1.0);
-        assert!(out_l < 1.0, "Loud signal should be attenuated, got {out_l}");
-        assert!(out_l > 0.0, "Output should still be positive");
+        assert!(
+            peak < 1.0,
+            "Loud signal should be attenuated (peak < unity), got {peak}"
+        );
+        assert!(peak > 0.0, "Output peak should be positive");
     }
 
     #[test]

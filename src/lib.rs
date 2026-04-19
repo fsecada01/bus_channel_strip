@@ -2,7 +2,11 @@ use nih_plug::prelude::*;
 use std::sync::Arc;
 #[cfg(feature = "gui")]
 use vizia_plug::ViziaState;
+#[cfg(test)]
+mod biquad_sanity_test;
 mod oversampler;
+#[cfg(test)]
+mod plugin_integration_tests;
 mod shaping;
 mod spectral;
 
@@ -37,6 +41,11 @@ use transformer::{TransformerModel, TransformerModule};
 mod punch;
 #[cfg(feature = "punch")]
 use punch::{ClipMode, OversamplingFactor, PunchModule};
+
+#[cfg(feature = "haas")]
+mod haas;
+#[cfg(feature = "haas")]
+use haas::{CombMode, HaasModule};
 
 #[cfg(feature = "gui")]
 mod components;
@@ -82,6 +91,8 @@ pub enum ModuleType {
     DynamicEQ,
     #[name = "Transformer"]
     Transformer,
+    #[name = "Haas"]
+    Haas,
     #[name = "Punch"]
     Punch,
 }
@@ -125,6 +136,9 @@ struct BusChannelStrip {
     /// Punch module (Clipper + Transient Shaper)
     #[cfg(feature = "punch")]
     punch: PunchModule,
+    /// Haas psychoacoustic stereo widener
+    #[cfg(feature = "haas")]
+    haas: HaasModule,
 
     /// Buffers for module reordering
     temp_buffer_1: Vec<Vec<f32>>,
@@ -311,10 +325,14 @@ pub struct BusChannelStripParams {
     pub pultec_lf_boost_freq: FloatParam,
     #[id = "pultec_lf_boost_gain"]
     pub pultec_lf_boost_gain: FloatParam,
+    #[id = "pultec_lf_bw"]
+    pub pultec_lf_boost_bandwidth: FloatParam,
     #[id = "pultec_lf_cut_freq"]
     pub pultec_lf_cut_freq: FloatParam,
     #[id = "pultec_lf_cut_gain"]
     pub pultec_lf_cut_gain: FloatParam,
+    #[id = "pultec_lf_cut_bw"]
+    pub pultec_lf_cut_bandwidth: FloatParam,
     #[id = "pultec_hf_boost_freq"]
     pub pultec_hf_boost_freq: FloatParam,
     #[id = "pultec_hf_boost_gain"]
@@ -543,6 +561,29 @@ pub struct BusChannelStripParams {
     #[id = "punch_wet_hpf"]
     pub punch_wet_hpf_hz: FloatParam,
 
+    // ── Haas Module Parameters ──────────────────────────────────────────
+    #[cfg(feature = "haas")]
+    #[id = "haas_bypass"]
+    pub haas_bypass: BoolParam,
+    #[cfg(feature = "haas")]
+    #[id = "haas_mid_gain"]
+    pub haas_mid_gain: FloatParam,
+    #[cfg(feature = "haas")]
+    #[id = "haas_side_gain"]
+    pub haas_side_gain: FloatParam,
+    #[cfg(feature = "haas")]
+    #[id = "haas_comb_depth"]
+    pub haas_comb_depth: FloatParam,
+    #[cfg(feature = "haas")]
+    #[id = "haas_comb_time"]
+    pub haas_comb_time: FloatParam,
+    #[cfg(feature = "haas")]
+    #[id = "haas_comb_mode"]
+    pub haas_comb_mode: EnumParam<CombMode>,
+    #[cfg(feature = "haas")]
+    #[id = "haas_mix"]
+    pub haas_mix: FloatParam,
+
     // Module Ordering Parameters
     #[id = "module_order_1"]
     pub module_order_1: EnumParam<ModuleType>,
@@ -556,6 +597,26 @@ pub struct BusChannelStripParams {
     pub module_order_5: EnumParam<ModuleType>,
     #[id = "module_order_6"]
     pub module_order_6: EnumParam<ModuleType>,
+    #[id = "module_order_7"]
+    pub module_order_7: EnumParam<ModuleType>,
+
+    // Per-module-type hide flags. Purely GUI state — audio path is unaffected.
+    // Non-automatable because these are view preferences, not performance
+    // parameters. Saved with the session so hides persist across reopens.
+    #[id = "hide_api5500"]
+    pub hide_api5500: BoolParam,
+    #[id = "hide_buttercomp2"]
+    pub hide_buttercomp2: BoolParam,
+    #[id = "hide_pultec"]
+    pub hide_pultec: BoolParam,
+    #[id = "hide_dynamic_eq"]
+    pub hide_dynamic_eq: BoolParam,
+    #[id = "hide_transformer"]
+    pub hide_transformer: BoolParam,
+    #[id = "hide_punch"]
+    pub hide_punch: BoolParam,
+    #[id = "hide_haas"]
+    pub hide_haas: BoolParam,
 }
 
 impl Default for BusChannelStrip {
@@ -580,6 +641,8 @@ impl Default for BusChannelStrip {
             transformer: TransformerModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "punch")]
             punch: PunchModule::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "haas")]
+            haas: HaasModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             temp_buffer_1: Vec::new(),
             temp_buffer_2: Vec::new(),
             spectrum_data: Arc::new(spectral::SpectrumData::new()),
@@ -895,6 +958,9 @@ impl Default for BusChannelStripParams {
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
+            .with_step_size(0.01)
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             opt_char: FloatParam::new(
@@ -902,6 +968,9 @@ impl Default for BusChannelStripParams {
                 0.5,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
+            .with_step_size(0.01)
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage())
             .with_smoother(SmoothingStyle::Linear(5.0)),
 
             // 1176-style FET compressor parameters
@@ -969,39 +1038,60 @@ impl Default for BusChannelStripParams {
             pultec_lf_boost_freq: FloatParam::new(
                 "LF Boost Freq",
                 60.0,
-                FloatRange::Linear { min: 20.0, max: 100.0 },
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 300.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
+            // Extended to ±18 dB to match professional hardware headroom.
             pultec_lf_boost_gain: FloatParam::new(
                 "LF Boost",
                 0.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
+                FloatRange::Linear { min: 0.0, max: 18.0 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            // BW=0 → Q=1.0 (tight/modern), BW=1 → Q=0.25 (very wide/vintage).
+            // Default 0.67 reproduces the current warm-sounding Q=0.5 shelf.
+            pultec_lf_boost_bandwidth: FloatParam::new(
+                "LF Boost BW",
+                0.67,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
 
             // Independent low-cut frequency enables the classic Pultec
             // "trick": boost at e.g. 60 Hz, cut at e.g. 200 Hz for a tight
-            // low end. Default 100 Hz is a neutral starting point; existing
-            // sessions created before v0.5 load with this default, which
-            // will sound different from the old coupled (0.6*boost) behavior.
+            // low end. Extended to 400 Hz so users can target guitar mud range.
             pultec_lf_cut_freq: FloatParam::new(
                 "LF Atten Freq",
                 100.0,
-                FloatRange::Linear { min: 20.0, max: 200.0 },
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 400.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
             )
             .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             pultec_lf_cut_gain: FloatParam::new(
-                "LF Atten", // "Attenuation" like the original
+                "LF Atten",
                 0.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
+                FloatRange::Linear { min: 0.0, max: 18.0 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" dB")
+            .with_step_size(0.1),
+
+            pultec_lf_cut_bandwidth: FloatParam::new(
+                "LF Atten BW",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
 
             pultec_hf_boost_freq: FloatParam::new(
                 "HF Boost Freq",
@@ -1018,10 +1108,10 @@ impl Default for BusChannelStripParams {
             pultec_hf_boost_gain: FloatParam::new(
                 "HF Boost",
                 0.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
+                FloatRange::Linear { min: 0.0, max: 10.0 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" dB")
+            .with_step_size(0.1),
 
             pultec_hf_boost_bandwidth: FloatParam::new(
                 "HF Bandwidth",
@@ -1046,10 +1136,10 @@ impl Default for BusChannelStripParams {
             pultec_hf_cut_gain: FloatParam::new(
                 "HF Atten",
                 0.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
+                FloatRange::Linear { min: 0.0, max: 8.0 },
             )
-            .with_unit("")
-            .with_step_size(0.01),
+            .with_unit(" dB")
+            .with_step_size(0.1),
 
             pultec_tube_drive: FloatParam::new(
                 "Tube Drive",
@@ -1492,15 +1582,86 @@ impl Default for BusChannelStripParams {
             .with_step_size(1.0)
             .with_value_to_string(formatters::v2s_f32_rounded(0)),
 
+            // ── Haas Module defaults ────────────────────────────────────
+            // Default: BYPASSED so the chain remains audibly unchanged on
+            // first load. User must engage Haas intentionally.
+            #[cfg(feature = "haas")]
+            haas_bypass: BoolParam::new("Haas Bypass", true),
+            #[cfg(feature = "haas")]
+            haas_mid_gain: FloatParam::new(
+                "Haas Mid",
+                0.0,
+                FloatRange::Linear { min: -12.0, max: 6.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit(" dB")
+            .with_step_size(0.1)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            #[cfg(feature = "haas")]
+            haas_side_gain: FloatParam::new(
+                "Haas Side",
+                0.0,
+                FloatRange::Linear { min: -6.0, max: 6.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit(" dB")
+            .with_step_size(0.1)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            #[cfg(feature = "haas")]
+            haas_comb_depth: FloatParam::new(
+                "Haas Depth",
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit("")
+            .with_step_size(0.01),
+            #[cfg(feature = "haas")]
+            haas_comb_time: FloatParam::new(
+                "Haas Time",
+                7.0,
+                FloatRange::Skewed {
+                    min: 1.0,
+                    max: 20.0,
+                    factor: FloatRange::skew_factor(-1.0),
+                },
+            )
+            .with_unit(" ms")
+            .with_step_size(0.1)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            #[cfg(feature = "haas")]
+            haas_comb_mode: EnumParam::new("Haas Mode", CombMode::SideComb),
+            #[cfg(feature = "haas")]
+            haas_mix: FloatParam::new(
+                "Haas Mix",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit("")
+            .with_step_size(0.01),
+
             // Module Ordering Parameters (default signal chain)
-            // Default order matches the standard 500-series layout:
-            // EQ -> Comp -> Pultec -> Transformer -> Punch  (DynamicEQ in reserve slot 6)
+            // Default order places Haas before Punch so the clipper catches
+            // any residual peaks introduced by the widener. DynamicEQ is
+            // the reserve slot 7.
             module_order_1: EnumParam::new("Module Order 1", ModuleType::Api5500EQ),
             module_order_2: EnumParam::new("Module Order 2", ModuleType::ButterComp2),
             module_order_3: EnumParam::new("Module Order 3", ModuleType::PultecEQ),
             module_order_4: EnumParam::new("Module Order 4", ModuleType::Transformer),
-            module_order_5: EnumParam::new("Module Order 5", ModuleType::Punch),
-            module_order_6: EnumParam::new("Module Order 6", ModuleType::DynamicEQ),
+            module_order_5: EnumParam::new("Module Order 5", ModuleType::Haas),
+            module_order_6: EnumParam::new("Module Order 6", ModuleType::Punch),
+            module_order_7: EnumParam::new("Module Order 7", ModuleType::DynamicEQ),
+
+            // Hide flags — all modules visible by default. Marked non-automatable
+            // so hosts don't clutter automation lists with per-module view state.
+            hide_api5500: BoolParam::new("Hide API5500", false).non_automatable(),
+            hide_buttercomp2: BoolParam::new("Hide ButterComp2", false).non_automatable(),
+            hide_pultec: BoolParam::new("Hide Pultec", false).non_automatable(),
+            hide_dynamic_eq: BoolParam::new("Hide Dynamic EQ", false).non_automatable(),
+            hide_transformer: BoolParam::new("Hide Transformer", false).non_automatable(),
+            hide_punch: BoolParam::new("Hide Punch", false).non_automatable(),
+            hide_haas: BoolParam::new("Hide Haas", false).non_automatable(),
         }
     }
 }
@@ -1516,6 +1677,7 @@ fn module_type_index(mt: ModuleType) -> usize {
         ModuleType::DynamicEQ => 3,
         ModuleType::Transformer => 4,
         ModuleType::Punch => 5,
+        ModuleType::Haas => 6,
     }
 }
 
@@ -1601,8 +1763,10 @@ impl BusChannelStrip {
         self.pultec.update_parameters(
             self.params.pultec_lf_boost_freq.value(),
             self.params.pultec_lf_boost_gain.value(),
+            self.params.pultec_lf_boost_bandwidth.value(),
             self.params.pultec_lf_cut_freq.value(),
             self.params.pultec_lf_cut_gain.value(),
+            self.params.pultec_lf_cut_bandwidth.value(),
             self.params.pultec_hf_boost_freq.value(),
             self.params.pultec_hf_boost_gain.value(),
             self.params.pultec_hf_boost_bandwidth.value(),
@@ -1840,6 +2004,23 @@ impl BusChannelStrip {
         }
     }
 
+    #[cfg(feature = "haas")]
+    fn process_module_haas(&mut self, buffer: &mut Buffer) {
+        let mid_gain = util::db_to_gain(self.params.haas_mid_gain.smoothed.next());
+        let side_gain = util::db_to_gain(self.params.haas_side_gain.smoothed.next());
+        self.haas.update_parameters(
+            mid_gain,
+            side_gain,
+            self.params.haas_comb_depth.smoothed.next(),
+            self.params.haas_comb_time.value(),
+            self.params.haas_comb_mode.value(),
+            self.params.haas_mix.smoothed.next(),
+        );
+        if !self.params.haas_bypass.value() {
+            self.haas.process(buffer);
+        }
+    }
+
     #[cfg(feature = "punch")]
     fn process_module_punch(&mut self, buffer: &mut Buffer) {
         self.punch.update_parameters(
@@ -1912,6 +2093,14 @@ impl BusChannelStrip {
                 #[cfg(feature = "punch")]
                 self.process_module_punch(buffer);
                 #[cfg(not(feature = "punch"))]
+                {
+                    let _ = buffer;
+                }
+            }
+            ModuleType::Haas => {
+                #[cfg(feature = "haas")]
+                self.process_module_haas(buffer);
+                #[cfg(not(feature = "haas"))]
                 {
                     let _ = buffer;
                 }
@@ -2027,6 +2216,10 @@ impl Plugin for BusChannelStrip {
         {
             self.punch = PunchModule::new(sr);
         }
+        #[cfg(feature = "haas")]
+        {
+            self.haas = HaasModule::new(sr);
+        }
 
         // Initialize temporary buffers for module reordering
         let max_buffer_size = _buffer_config.max_buffer_size as usize;
@@ -2102,6 +2295,10 @@ impl Plugin for BusChannelStrip {
         {
             self.punch.reset();
         }
+        #[cfg(feature = "haas")]
+        {
+            self.haas.reset();
+        }
     }
 
     fn process(
@@ -2124,7 +2321,7 @@ impl Plugin for BusChannelStrip {
         };
 
         // Dispatch modules in user-chosen order.
-        // Each of the six module_order_N params selects which module lands
+        // Each of the seven module_order_N params selects which module lands
         // in slot N. Duplicates are deduplicated: if the user puts API5500
         // in two slots, the module only runs once. Any slot whose feature
         // is disabled at build time becomes a no-op inside dispatch_module.
@@ -2135,8 +2332,9 @@ impl Plugin for BusChannelStrip {
             self.params.module_order_4.value(),
             self.params.module_order_5.value(),
             self.params.module_order_6.value(),
+            self.params.module_order_7.value(),
         ];
-        let mut seen = [false; 6];
+        let mut seen = [false; 7];
         for mt in order {
             let idx = module_type_index(mt);
             if seen[idx] {

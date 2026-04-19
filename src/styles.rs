@@ -230,6 +230,14 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #ff6b78;
 }
 
+.haas-theme {
+    border: 3px solid #8ca0d2 !important;
+    background: linear-gradient(165deg, #1e2238 0%, #181b2d 45%, #121527) !important;
+}
+.haas-theme .module-title {
+    color: #b4c0e4;
+}
+
 /* Signal flow indicator — subtle pill that blends into the chassis header
    gradient instead of reading as a separate framed block. */
 .signal-flow-section {
@@ -487,6 +495,62 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 .module-led-indicator:checked:hover {
     border-color: #3a4050;
+}
+
+/* Hide button — small "×" glyph in the module header that collapses the slot
+   to a narrow tab. Subtle by default, brightens on hover so it's discoverable
+   without stealing attention from the main controls. */
+.hide-btn {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #6a7280;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+.hide-btn:hover {
+    color: #e0a0a0;
+    border-color: #5a3038;
+    background: rgba(200, 60, 60, 0.08);
+}
+
+/* Collapsed tab layout — 56px wide strip containing the 3-char module tag
+   and a full-height expand button. The tab keeps the theme border color so
+   the chain remains visually readable even with several modules collapsed. */
+.slot-collapsed {
+    gap: 8px;
+    padding: 8px 4px;
+}
+.collapsed-name {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: inherit;
+    text-align: center;
+    width: 1s;
+    height: 18px;
+}
+.expand-btn {
+    width: 1s;
+    height: 1s;
+    min-height: 32px;
+    padding: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #a0a8b8;
+    background: rgba(30, 34, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+}
+.expand-btn:hover {
+    color: #ffffff;
+    background: rgba(50, 58, 72, 0.8);
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Band ON button — inverted convention vs bypass buttons.

@@ -49,6 +49,7 @@ pub enum ModuleTheme {
     DynamicEq,
     Transformer,
     Punch,
+    Haas,
 }
 
 impl ModuleTheme {
@@ -60,6 +61,7 @@ impl ModuleTheme {
             Self::DynamicEq => "dynamic-eq-theme",
             Self::Transformer => "transformer-theme",
             Self::Punch => "punch-theme",
+            Self::Haas => "haas-theme",
         }
     }
 
@@ -71,6 +73,7 @@ impl ModuleTheme {
             Self::DynamicEq => Color::rgb(102, 204, 102),  // #66cc66
             Self::Transformer => Color::rgb(204, 102, 51), // #cc6633
             Self::Punch => Color::rgb(255, 51, 68),        // #ff3344 (red/orange per spec)
+            Self::Haas => Color::rgb(140, 160, 210),       // #8ca0d2 (muted blue-lavender)
         }
     }
 }

@@ -115,14 +115,15 @@ impl Api5500 {
     }
 
     pub fn process(&mut self, buffer: &mut Buffer) {
-        for samples in buffer.iter_samples() {
-            for sample in samples {
+        for mut samples in buffer.iter_samples() {
+            for (ch, sample) in samples.iter_mut().enumerate() {
+                let ch = ch.min(1);
                 let mut s = *sample;
-                s = self.lf.run(s);
-                s = self.lmf.run(s);
-                s = self.mf.run(s);
-                s = self.hmf.run(s);
-                s = self.hf.run(s);
+                s = self.lf.run_ch(s, ch);
+                s = self.lmf.run_ch(s, ch);
+                s = self.mf.run_ch(s, ch);
+                s = self.hmf.run_ch(s, ch);
+                s = self.hf.run_ch(s, ch);
                 *sample = s;
             }
         }

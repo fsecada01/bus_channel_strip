@@ -14,6 +14,12 @@ CORE_FEATURES := "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq"
 VST3_DIR := "C:\\Program Files\\Common Files\\VST3"
 CLAP_DIR := "C:\\Program Files\\Common Files\\CLAP"
 
+# Exported so PowerShell install scripts inherit them as $env: variables
+export BCS_VST3_SRC  := justfile_directory() + "\\target\\bundled\\Bus-Channel-Strip.vst3\\Contents\\x86_64-win\\Bus-Channel-Strip.vst3"
+export BCS_VST3_DEST := VST3_DIR + "\\Bus-Channel-Strip.vst3\\Contents\\x86_64-win\\Bus-Channel-Strip.vst3"
+export BCS_CLAP_SRC  := justfile_directory() + "\\target\\bundled\\Bus-Channel-Strip.clap"
+export BCS_CLAP_DEST := CLAP_DIR + "\\Bus-Channel-Strip.clap"
+
 # System prompt file (auto-included in CLAUDE.md via @ syntax)
 SYSTEM_PROMPT := "docs/SYSTEM_PROMPT.md"
 
@@ -69,11 +75,11 @@ bundle-profile:
 # Program-Files virtualization case where the copy "succeeds" but writes to
 # VirtualStore instead of the real destination.
 install-vst3:
-    powershell -NoProfile -Command "New-Item -ItemType Directory -Force '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win' | Out-Null; Copy-Item -Force -ErrorAction Stop '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3' '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3'; if ((Get-Item '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3').Length -ne (Get-Item '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3').Length) { Write-Error 'VST3 install verification FAILED: destination size does not match source. Run CMD as Administrator, close the DAW if it is holding the file, and check AV exclusions.'; exit 1 }; Write-Host ('Installed VST3 OK  mtime=' + (Get-Item '{{VST3_DIR}}\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3').LastWriteTime)"
+    @powershell -NoProfile -File {{justfile_directory()}}\scripts\install-vst3.ps1
 
 # Install CLAP to system plugin directory. Same safeguards as install-vst3.
 install-clap:
-    powershell -NoProfile -Command "if (Test-Path '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.clap') { New-Item -ItemType Directory -Force '{{CLAP_DIR}}' | Out-Null; Copy-Item -Force -ErrorAction Stop '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.clap' '{{CLAP_DIR}}\Bus-Channel-Strip.clap'; if ((Get-Item '{{justfile_directory()}}\target\bundled\Bus-Channel-Strip.clap').Length -ne (Get-Item '{{CLAP_DIR}}\Bus-Channel-Strip.clap').Length) { Write-Error 'CLAP install verification FAILED: destination size does not match source. Run CMD as Administrator, close the DAW if it is holding the file, and check AV exclusions.'; exit 1 }; Write-Host ('Installed CLAP OK  mtime=' + (Get-Item '{{CLAP_DIR}}\Bus-Channel-Strip.clap').LastWriteTime) } else { Write-Host 'CLAP bundle not found (may not have been built)' }"
+    @powershell -NoProfile -File {{justfile_directory()}}\scripts\install-clap.ps1
 
 # Install both formats
 install: install-vst3 install-clap

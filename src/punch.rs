@@ -16,7 +16,8 @@
 //! ```
 
 use crate::oversampler::Oversampler;
-use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
+use crate::shaping::biquad_coeffs;
+use biquad::{Biquad, DirectForm1, Type};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
 
@@ -349,13 +350,8 @@ impl PunchModule {
 
     /// Create a new Punch module instance
     pub fn new(sample_rate: f32) -> Self {
-        let hpf_coeffs = Coefficients::<f32>::from_params(
-            Type::HighPass,
-            sample_rate.hz(),
-            WET_HPF_MIN_HZ.hz(),
-            0.707,
-        )
-        .expect("HighPass with defaults is always valid");
+        let hpf_coeffs = biquad_coeffs(Type::HighPass, sample_rate, WET_HPF_MIN_HZ, 0.707)
+            .expect("HighPass with defaults is always valid");
 
         Self {
             sample_rate,
@@ -437,12 +433,7 @@ impl PunchModule {
         let new_hpf = wet_hpf_hz.clamp(WET_HPF_MIN_HZ, 1000.0);
         if (new_hpf - self.wet_hpf_hz).abs() > 0.01 {
             self.wet_hpf_hz = new_hpf;
-            if let Ok(coeff) = Coefficients::<f32>::from_params(
-                Type::HighPass,
-                self.sample_rate.hz(),
-                new_hpf.hz(),
-                0.707,
-            ) {
+            if let Ok(coeff) = biquad_coeffs(Type::HighPass, self.sample_rate, new_hpf, 0.707) {
                 self.wet_hpf_l.update_coefficients(coeff);
                 self.wet_hpf_r.update_coefficients(coeff);
             }

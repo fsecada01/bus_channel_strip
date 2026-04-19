@@ -201,7 +201,8 @@ fn slot_module_type(params: &Arc<BusChannelStripParams>, slot: usize) -> ModuleT
         2 => params.module_order_3.value(),
         3 => params.module_order_4.value(),
         4 => params.module_order_5.value(),
-        _ => params.module_order_6.value(),
+        5 => params.module_order_6.value(),
+        _ => params.module_order_7.value(),
     }
 }
 
@@ -212,7 +213,8 @@ fn slot_param_ptr(params: &Arc<BusChannelStripParams>, slot: usize) -> ParamPtr 
         2 => params.module_order_3.as_ptr(),
         3 => params.module_order_4.as_ptr(),
         4 => params.module_order_5.as_ptr(),
-        _ => params.module_order_6.as_ptr(),
+        5 => params.module_order_6.as_ptr(),
+        _ => params.module_order_7.as_ptr(),
     }
 }
 
@@ -228,7 +230,8 @@ fn slot_preview_normalized(
         2 => params.module_order_3.preview_normalized(mt),
         3 => params.module_order_4.preview_normalized(mt),
         4 => params.module_order_5.preview_normalized(mt),
-        _ => params.module_order_6.preview_normalized(mt),
+        5 => params.module_order_6.preview_normalized(mt),
+        _ => params.module_order_7.preview_normalized(mt),
     }
 }
 
@@ -242,6 +245,7 @@ fn module_type_to_usize(mt: ModuleType) -> usize {
         ModuleType::DynamicEQ => 3,
         ModuleType::Transformer => 4,
         ModuleType::Punch => 5,
+        ModuleType::Haas => 6,
     }
 }
 
@@ -252,7 +256,8 @@ fn usize_to_module_type(idx: usize) -> ModuleType {
         2 => ModuleType::PultecEQ,
         3 => ModuleType::DynamicEQ,
         4 => ModuleType::Transformer,
-        _ => ModuleType::Punch,
+        5 => ModuleType::Punch,
+        _ => ModuleType::Haas,
     }
 }
 
@@ -264,6 +269,7 @@ fn module_type_to_theme(mt: ModuleType) -> ModuleTheme {
         ModuleType::DynamicEQ => ModuleTheme::DynamicEq,
         ModuleType::Transformer => ModuleTheme::Transformer,
         ModuleType::Punch => ModuleTheme::Punch,
+        ModuleType::Haas => ModuleTheme::Haas,
     }
 }
 
@@ -275,6 +281,176 @@ fn module_type_name(mt: ModuleType) -> &'static str {
         ModuleType::DynamicEQ => "Dynamic EQ",
         ModuleType::Transformer => "Console/Tape",
         ModuleType::Punch => "PUNCH",
+        ModuleType::Haas => "HAAS",
+    }
+}
+
+/// Reads the per-module-type hide flag. Hide state is keyed by the module's
+/// identity, not its slot position — so moving a module around preserves its
+/// visibility setting.
+fn is_module_hidden(params: &Arc<BusChannelStripParams>, mt: ModuleType) -> bool {
+    match mt {
+        ModuleType::Api5500EQ => params.hide_api5500.value(),
+        ModuleType::ButterComp2 => params.hide_buttercomp2.value(),
+        ModuleType::PultecEQ => params.hide_pultec.value(),
+        ModuleType::DynamicEQ => params.hide_dynamic_eq.value(),
+        ModuleType::Transformer => params.hide_transformer.value(),
+        ModuleType::Punch => params.hide_punch.value(),
+        ModuleType::Haas => params.hide_haas.value(),
+    }
+}
+
+/// Short 3-char tag for the collapsed tab. Keeps the narrow strip legible
+/// without overflowing the tab width.
+fn module_type_short_name(mt: ModuleType) -> &'static str {
+    match mt {
+        ModuleType::Api5500EQ => "API",
+        ModuleType::ButterComp2 => "BC2",
+        ModuleType::PultecEQ => "PLT",
+        ModuleType::DynamicEQ => "DYN",
+        ModuleType::Transformer => "TRF",
+        ModuleType::Punch => "PCH",
+        ModuleType::Haas => "HAS",
+    }
+}
+
+/// Small "×" button in the module header that toggles the hide flag for this
+/// module type. Bound via the same BoolParam used by the collapsed-tab expand
+/// button, so clicking either one flips state in the expected direction.
+fn build_hide_button_for_type(cx: &mut Context, mt: ModuleType) {
+    match mt {
+        ModuleType::Api5500EQ => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_api5500)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+        ModuleType::ButterComp2 => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_buttercomp2)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+        ModuleType::PultecEQ => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_pultec)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+        ModuleType::DynamicEQ => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_dynamic_eq)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+        ModuleType::Transformer => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_transformer)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+        ModuleType::Punch => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_punch)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+        ModuleType::Haas => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_haas)
+                .with_label("\u{00d7}")
+                .class("hide-btn");
+        }
+    }
+}
+
+/// Full-tab button in the collapsed view — clicking anywhere on the tab
+/// flips the same BoolParam back to false, restoring the normal slot.
+fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
+    match mt {
+        ModuleType::Api5500EQ => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_api5500)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+        ModuleType::ButterComp2 => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_buttercomp2)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+        ModuleType::PultecEQ => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_pultec)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+        ModuleType::DynamicEQ => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_dynamic_eq)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+        ModuleType::Transformer => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_transformer)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+        ModuleType::Punch => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_punch)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+        ModuleType::Haas => {
+            ParamButton::new(cx, Data::params, |p| &p.hide_haas)
+                .with_label("\u{25B6}")
+                .class("expand-btn");
+        }
+    }
+}
+
+/// One-shot repair for saved sessions whose `module_order_*` values now collide
+/// (e.g. schema upgrades that added a new slot whose default overlaps with an
+/// existing slot). Walks slots 0..7, finds duplicated module types, and fires
+/// RawParamEvent writes to replace later duplicates with missing module types
+/// in canonical order. No-op when all 7 slots already hold unique types.
+fn repair_module_order(cx: &mut Context, params: &Arc<BusChannelStripParams>) {
+    let raw = [
+        params.module_order_1.value(),
+        params.module_order_2.value(),
+        params.module_order_3.value(),
+        params.module_order_4.value(),
+        params.module_order_5.value(),
+        params.module_order_6.value(),
+        params.module_order_7.value(),
+    ];
+    let mut seen = [false; 7];
+    let mut dupe_slots: Vec<usize> = Vec::new();
+    for (i, mt) in raw.iter().enumerate() {
+        let idx = module_type_to_usize(*mt);
+        if seen[idx] {
+            dupe_slots.push(i);
+        } else {
+            seen[idx] = true;
+        }
+    }
+    if dupe_slots.is_empty() {
+        return;
+    }
+
+    // Fill in the missing types in canonical order — same order the plugin
+    // ships with on a fresh instance so the repaired chain looks predictable.
+    let canonical = [
+        ModuleType::Api5500EQ,
+        ModuleType::ButterComp2,
+        ModuleType::PultecEQ,
+        ModuleType::DynamicEQ,
+        ModuleType::Transformer,
+        ModuleType::Punch,
+        ModuleType::Haas,
+    ];
+    let missing: Vec<ModuleType> = canonical
+        .iter()
+        .copied()
+        .filter(|mt| !seen[module_type_to_usize(*mt)])
+        .collect();
+
+    for (dupe_slot, new_mt) in dupe_slots.iter().zip(missing.iter()) {
+        let ptr = slot_param_ptr(params, *dupe_slot);
+        let norm = slot_preview_normalized(params, *dupe_slot, *new_mt);
+        cx.emit(RawParamEvent::BeginSetParameter(ptr));
+        cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+        cx.emit(RawParamEvent::EndSetParameter(ptr));
     }
 }
 
@@ -286,6 +462,7 @@ fn module_type_subtitle(mt: ModuleType) -> &'static str {
         ModuleType::DynamicEQ => "DYN EQ",
         ModuleType::Transformer => "TRANSFORMER",
         ModuleType::Punch => "CLIP + TRANSIENT",
+        ModuleType::Haas => "STEREO WIDENER",
     }
 }
 
@@ -319,10 +496,7 @@ pub(crate) fn default_state() -> Arc<ViziaState> {
     // chassis content zoom is handled via toggle_class + CSS per zoom level,
     // which keeps the window at a fixed size and lets the ScrollView reveal
     // content that overflows. Visual zoom is a pure CSS concern.
-    ViziaState::new_with_default_scale_factor(
-        || (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
-        1.0,
-    )
+    ViziaState::new_with_default_scale_factor(|| (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT), 1.0)
 }
 
 pub(crate) fn create(
@@ -353,6 +527,12 @@ pub(crate) fn create(
             zoom_level: 100,
         }
         .build(cx);
+
+        // Heal duplicate module_order_* assignments left over from sessions
+        // saved under an older schema (fewer slots). When slot N defaults to
+        // a type already occupied by an earlier slot, overwrite it with the
+        // missing module type so every slot shows a unique module.
+        repair_module_order(cx, &params);
 
         VStack::new(cx, |cx| {
             // ── Chassis header ──────────────────────────────────────────────
@@ -400,7 +580,7 @@ pub(crate) fn create(
             // higher zoom levels keep every slot reachable.
             ScrollView::new(cx, |cx| {
                 HStack::new(cx, |cx| {
-                    for slot_idx in 0..6_usize {
+                    for slot_idx in 0..7_usize {
                         create_dynamic_module_slot(cx, slot_idx);
                     }
                 })
@@ -542,105 +722,150 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
             let mt = usize_to_module_type(mt_lens.get(cx));
             let theme = module_type_to_theme(mt);
 
-            VStack::new(cx, |cx| {
-                // ── Drag handle ─────────────────────────────────────────────
-                HStack::new(cx, |cx| {
-                    Label::new(cx, "\u{2261}") // ≡ hamburger icon
-                        .class("drag-handle-icon");
-                    // Reactive label: context changes based on drag state
-                    Label::new(
-                        cx,
-                        Data::drag_slot.map(move |ds| match *ds {
-                            Some(src) if src == slot_idx => "CANCEL",
-                            Some(_) => "SWAP HERE",
-                            None => "MOVE",
-                        }),
-                    )
-                    .class("drag-handle-label");
-                    // "SELECTED" indicator — only visible when this slot is
-                    // the active swap source.
-                    Label::new(cx, "\u{25CF} SELECTED")
-                        .class("drag-selected-indicator")
-                        .display(Data::drag_slot.map(move |ds| {
-                            if *ds == Some(slot_idx) {
-                                Display::Flex
-                            } else {
-                                Display::None
-                            }
-                        }));
-                })
-                .class("drag-handle")
-                .toggle_class(
-                    "drag-handle-active",
-                    Data::drag_slot.map(move |ds| *ds == Some(slot_idx)),
-                )
-                .on_press(move |cx| cx.emit(AppEvent::SelectSlot(slot_idx)))
-                .cursor(CursorIcon::Hand)
-                .top(Pixels(0.0))
-                .bottom(Pixels(0.0))
-                .height(Auto)
-                .width(Stretch(1.0));
-
-                // ── Module header ────────────────────────────────────────────
-                HStack::new(cx, |cx| {
-                    VStack::new(cx, |cx| {
-                        Label::new(cx, module_type_name(mt))
-                            .class("module-name")
-                            // Name turns bright yellow when this slot is selected.
-                            .color(Data::drag_slot.map(move |ds| {
-                                if *ds == Some(slot_idx) {
-                                    Color::rgb(255, 220, 50)
-                                } else {
-                                    theme.accent_color()
-                                }
-                            }));
-                        Label::new(cx, module_type_subtitle(mt)).class("module-type");
-                    })
-                    .height(Auto)
-                    .width(Stretch(1.0));
-
-                    // Always-visible LED status dot: green when the module is
-                    // active, dark when bypassed. Clicking it toggles bypass
-                    // (vizia CSS lacks pointer-events:none, so we accept the
-                    // double-toggle-path and make both lead to the same result).
-                    build_led_indicator_for_type(cx, mt);
-                })
-                .class("module-header")
-                .top(Pixels(0.0))
-                .bottom(Pixels(0.0))
-                .height(Auto)
-                .width(Stretch(1.0))
-                .gap(Pixels(6.0));
-
-                // ── Bypass button ────────────────────────────────────────────
-                build_bypass_button_for_type(cx, mt);
-
-                // ── Parameter controls ───────────────────────────────────────
-                build_controls_for_type(cx, mt);
-            })
-            // alignment(TopLeft) packs children to the top-left instead of
-            // the default center which distributes Stretch space around items.
-            .alignment(Alignment::TopLeft)
-            .gap(Pixels(4.0))
-            .class("module-slot")
-            .class(theme.class_name())
-            // Border turns bright white when this slot is selected for swap.
-            .border_color(Data::drag_slot.map(move |ds| {
-                if *ds == Some(slot_idx) {
-                    Color::rgba(255, 255, 255, 230)
+            // Inner binding watches the hide flag for this module type. When
+            // hidden, render a narrow click-to-expand tab; otherwise render
+            // the full slot content.
+            let hide_lens = Data::params.map(move |p| is_module_hidden(p, mt));
+            Binding::new(cx, hide_lens, move |cx, hide_binding| {
+                let hidden = hide_binding.get(cx);
+                if hidden {
+                    build_collapsed_slot(cx, slot_idx, mt, theme);
                 } else {
-                    theme.accent_color()
+                    build_full_slot(cx, slot_idx, mt, theme);
                 }
-            }))
-            // Slot width scales with the chassis zoom level. Content that
-            // overflows the window is reachable via the strip ScrollView.
-            .width(Data::zoom_level.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
-            .height(Stretch(1.0))
-            .border_width(Pixels(3.0))
-            .background_color(Color::rgb(42, 42, 42))
-            .padding(Pixels(12.0));
+            });
         },
     );
+}
+
+/// Full expanded slot — drag handle, module header (with hide button), bypass
+/// LED + button, and module-specific parameter controls.
+fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
+    VStack::new(cx, |cx| {
+        // ── Drag handle ─────────────────────────────────────────────
+        HStack::new(cx, |cx| {
+            Label::new(cx, "\u{2261}") // ≡ hamburger icon
+                .class("drag-handle-icon");
+            // Reactive label: context changes based on drag state
+            Label::new(
+                cx,
+                Data::drag_slot.map(move |ds| match *ds {
+                    Some(src) if src == slot_idx => "CANCEL",
+                    Some(_) => "SWAP HERE",
+                    None => "MOVE",
+                }),
+            )
+            .class("drag-handle-label");
+            // "SELECTED" indicator — only visible when this slot is
+            // the active swap source.
+            Label::new(cx, "\u{25CF} SELECTED")
+                .class("drag-selected-indicator")
+                .display(Data::drag_slot.map(move |ds| {
+                    if *ds == Some(slot_idx) {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    }
+                }));
+        })
+        .class("drag-handle")
+        .toggle_class(
+            "drag-handle-active",
+            Data::drag_slot.map(move |ds| *ds == Some(slot_idx)),
+        )
+        .on_press(move |cx| cx.emit(AppEvent::SelectSlot(slot_idx)))
+        .cursor(CursorIcon::Hand)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0))
+        .height(Auto)
+        .width(Stretch(1.0));
+
+        // ── Module header ────────────────────────────────────────────
+        HStack::new(cx, |cx| {
+            VStack::new(cx, |cx| {
+                Label::new(cx, module_type_name(mt))
+                    .class("module-name")
+                    // Name turns bright yellow when this slot is selected.
+                    .color(Data::drag_slot.map(move |ds| {
+                        if *ds == Some(slot_idx) {
+                            Color::rgb(255, 220, 50)
+                        } else {
+                            theme.accent_color()
+                        }
+                    }));
+                Label::new(cx, module_type_subtitle(mt)).class("module-type");
+            })
+            .height(Auto)
+            .width(Stretch(1.0));
+
+            // Hide button — collapses the slot to a narrow tab. Sits next to
+            // the LED so it's discoverable but unobtrusive.
+            build_hide_button_for_type(cx, mt);
+
+            // Always-visible LED status dot: green when the module is
+            // active, dark when bypassed. Clicking it toggles bypass
+            // (vizia CSS lacks pointer-events:none, so we accept the
+            // double-toggle-path and make both lead to the same result).
+            build_led_indicator_for_type(cx, mt);
+        })
+        .class("module-header")
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0))
+        .height(Auto)
+        .width(Stretch(1.0))
+        .gap(Pixels(6.0));
+
+        // ── Bypass button ────────────────────────────────────────────
+        build_bypass_button_for_type(cx, mt);
+
+        // ── Parameter controls ───────────────────────────────────────
+        build_controls_for_type(cx, mt);
+    })
+    // alignment(TopLeft) packs children to the top-left instead of
+    // the default center which distributes Stretch space around items.
+    .alignment(Alignment::TopLeft)
+    .gap(Pixels(4.0))
+    .class("module-slot")
+    .class(theme.class_name())
+    // Border turns bright white when this slot is selected for swap.
+    .border_color(Data::drag_slot.map(move |ds| {
+        if *ds == Some(slot_idx) {
+            Color::rgba(255, 255, 255, 230)
+        } else {
+            theme.accent_color()
+        }
+    }))
+    // Slot width scales with the chassis zoom level. Content that
+    // overflows the window is reachable via the strip ScrollView.
+    .width(Data::zoom_level.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
+    .height(Stretch(1.0))
+    .border_width(Pixels(3.0))
+    .background_color(Color::rgb(42, 42, 42))
+    .padding(Pixels(12.0));
+}
+
+/// Narrow collapsed tab — shows the 3-char module tag plus an expand button
+/// that toggles the hide flag back to false. Width is fixed regardless of
+/// zoom so several collapsed tabs stack neatly next to full slots.
+fn build_collapsed_slot(cx: &mut Context, _slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
+    VStack::new(cx, |cx| {
+        Label::new(cx, module_type_short_name(mt))
+            .class("collapsed-name")
+            .color(theme.accent_color());
+        // Expand button fills the rest of the tab.
+        build_expand_button_for_type(cx, mt);
+    })
+    .alignment(Alignment::Center)
+    .gap(Pixels(6.0))
+    .class("module-slot")
+    .class("slot-collapsed")
+    .class(theme.class_name())
+    .border_color(theme.accent_color())
+    .width(Pixels(56.0))
+    .height(Stretch(1.0))
+    .border_width(Pixels(3.0))
+    .background_color(Color::rgb(42, 42, 42))
+    .padding(Pixels(6.0));
 }
 
 /// Base slot width at 100% zoom, in logical pixels. All other zoom levels are
@@ -685,6 +910,12 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
                 .with_label("")
                 .class("module-led-indicator");
         }
+        ModuleType::Haas => {
+            #[cfg(feature = "haas")]
+            ParamButton::new(cx, Data::params, |p| &p.haas_bypass)
+                .with_label("")
+                .class("module-led-indicator");
+        }
     }
 }
 
@@ -710,6 +941,10 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
             #[cfg(feature = "punch")]
             components::create_active_led_button(cx, |p| &p.punch_bypass);
         }
+        ModuleType::Haas => {
+            #[cfg(feature = "haas")]
+            components::create_active_led_button(cx, |p| &p.haas_bypass);
+        }
     }
 }
 
@@ -725,6 +960,7 @@ fn build_controls_for_type(cx: &mut Context, mt: ModuleType) {
         ModuleType::DynamicEQ => build_dynamic_eq_controls(cx),
         ModuleType::Transformer => build_transformer_controls(cx),
         ModuleType::Punch => build_punch_controls(cx),
+        ModuleType::Haas => build_haas_controls(cx),
     }
 }
 
@@ -832,9 +1068,7 @@ fn build_classic_controls(cx: &mut Context) {
         components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
         components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.comp_output);
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "SC HP", Data::params, |p| {
-                &p.comp_sc_hp_freq
-            });
+            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
             components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
         });
     })
@@ -877,9 +1111,7 @@ fn build_optical_controls(cx: &mut Context) {
         });
         components::create_param_slider(cx, "SPEED", Data::params, |p| &p.opt_speed);
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "SC HP", Data::params, |p| {
-                &p.comp_sc_hp_freq
-            });
+            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
             components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
         });
     })
@@ -931,6 +1163,9 @@ fn build_pultec_controls(cx: &mut Context) {
                 components::create_gain_slider(cx, "BOOST", Data::params, |p| {
                     &p.pultec_lf_boost_gain
                 });
+                components::create_param_slider(cx, "BW", Data::params, |p| {
+                    &p.pultec_lf_boost_bandwidth
+                });
             });
             components::module_row(cx, |cx| {
                 components::create_frequency_slider(cx, "ATTEN", Data::params, |p| {
@@ -938,6 +1173,9 @@ fn build_pultec_controls(cx: &mut Context) {
                 });
                 components::create_gain_slider(cx, "ATTEN", Data::params, |p| {
                     &p.pultec_lf_cut_gain
+                });
+                components::create_param_slider(cx, "BW", Data::params, |p| {
+                    &p.pultec_lf_cut_bandwidth
                 });
             });
         });
@@ -1673,6 +1911,33 @@ fn build_punch_controls(cx: &mut Context) {
                     &p.punch_wet_hpf_hz
                 });
             });
+        });
+    })
+    .gap(Pixels(4.0))
+    .height(Auto)
+    .width(Stretch(1.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
+}
+
+fn build_haas_controls(cx: &mut Context) {
+    #[cfg(feature = "haas")]
+    VStack::new(cx, |cx| {
+        components::module_section(cx, "M/S GAIN", |cx| {
+            components::module_row(cx, |cx| {
+                components::create_gain_slider(cx, "MID", Data::params, |p| &p.haas_mid_gain);
+                components::create_gain_slider(cx, "SIDE", Data::params, |p| &p.haas_side_gain);
+            });
+        });
+        components::module_section(cx, "COMB", |cx| {
+            components::module_row(cx, |cx| {
+                components::create_param_slider(cx, "DEPTH", Data::params, |p| &p.haas_comb_depth);
+                components::create_param_slider(cx, "TIME", Data::params, |p| &p.haas_comb_time);
+            });
+            components::create_param_slider(cx, "MODE", Data::params, |p| &p.haas_comb_mode);
+        });
+        components::module_section(cx, "OUTPUT", |cx| {
+            components::create_param_slider(cx, "MIX", Data::params, |p| &p.haas_mix);
         });
     })
     .gap(Pixels(4.0))

@@ -1,5 +1,6 @@
 use crate::oversampler::Oversampler;
-use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
+use crate::shaping::biquad_coeffs;
+use biquad::{Biquad, DirectForm1, Type};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
 
@@ -152,13 +153,8 @@ impl TransformerModule {
     /// Create new transformer module
     pub fn new(sample_rate: f32) -> Self {
         // Initialize frequency response filters (flat by default)
-        let flat_coeff = Coefficients::<f32>::from_params(
-            Type::LowPass,
-            sample_rate.hz(),
-            20000.0_f32.hz(),
-            0.707,
-        )
-        .expect("LowPass filter should be valid");
+        let flat_coeff = biquad_coeffs(Type::LowPass, sample_rate, 20000.0, 0.707)
+            .expect("LowPass filter should be valid");
 
         // Oversamplers are called once per sample (inline use), so
         // `max_block_size = 1` is sufficient — each upsample/downsample pair
@@ -239,12 +235,9 @@ impl TransformerModule {
         };
         // Always update (even at 0 dB) so that model changes take effect immediately.
         let low_gain = low_response * 3.0; // ±3 dB
-        if let Ok(coeff) = Coefficients::<f32>::from_params(
-            Type::LowShelf(low_gain),
-            self.sample_rate.hz(),
-            low_freq.hz(),
-            0.707,
-        ) {
+        if let Ok(coeff) =
+            biquad_coeffs(Type::LowShelf(low_gain), self.sample_rate, low_freq, 0.707)
+        {
             self.low_shelf.update_coefficients(coeff);
         }
 
@@ -255,10 +248,10 @@ impl TransformerModule {
             TransformerModel::American => 10000.0,
         };
         let high_gain = high_response * 2.0; // ±2 dB
-        if let Ok(coeff) = Coefficients::<f32>::from_params(
+        if let Ok(coeff) = biquad_coeffs(
             Type::HighShelf(high_gain),
-            self.sample_rate.hz(),
-            high_freq.hz(),
+            self.sample_rate,
+            high_freq,
             0.707,
         ) {
             self.high_shelf.update_coefficients(coeff);

@@ -1,4 +1,21 @@
-use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type};
+use biquad::{Biquad, Coefficients, DirectForm1, Errors, Type};
+
+/// Workaround for biquad 0.5.0: its `Coefficients::from_params` has a
+/// frequency-normalization bug (computes `f0/(2*fs)` instead of `f0/(fs/2)`),
+/// producing a corner frequency 4× lower than requested. Every shelf/peaking
+/// filter in this project was silently being built at the wrong frequency.
+/// Use this helper instead — it calls `from_normalized_params` with the
+/// correct Nyquist=1 convention and clamps the normalized value just below
+/// Nyquist to avoid the `OutsideNyquist` error at high sample rates.
+pub fn biquad_coeffs(
+    filter_type: Type<f32>,
+    sample_rate: f32,
+    freq_hz: f32,
+    q: f32,
+) -> Result<Coefficients<f32>, Errors> {
+    let normalized = (freq_hz * 2.0 / sample_rate).clamp(1.0e-6, 0.999);
+    Coefficients::<f32>::from_normalized_params(filter_type, normalized, q)
+}
 
 /// Enum for the type of filter to use.
 pub enum FilterType {
@@ -7,9 +24,12 @@ pub enum FilterType {
     HighShelf,
 }
 
-/// A single biquad filter with parameters.
+/// A stereo biquad filter. Each channel carries its own state (z1, z2) so
+/// feeding interleaved L/R samples through one logical filter does not smear
+/// the transfer function — a single shared biquad fed LRLRLR corrupts its
+/// delay line and measurably reduces perceived gain on shelf/peaking curves.
 pub struct Filter {
-    filter: DirectForm1<f32>,
+    filter: [DirectForm1<f32>; 2],
 }
 
 impl Filter {
@@ -21,11 +41,14 @@ impl Filter {
             FilterType::HighShelf => Type::HighShelf(gain),
         };
 
-        let coeff = Coefficients::<f32>::from_params(filter_type, sample_rate.hz(), freq.hz(), q)
+        let coeff = biquad_coeffs(filter_type, sample_rate, freq, q)
             .expect("Failed to create filter coefficients");
 
         Self {
-            filter: DirectForm1::<f32>::new(coeff),
+            filter: [
+                DirectForm1::<f32>::new(coeff),
+                DirectForm1::<f32>::new(coeff),
+            ],
         }
     }
 
@@ -44,19 +67,19 @@ impl Filter {
             FilterType::HighShelf => Type::HighShelf(gain),
         };
 
-        let coeff = Coefficients::<f32>::from_params(filter_type, sample_rate.hz(), freq.hz(), q)
+        let coeff = biquad_coeffs(filter_type, sample_rate, freq, q)
             .expect("Failed to create filter coefficients");
 
         // Update coefficients without clearing filter memory
-        self.filter.update_coefficients(coeff);
+        self.filter[0].update_coefficients(coeff);
+        self.filter[1].update_coefficients(coeff);
     }
 
-    /// Process a single sample. Output is linear — callers own any saturation.
-    pub fn run(&mut self, sample: f32) -> f32 {
-        // Biquad filtering only. No inline clipping: hidden nonlinearity inside
-        // a chain of cascaded EQs aliases and smears the midrange. Headroom
-        // management is the job of an explicit saturator stage downstream.
-        self.filter.run(sample)
+    /// Process a single sample through a specific channel's state. Callers
+    /// iterating stereo audio MUST use the correct `ch` per sample (0 = L,
+    /// 1 = R) or the cross-channel smear returns.
+    pub fn run_ch(&mut self, sample: f32, ch: usize) -> f32 {
+        self.filter[ch.min(1)].run(sample)
     }
 }
 
@@ -319,9 +342,9 @@ mod tests {
         let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 0.0);
         // Warm up with DC
         for _ in 0..2000 {
-            f.run(0.5);
+            f.run_ch(0.5, 0);
         }
-        let out = f.run(0.5);
+        let out = f.run_ch(0.5, 0);
         assert!((out - 0.5).abs() < 0.01, "0 dB Bell steady-state: {out}");
     }
 
@@ -340,11 +363,11 @@ mod tests {
         let mut f2 = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 6.0);
         // Warm up both filters
         for _ in 0..2000 {
-            f1.run(0.1);
-            f2.run(0.2);
+            f1.run_ch(0.1, 0);
+            f2.run_ch(0.2, 0);
         }
-        let a = f1.run(0.1);
-        let b = f2.run(0.2);
+        let a = f1.run_ch(0.1, 0);
+        let b = f2.run_ch(0.2, 0);
         let ratio = b / a;
         assert!(
             (ratio - 2.0).abs() < 1e-3,
@@ -357,7 +380,7 @@ mod tests {
         // Even at +18 dB bell, output stays finite (no denormals or NaN).
         let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 18.0);
         for _ in 0..2000 {
-            let out = f.run(0.5);
+            let out = f.run_ch(0.5, 0);
             assert!(out.is_finite(), "Filter output must stay finite");
         }
     }
