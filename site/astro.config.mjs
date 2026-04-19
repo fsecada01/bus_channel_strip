@@ -7,7 +7,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Bus Channel Strip',
-      description: 'Six classic processors. One signal chain. Mix, compress, shape, and maximize — with analog transformer character.',
+      description: 'Seven classic processors. One signal chain. Mix, compress, shape, widen, and maximize — with analog transformer character.',
       social: {
         github: 'https://github.com/fsecada01/bus_channel_strip',
       },
@@ -29,6 +29,7 @@ export default defineConfig({
             { label: 'Pultec EQ', link: '/modules/pultec/' },
             { label: 'Dynamic EQ', link: '/modules/dynamic_eq/' },
             { label: 'Transformer', link: '/modules/transformer/' },
+            { label: 'Haas', link: '/modules/haas/' },
             { label: 'Punch', link: '/modules/punch/' },
           ],
         },

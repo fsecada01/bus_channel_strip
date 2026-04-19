@@ -7,6 +7,41 @@ For full release notes, binaries, and platform-specific archives, see the [GitHu
 
 ---
 
+## v0.5.0 — 2026-04
+
+### Pultec EQ — authentic LCR resonance and bandwidth control
+
+The LF section is completely remodeled to match the sound of the original EQP-1A hardware.
+
+- **LCR resonant bump**: A PeakingEQ at the shelf corner frequency (45% of shelf gain, Q=1.8) models the inductor resonance of the original hardware. This resonant peak is why Pultec LF boosts sound focused and punchy rather than soft and woolly.
+- **18 dB range** for both LF Boost and LF Cut (extended from ~8 dB).
+- **LF Boost Freq**: now spans 20–300 Hz with skewed scaling (was stepped 20/30/60/100 Hz).
+- **LF Cut Freq**: now spans 20–400 Hz with skewed scaling (was 20–200 Hz).
+- **New: LF Boost Bandwidth** — controls shelf width from narrow (Q=1.0) to wide (Q=0.25). At the default of 0.67, the shelf spreads through the musical 100–300 Hz range. This is the difference between a Pultec that sounds sub-only and one that sounds full and present on guitars, keys, and mix buses.
+- **New: LF Cut Bandwidth** — same Q mapping as LF Boost BW.
+- All filter math now routes through `shaping::biquad_coeffs` to apply the correct Nyquist normalization (`f0 * 2 / sr`), fixing the biquad 0.5.0 frequency normalization bug that was placing every filter at 1/4 its intended corner frequency.
+
+### New module: Haas stereo widener
+
+A psychoacoustic stereo widener using M/S encoding and Haas effect comb filtering.
+
+- **Two modes**: Side Comb (WOW-Thing style, mono-compatible) and Wide Comb (diffuse, L-R delay injection).
+- **Delay time**: 1–20 ms, Hermite-interpolated with one-pole smoothing (τ=20 ms) to prevent zipper noise on automation sweeps.
+- **RMS-safe output trim**: automatic gain compensation based on mid/side gains and comb depth.
+- **Anti-denormal protection**: Airwindows-style 1e-20 alternating dither in the delay line.
+- **Default position**: before Punch — so the clipper catches any widener-induced peaks before they hit the ceiling.
+- Feature flag: `haas` (enabled by default).
+
+### Plugin integration tests
+
+New `src/plugin_integration_tests.rs` file exercises the full plugin pipeline rather than isolated module tests. Catches parameter wiring failures, bypass default regressions, and coefficient initialization bugs. Currently covers Pultec module end-to-end.
+
+### CI fix
+
+`src/haas.rs` was missing from the repository (untracked locally). Added to git. The `haas` feature is in `[features] default`, so all CI targets were failing with `E0583: file not found for module 'haas'`.
+
+---
+
 ## v0.4.0 — 2026-03
 
 ### ButterComp2 — new compression models

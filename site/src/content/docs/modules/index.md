@@ -1,9 +1,9 @@
 ---
 title: Module Reference
-description: Overview of all six Bus Channel Strip DSP modules and their signal chain order.
+description: Overview of all seven Bus Channel Strip DSP modules and their signal chain order.
 ---
 
-Bus Channel Strip contains six DSP modules in a serial signal chain. Each module:
+Bus Channel Strip contains seven DSP modules in a serial signal chain. Each module:
 
 - Has an individual **bypass** switch
 - Is **fully automatable** (VST3 and CLAP)
@@ -23,6 +23,8 @@ Bus Channel Strip contains six DSP modules in a serial signal chain. Each module
   <span class="arrow">→</span>
   <span class="node node-xfm">Transformer</span>
   <span class="arrow">→</span>
+  <span class="node node-haas">Haas</span>
+  <span class="arrow">→</span>
   <span class="node node-punch">Punch</span>
 </div>
 
@@ -33,7 +35,8 @@ This default order reflects a classic mastering/bus processing workflow:
 3. **Tonal shaping** (Pultec) — add character after dynamics are controlled
 4. **Frequency-dependent dynamics** (Dynamic EQ) — surgical per-band control
 5. **Harmonic coloration** (Transformer) — analog warmth and character
-6. **Peak limiting** (Punch) — transparent ceiling with transient restoration
+6. **Stereo widening** (Haas) — spatial placement before the final ceiling
+7. **Peak limiting** (Punch) — transparent ceiling catches any widener-induced peaks
 
 ## Modules
 
@@ -41,7 +44,8 @@ This default order reflects a classic mastering/bus processing workflow:
 |--------|--------|---------|
 | [API5500 EQ](/bus_channel_strip/modules/api5500/) | Custom Rust | 5-band semi-parametric console EQ |
 | [ButterComp2](/bus_channel_strip/modules/buttercomp2/) | Airwindows C++ (FFI) | Bipolar interleaved glue compression |
-| [Pultec EQ](/bus_channel_strip/modules/pultec/) | Custom Rust | Passive EQP-1A style with tube saturation |
+| [Pultec EQ](/bus_channel_strip/modules/pultec/) | Custom Rust | Passive EQP-1A with LCR resonance, bandwidth control, 18 dB range |
 | [Dynamic EQ](/bus_channel_strip/modules/dynamic_eq/) | Custom Rust | 4-band frequency-dependent dynamics |
 | [Transformer](/bus_channel_strip/modules/transformer/) | Custom Rust | Analog transformer coloration (4 models) |
+| [Haas](/bus_channel_strip/modules/haas/) | Custom Rust | Psychoacoustic stereo widener (M/S + comb) |
 | [Punch](/bus_channel_strip/modules/punch/) | Custom Rust | Clipper + transient shaper, 8× oversampling |

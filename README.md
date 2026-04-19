@@ -17,7 +17,7 @@
 
 ---
 
-Bus Channel Strip is a single plugin that replaces six inserts on your master or stem bus. Load it once and run your mix through a console EQ, an Airwindows glue compressor, a passive tube EQ, a dynamic EQ with sidechain support, a vintage transformer stage, and a transparent loudness maximizer — in that order, or in any order you like.
+Bus Channel Strip is a single plugin that replaces seven inserts on your master or stem bus. Load it once and run your mix through a console EQ, an Airwindows glue compressor, a passive tube EQ, a dynamic EQ with sidechain support, a vintage transformer stage, a psychoacoustic stereo widener, and a transparent loudness maximizer — in that order, or in any order you like.
 
 Every module is individually bypassable and fully automatable. Every parameter reads as a clean integer in your DAW's automation lanes. The signal chain has a global bypass for zero-latency passthrough and RMS-based Auto Gain compensation so level differences don't fool your ears when you're comparing.
 
@@ -45,22 +45,18 @@ Go to [**Releases**](../../releases/latest) and grab the archive for your platfo
 
 ---
 
-## What's New in v0.4.0
+## What's New in v0.5.0
 
-- **ButterComp2 gets four compressor models** — Classic (original Airwindows bipolar algorithm), VCA, Optical, and FET. Each model changes the compression character while keeping the signature NY parallel blend intact.
-- **API5500 EQ layout redesigned** — LF and HF shelves now sit side by side in a two-column layout. The three parametric bands (LMF, MF, HMF) are ordered low to high, matching the physical console.
-- **Pultec HF controls restored** — HF boost bandwidth and HF cut knobs are now fully visible in the GUI.
-- **Transformer restructured** — Output saturation is now exposed as a dedicated control. The panel is organized into discrete INPUT, OUTPUT, and TONE sections.
-- **Integer parameter display** — All non-percentage parameters now display as clean integers in automation lanes. No more reading `−12.000000 dB` in your DAW.
-- **Global bypass** — Zero-latency passthrough toggle for the entire chain.
-- **Auto Gain compensation** — RMS-based gain correction with an ~5 second time constant. Keeps the bypassed and processed levels matched.
+- **Pultec EQ major upgrade** — Authentic LCR resonant bump at the shelf corner frequency models the real EQP-1A inductor resonance (45% of shelf gain at Q=1.8). LF Boost and LF Cut ranges extended to 18 dB each. LF Boost Freq range widened to 20–300 Hz and LF Cut Freq to 20–400 Hz. New **LF Boost Bandwidth** and **LF Cut Bandwidth** controls (Q=1.0 → Q=0.25 as bandwidth increases, default 0.67 is musical). All filter math now routes through `shaping::biquad_coeffs` to fix the biquad 0.5.0 frequency normalization bug.
+- **Haas Module** — New 7th module: psychoacoustic stereo widening via M/S encoding + Haas effect comb filtering. Two comb modes: **Side Comb** (WOW-Thing style, mono-compatible) and **Wide Comb** (diffuse, L-R delay injection). Hermite interpolation for smooth delay automation, RMS-safe automatic output trim, 1–20 ms delay range, and a dry/wet mix blend. Positioned before Punch so the clipper catches any widener-induced peaks.
+- **Plugin integration tests** — `src/plugin_integration_tests.rs` exercises the full signal pipeline (not just isolated modules) to catch regressions across the chain.
 
 ---
 
 ## The Signal Chain
 
 ```
-[API5500 EQ] -> [ButterComp2] -> [Pultec EQ] -> [Dynamic EQ] -> [Transformer] -> [Punch]
+[API5500 EQ] -> [ButterComp2] -> [Pultec EQ] -> [Dynamic EQ] -> [Transformer] -> [Haas] -> [Punch]
 ```
 
 Every module can be reordered by clicking its drag handle and swapping it with any other slot. Every module has an individual bypass switch. The chain is fully automatable — all ~90 parameters are exposed to your DAW.
@@ -73,9 +69,10 @@ Every module can be reordered by clicking its drag handle and swapping it with a
 |--------|----------|--------------------------|
 | **API5500 EQ** — *5-band semi-parametric* | Console EQ | Broad, musical shelving on the lows and highs, three overlapping parametric bands (LMF / MF / HMF) for surgical or broad-brush tonal shaping, and a high-pass filter. Gives the mix the forward, punchy character of a large-format API console. |
 | **ButterComp2** — *Airwindows bipolar interleaved* | Glue Compressor | The richest glue compressor in the chain. Chris Johnson's bipolar interleaved algorithm knits elements together without dulling transients. Four models — **Classic** (original Airwindows), **VCA**, **Optical**, and **FET** — give you density with attitude. Built-in NY parallel blend lets you dial in exactly how much cement you pour. |
-| **Pultec EQ** — *EQP-1A passive tube* | Tone Shaper | Simultaneous boost and cut on the same low frequency band: the classic Pultec trick for adding weight without muddiness. A tube saturation stage adds the harmonic richness that makes passive EQs sound like they cost more than your monitors. HF boost bandwidth and HF cut controls let you tame or open the top end the way a vintage unit would. |
+| **Pultec EQ** — *EQP-1A passive tube* | Tone Shaper | Simultaneous boost and cut on the same low frequency band: the classic Pultec trick for adding weight without muddiness. An authentic LCR resonant bump at the shelf corner models the original hardware's inductor resonance. LF Boost and Cut up to 18 dB each with independent bandwidth controls. Tube saturation adds harmonic richness. |
 | **Dynamic EQ** — *4-band frequency-dependent dynamics* | Surgical Dynamics | Compresses, expands, or gates each of four frequency bands independently — only when the level in that band crosses its threshold. A real-time spectral analyzer shows you what's happening while GR meters show how hard each band is working. Optional sidechain input for frequency-targeted ducking or de-essing driven by another signal. |
 | **Transformer** — *4 vintage hardware models* | Saturation / Color | Runs your signal through an emulated transformer core in four flavors: **Vintage** (Neve-style iron warmth), **Modern** (API-style punch), **British** (SSL-style clarity and grit), and **American** (custom character). Independent input and output transformer stages let you push the front end hard and tame the output separately. Frequency response shaping from the transformer model is included. |
+| **Haas** — *Psychoacoustic stereo widener* | Stereo Width | M/S encoding with independent mid/side gain, then Haas effect comb filtering in two modes: **Side Comb** (mono-compatible, WOW-Thing style) or **Wide Comb** (diffuse L-R delay injection). Hermite interpolation keeps automation smooth and click-free. RMS-safe automatic output trim. Positioned before Punch so the clipper catches any widener-induced peaks. |
 | **Punch** — *Clipper + transient shaper* | Loudness / Limiting | Final brick in the chain. Hard, Soft, and Cubic clipping modes push into the ceiling while up to 8x oversampling keeps aliasing out of the audible range. A pre-clip transient shaper (attack, sustain, release) lets you sculpt the attack shape before the limiter acts on it — the correct order for transient control without pumping. A parallel Mix knob blends the clipped signal with the dry for NY-style limiting. |
 
 ---
@@ -112,7 +109,7 @@ just qa           # fmt-check + lint + test
 ```cmd
 set LLVM_HOME=C:\Program Files\LLVM
 set LIBCLANG_PATH=C:\Program Files\LLVM\bin
-cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui"
+cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,haas,gui"
 ```
 
 Bundles output to `target/bundled/`.
@@ -170,6 +167,7 @@ src/
   pultec.rs        # Pultec EQP-1A tube EQ
   dynamic_eq.rs    # 4-band dynamic EQ
   transformer.rs   # Transformer saturation module
+  haas.rs          # Psychoacoustic stereo widener (M/S + Haas comb)
   punch.rs         # Clipper + transient shaper with oversampling
   editor.rs        # vizia GUI
   components.rs    # Reusable GUI components

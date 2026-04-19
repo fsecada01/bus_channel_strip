@@ -11,10 +11,10 @@ This document provides context and guidelines for AI assistance with the bus cha
 
 A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-based DSP modules in Rust.
 
-**Signal Flow**: `[API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer] → [Punch]`
+**Signal Flow**: `[API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer] → [Haas] → [Punch]`
 
 **Current Status**:
-- ✅ ALL 6 CORE MODULES IMPLEMENTED AND FUNCTIONAL (including Punch module)
+- ✅ ALL 7 CORE MODULES IMPLEMENTED AND FUNCTIONAL (including Haas and Punch modules)
 - ✅ MODULE REORDERING SYSTEM COMPLETE
 - ✅ PROFESSIONAL PARAMETER SET (~75 parameters)
 - ✅ ALL COMPILATION ERRORS FIXED
@@ -97,6 +97,7 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - `src/pultec.rs` - Custom Pultec EQP-1A style EQ with tube saturation
 - `src/dynamic_eq.rs` - 4-band dynamic EQ with frequency-dependent compression
 - `src/transformer.rs` - Transformer coloration module (4 vintage models)
+- `src/haas.rs` - Psychoacoustic stereo widener (M/S encoding + Haas effect comb filtering, two modes)
 - `src/punch.rs` - Clipper + Transient Shaper module (hard/soft/cubic clip, 8x oversampling, transient detection)
 - `src/editor.rs` - Professional vizia GUI implementation (working, responsive 1800x650 default)
 - `src/components.rs` - Reusable vizia UI components
@@ -152,9 +153,10 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - Custom C++ FFI wrappers in `cpp/`
 
 **Feature Flags:**
-- Default features: `api5500`, `buttercomp2`, `pultec`, `transformer`, `punch`, `gui`
+- Default features: `api5500`, `buttercomp2`, `pultec`, `transformer`, `punch`, `haas`, `gui`
 - Optional: `dynamic_eq` (4-band dynamic EQ with hierarchical sub-features)
 - Optional: `punch` (Clipper + Transient Shaper with oversampling)
+- Optional: `haas` (Haas stereo widener module)
 - Build with specific modules: `cargo build --features "api5500,pultec,punch"`
 
 ## Known Issues & Fixes
@@ -186,7 +188,7 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 ```cmd
 set LLVM_HOME=C:\Program Files\LLVM
 set LIBCLANG_PATH=C:\Program Files\LLVM\bin
-cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,punch,gui"
+cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,punch,haas,gui"
 ```
 
 **Or use the build script:** `bin\preflight_build_simple.bat`

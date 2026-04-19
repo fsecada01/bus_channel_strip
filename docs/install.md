@@ -100,7 +100,7 @@ just qa
 set LLVM_HOME=C:\Program Files\LLVM
 set LIBCLANG_PATH=C:\Program Files\LLVM\bin
 cargo +nightly run --package xtask -- bundle bus_channel_strip --release ^
-  --features "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui"
+  --features "api5500,buttercomp2,pultec,transformer,haas,punch,dynamic_eq,gui"
 ```
 
 Output bundles are in `target/bundled/`.
@@ -113,6 +113,7 @@ Output bundles are in `target/bundled/`.
 | `buttercomp2` | ButterComp2 compressor (includes C++ FFI compilation) |
 | `pultec` | Pultec EQ module |
 | `transformer` | Transformer module |
+| `haas` | Haas psychoacoustic stereo widener |
 | `punch` | Punch clipper + transient shaper |
 | `dynamic_eq` | 4-band Dynamic EQ with spectral analyzer |
 | `gui` | vizia-plug GUI (requires nightly Rust + LLVM on Windows) |
@@ -120,7 +121,7 @@ Output bundles are in `target/bundled/`.
 All features are enabled by default. Build without GUI for CI/headless environments:
 
 ```bash
-cargo build --features "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq"
+cargo build --features "api5500,buttercomp2,pultec,transformer,haas,punch,dynamic_eq"
 ```
 
 ---

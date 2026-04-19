@@ -1,6 +1,6 @@
 # Module Reference
 
-Bus Channel Strip contains six DSP modules arranged in a serial signal chain. Each module:
+Bus Channel Strip contains seven DSP modules arranged in a serial signal chain. Each module:
 
 - Has an individual **bypass** switch
 - Is **fully automatable** (VST3 and CLAP)
@@ -22,6 +22,8 @@ Bus Channel Strip contains six DSP modules arranged in a serial signal chain. Ea
   <span class="arrow">→</span>
   <span class="node node-xfm">Transformer</span>
   <span class="arrow">→</span>
+  <span class="node node-haas">Haas</span>
+  <span class="arrow">→</span>
   <span class="node node-punch">Punch</span>
 </div>
 
@@ -32,7 +34,8 @@ This default order reflects a classic mastering/bus processing workflow:
 3. **Tonal shaping** (Pultec) — add character after dynamics are controlled
 4. **Frequency-dependent dynamics** (Dynamic EQ) — surgical per-band control
 5. **Harmonic coloration** (Transformer) — analog warmth and character
-6. **Peak limiting** (Punch) — transparent ceiling with transient restoration
+6. **Stereo widening** (Haas) — psychoacoustic width before final limiting
+7. **Peak limiting** (Punch) — transparent ceiling with transient restoration; catches any widener-induced peaks
 
 ---
 
@@ -45,4 +48,5 @@ This default order reflects a classic mastering/bus processing workflow:
 | :material-radio: | [Pultec EQ](pultec.md) | Custom Rust implementation |
 | :material-chart-bell-curve: | [Dynamic EQ](dynamic_eq.md) | Custom Rust implementation |
 | :material-power-plug: | [Transformer](transformer.md) | Custom Rust implementation |
+| :material-surround-sound: | [Haas](haas.md) | Custom Rust implementation |
 | :material-lightning-bolt: | [Punch](punch.md) | Custom Rust implementation |
