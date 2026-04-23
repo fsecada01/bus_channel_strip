@@ -1,31 +1,56 @@
 # 🎨 Bus Channel Strip GUI Design
 
-## **Professional GUI Implementation Complete!**
+> **Design direction in flux.** The GUI is migrating from the fixed
+> horizontal strip documented below to a slot-and-library rack model
+> inspired by Slate Digital VMR and Audio Assault Mix Locker. See
+> [`MULTI_FX_UI_DESIGN.md`](./MULTI_FX_UI_DESIGN.md) for the target
+> architecture, component specifications, and staged migration plan.
+> Sections in this document marked **[current]** describe the shipping
+> implementation; sections marked **[target]** describe the new design.
 
-This document describes the comprehensive GUI design for our professional bus channel strip plugin. The implementation provides a hardware-inspired interface with color-coded modules and intuitive workflow.
+This document describes the GUI design for the professional bus channel
+strip plugin. The current implementation provides a hardware-inspired
+interface with color-coded modules; the next iteration restructures the
+layout around reorderable slots and a module library.
 
 ## **🖼️ GUI Architecture**
 
-### **Layout Overview**
+### **Layout Overview [current]**
 - **Default Size**: 1800x650 pixels (responsive, adapts to DAW window)
 - **Minimum Size**: 1680x620 pixels (ensures all modules visible)
-- **Horizontal Strip Layout**: 5 modules side-by-side (320px each)
+- **Horizontal Strip Layout**: modules side-by-side with per-module widths (140–320px)
 - **Color-Coded Modules**: Based on AGENTS.md guidelines
 - **Master Section**: Header area with gain controls
 - **Responsive**: Uses vizia Stretch(1.0) units to adapt to window resizing
+
+### **Layout Overview [target]**
+- **Rack of 6 slots** replacing fixed module columns
+- **Normalized slot width** (220px compact, 440px double-wide, 600px focused)
+- **Module library** accessible via top-bar dropdown
+- **Chain mini-map** showing whole signal flow above the rack
+- **Focus view** expands one slot; siblings collapse to 80px header cards
+- **Chain preset selector** in the top bar for stock + user chains
+- Full specification in [`MULTI_FX_UI_DESIGN.md`](./MULTI_FX_UI_DESIGN.md)
 
 ### **Signal Flow Visualization**
 ```
 [API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer] → [PUNCH]
 ```
 
+The signal chain is driven by the `module_order_1..6` parameters; order
+above is the default, not a fixed routing.
+
 ### **Module Reordering**
 - **Backend**: Parameters `module_order_1` through `module_order_6` control signal flow
-- **Current UI**: Not yet implemented - modules appear in fixed positions
-- **TODO**: Add dropdown selectors above each module slot to change module order
-- **Workaround**: Use DAW automation to change module order parameters
+- **Current UI [current]**: Not implemented — modules appear in fixed positions; DAW automation is the workaround
+- **Target UI [target]**: Drag-to-reorder via slot title-bar handles, plus a library picker for adding / replacing / removing modules. Empty slots are first-class (sentinel index in `module_order_*`). See `MULTI_FX_UI_DESIGN.md` §Interaction Model.
 
-## **🎛️ Module Layout & Colors**
+## **🎛️ Module Layout & Colors [current]**
+
+> In the target rack design, per-module widths are replaced by a uniform
+> slot width with an optional double-wide flag for dense modules
+> (Dynamic EQ, Transformer, Punch). Color coding is preserved verbatim.
+
 
 ### **1. API5500 EQ Module (180px wide)**
 - **Colors**: Blue-gray background (#3C5064), Cyan accents (#00C8FF)
@@ -313,24 +338,43 @@ just fmt
 
 ## **Future Enhancements**
 
-### **Phase 2 Features**
-- **Module Reordering UI**: Dropdown selectors per slot (backend `module_order_*` params exist; UI pending)
-- **Spectrum Analyzer**: Real-time frequency display per EQ module
-- **Preset Browser**: Visual preset management
-- **Skin Support**: Multiple visual themes
+### **Rack Redesign (active)**
+Tracked in [`MULTI_FX_UI_DESIGN.md`](./MULTI_FX_UI_DESIGN.md). Staged rollout:
+1. Slot component scaffolding (wrap existing modules in slot chrome)
+2. Module library + drag-to-slot add/replace
+3. Focus view + sibling collapse + keyboard shortcuts
+4. Chain presets (stock chains + user saves)
+5. Mini-map, drop indicators, polish
 
-### **Advanced Features**
-- **MIDI Learn**: Parameter automation mapping
-- **A/B Compare**: Settings comparison
+### **Phase 2 Features (beyond rack redesign)**
+- **Spectrum Analyzer**: Real-time frequency display per EQ module
+- **Preset Browser**: Visual preset management (distinct from chain presets)
+
+### **Deferred / Non-Goals**
+- **Skin Support** — single polished theme preferred
+- **MIDI Learn** — parameter automation mapping
+- **A/B Compare** — settings comparison
+- **Macro Controls** — VMR-style multi-param knobs (see `MULTI_FX_UI_DESIGN.md` §Non-Goals)
+- **Simple/Advanced mode toggle** — focus view covers the same need
 
 ## **Status**
 
+### Shipping (current fixed-strip layout)
 ✅ vizia-plug integration complete (ECS, Skia rendering)
 ✅ All 6 module UIs implemented
 ✅ Responsive layout (1800x650 default, 1680x620 minimum)
 ✅ All parameters bound to vizia Lens system
 ✅ Plugin passes DAW testing (Reaper) — "sounds great!"
 🔧 Module reordering GUI not yet implemented (DAW automation workaround available)
+
+### Rack redesign (in progress on `claude/multi-fx-ui-design-q9OpV`)
+📐 Design doc: [`MULTI_FX_UI_DESIGN.md`](./MULTI_FX_UI_DESIGN.md)
+⬜ Slot component scaffolding
+⬜ Module library picker
+⬜ Drag-to-reorder
+⬜ Focus view
+⬜ Chain presets
+⬜ Signal-flow mini-map
 
 ---
 
