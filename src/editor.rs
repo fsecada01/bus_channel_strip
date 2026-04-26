@@ -254,10 +254,18 @@ impl Model for Data {
                     Some(cur) if cur == idx => None,
                     _ => Some(idx),
                 };
+                // Clear any stale click-to-swap selection — entering focus
+                // mode is a context switch and a half-completed swap from
+                // before the focus shift would surprise the user on their
+                // next drag-handle click.
+                self.drag_slot = None;
+                self.hovered_slot = None;
             }
 
             AppEvent::ClearFocus => {
                 self.focused_slot = None;
+                self.drag_slot = None;
+                self.hovered_slot = None;
             }
 
             AppEvent::LoadChain(idx) => {
@@ -1051,16 +1059,12 @@ fn build_chain_minimap(cx: &mut Context) {
                     "minimap-pill-focused",
                     Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
                 )
-                .on_press(move |cx| {
-                    if !is_empty {
-                        cx.emit(AppEvent::ToggleFocusSlot(slot_idx));
-                    }
-                })
-                .cursor(if is_empty {
-                    CursorIcon::Default
-                } else {
-                    CursorIcon::Hand
-                })
+                // Empty pills are clickable too — focusing one promotes
+                // the slot to full-size and surfaces the library picker,
+                // matching the keyboard 1..7 behavior and the module-name
+                // click on filled slots.
+                .on_press(move |cx| cx.emit(AppEvent::ToggleFocusSlot(slot_idx)))
+                .cursor(CursorIcon::Hand)
                 .height(Pixels(20.0))
                 .width(Pixels(56.0))
                 .alignment(Alignment::Center);
@@ -1360,9 +1364,9 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
         HStack::new(cx, |cx| {
             // Module name + subtitle. Wrapped in a focus-toggle target:
             // clicking the name area enters focus mode for this slot, or
-            // exits if it's already focused. Empty slots are not
-            // focusable — there's nothing to inspect.
-            let focusable = mt != ModuleType::Empty;
+            // exits if it's already focused. Empty slots ARE focusable —
+            // focusing one renders the slot full-size, which surfaces the
+            // library picker. This matches the keyboard 1..7 behavior.
             VStack::new(cx, |cx| {
                 Label::new(cx, module_type_name(mt))
                     .class("module-name")
@@ -1381,24 +1385,19 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
                 "module-name-target-focused",
                 Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
             )
-            .on_press(move |cx| {
-                if focusable {
-                    cx.emit(AppEvent::ToggleFocusSlot(slot_idx));
-                }
-            })
-            .cursor(if focusable {
-                CursorIcon::Hand
-            } else {
-                CursorIcon::Default
-            })
+            .on_press(move |cx| cx.emit(AppEvent::ToggleFocusSlot(slot_idx)))
+            .cursor(CursorIcon::Hand)
             .height(Auto)
             .width(Stretch(1.0));
 
             // Eject button — removes the module from the slot, returning
             // the slot to its empty/picker state. Distinct from hide
             // (which only collapses presentation) and bypass (which
-            // disables DSP but keeps the module in the chain).
-            build_eject_button(cx, slot_idx);
+            // disables DSP but keeps the module in the chain). Skipped
+            // on Empty slots since there's nothing to eject.
+            if mt != ModuleType::Empty {
+                build_eject_button(cx, slot_idx);
+            }
 
             // Hide button — collapses the slot to a narrow tab. Sits next to
             // the LED so it's discoverable but unobtrusive.

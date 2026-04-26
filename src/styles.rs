@@ -255,20 +255,6 @@ pub const COMPONENT_STYLES: &str = r#"
     letter-spacing: 1.2px;
 }
 
-.signal-flow-hint {
-    font-size: 10px;
-    font-weight: 400;
-    color: #707886;
-    font-style: italic;
-}
-
-.signal-flow-params {
-    font-size: 9px;
-    font-weight: 400;
-    color: #5d6672;
-    font-family: monospace;
-}
-
 /* ── Chain preset selector ─────────────────────────────────────────────────
    Compact horizontal button row inside the chassis header. Each button is
    a tag (3-char code) over a name. Visually borrows the zoom-btn aesthetic
@@ -1249,7 +1235,6 @@ scrollbar .thumb:hover {
 .zoom-75 .dyneq-band-title   { font-size: 10px; }
 .zoom-75 .chassis-brand      { font-size: 13px; }
 .zoom-75 .chassis-title      { font-size: 10px; }
-.zoom-75 .signal-flow-hint   { font-size: 9px;  }
 
 .zoom-125 .module-name       { font-size: 18px; }
 .zoom-125 .module-type       { font-size: 15px; }
@@ -1259,7 +1244,6 @@ scrollbar .thumb:hover {
 .zoom-125 .dyneq-band-title  { font-size: 15px; }
 .zoom-125 .chassis-brand     { font-size: 22px; }
 .zoom-125 .chassis-title     { font-size: 16px; }
-.zoom-125 .signal-flow-hint  { font-size: 13px; }
 
 .zoom-150 .module-name       { font-size: 22px; }
 .zoom-150 .module-type       { font-size: 18px; }
@@ -1269,7 +1253,6 @@ scrollbar .thumb:hover {
 .zoom-150 .dyneq-band-title  { font-size: 18px; }
 .zoom-150 .chassis-brand     { font-size: 26px; }
 .zoom-150 .chassis-title     { font-size: 19px; }
-.zoom-150 .signal-flow-hint  { font-size: 15px; }
 
 .zoom-200 .module-name       { font-size: 28px; }
 .zoom-200 .module-type       { font-size: 23px; }
@@ -1279,6 +1262,5 @@ scrollbar .thumb:hover {
 .zoom-200 .dyneq-band-title  { font-size: 23px; }
 .zoom-200 .chassis-brand     { font-size: 34px; }
 .zoom-200 .chassis-title     { font-size: 25px; }
-.zoom-200 .signal-flow-hint  { font-size: 19px; }
 
 "#;
