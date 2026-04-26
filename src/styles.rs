@@ -519,6 +519,94 @@ pub const COMPONENT_STYLES: &str = r#"
     background: rgba(200, 60, 60, 0.08);
 }
 
+/* Eject button — header-mounted control that removes the slot's module and
+   returns it to the picker state. Visually distinct from the hide button:
+   uses the eject glyph (⏏) and a faint amber tint on hover so it reads as a
+   destructive action without screaming for attention. */
+.eject-btn {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    alignment: center;
+}
+.eject-btn:hover {
+    border-color: #6a4a18;
+    background: rgba(220, 160, 50, 0.08);
+}
+.eject-btn-glyph {
+    font-size: 13px;
+    font-weight: 700;
+    color: #7a8090;
+    text-align: center;
+    height: 14px;
+    width: 1s;
+}
+.eject-btn:hover .eject-btn-glyph {
+    color: #ffd070;
+}
+
+/* Empty slot theme — neutral steel border, dashed feel via a subtle muted
+   gradient. Distinct from real-module themes so users can scan the rack and
+   immediately see which slots are unoccupied. */
+.empty-theme {
+    border: 3px dashed #6e7480 !important;
+    background: linear-gradient(165deg, #1e2128 0%, #181a20 45%, #14161b) !important;
+}
+.empty-theme .module-name {
+    color: #9aa0ae;
+    font-style: italic;
+}
+.empty-theme .module-type {
+    color: #6e7480;
+}
+
+/* Library picker — the body of an empty slot. Vertical stack of one row per
+   available module type. Each row reads as a clickable card with the
+   module's accent color in the title; the subtitle stays muted. */
+.library-picker {
+    padding-top: 4px;
+}
+.picker-header {
+    font-size: 11px;
+    font-weight: 700;
+    color: #c8ccd4;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: 4px;
+    height: 16px;
+}
+.picker-row {
+    padding: 6px 8px;
+    background: rgba(40, 44, 52, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+}
+.picker-row:hover {
+    background: rgba(60, 66, 78, 0.85);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.picker-row-name {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    height: 14px;
+}
+.picker-row-subtitle {
+    font-size: 10px;
+    font-weight: 500;
+    color: #8a909a;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    height: 12px;
+}
+
 /* Collapsed tab layout — 56px wide strip containing the 3-char module tag
    and a full-height expand button. The tab keeps the theme border color so
    the chain remains visually readable even with several modules collapsed. */

@@ -25,6 +25,10 @@ use crate::{BusChannelStripParams, ModuleType};
 #[derive(Debug, Clone, Copy)]
 pub enum AppEvent {
     SelectSlot(usize),
+    /// Assign a specific ModuleType to a slot. Used by the library picker
+    /// (Empty slot → fill with chosen module) and the eject action
+    /// (filled slot → ModuleType::Empty).
+    SetSlotModule(usize, ModuleType),
     /// Open the full-screen DynEQ back view.
     OpenDynEq,
     /// Return from DynEQ back view to the strip front view.
@@ -151,6 +155,22 @@ impl Model for Data {
                 cx.emit(RawParamEvent::EndSetParameter(thresh_ptr));
             }
 
+            AppEvent::SetSlotModule(slot, mt) => {
+                // Direct param write — bypasses the swap logic so a slot can
+                // become Empty (eject) or be filled from the library picker
+                // without disturbing other slots. The audio dispatcher's
+                // dedup loop tolerates duplicates harmlessly, but the picker
+                // filters to prevent them at the UI level.
+                let ptr = slot_param_ptr(&self.params, *slot);
+                let norm = slot_preview_normalized(&self.params, *slot, *mt);
+                cx.emit(RawParamEvent::BeginSetParameter(ptr));
+                cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+                cx.emit(RawParamEvent::EndSetParameter(ptr));
+                // Clear any in-flight swap selection — replacing a slot's
+                // contents while a swap is staged would be ambiguous.
+                self.drag_slot = None;
+            }
+
             AppEvent::SelectSlot(idx) => {
                 let idx = *idx;
                 match self.drag_slot {
@@ -237,6 +257,7 @@ fn slot_preview_normalized(
 
 /// Converts ModuleType to usize for use as a vizia Binding lens target.
 /// vizia's `Binding::new` requires `Target: Data`; usize satisfies that.
+/// Empty maps to 7 to keep indices 0..6 stable for the seven real modules.
 fn module_type_to_usize(mt: ModuleType) -> usize {
     match mt {
         ModuleType::Api5500EQ => 0,
@@ -246,6 +267,7 @@ fn module_type_to_usize(mt: ModuleType) -> usize {
         ModuleType::Transformer => 4,
         ModuleType::Punch => 5,
         ModuleType::Haas => 6,
+        ModuleType::Empty => 7,
     }
 }
 
@@ -257,9 +279,22 @@ fn usize_to_module_type(idx: usize) -> ModuleType {
         3 => ModuleType::DynamicEQ,
         4 => ModuleType::Transformer,
         5 => ModuleType::Punch,
-        _ => ModuleType::Haas,
+        6 => ModuleType::Haas,
+        _ => ModuleType::Empty,
     }
 }
+
+/// Canonical list of real (non-Empty) modules in display order. Used by the
+/// library picker and the duplicate repair pass.
+const ALL_REAL_MODULES: [ModuleType; 7] = [
+    ModuleType::Api5500EQ,
+    ModuleType::ButterComp2,
+    ModuleType::PultecEQ,
+    ModuleType::DynamicEQ,
+    ModuleType::Transformer,
+    ModuleType::Punch,
+    ModuleType::Haas,
+];
 
 fn module_type_to_theme(mt: ModuleType) -> ModuleTheme {
     match mt {
@@ -270,6 +305,7 @@ fn module_type_to_theme(mt: ModuleType) -> ModuleTheme {
         ModuleType::Transformer => ModuleTheme::Transformer,
         ModuleType::Punch => ModuleTheme::Punch,
         ModuleType::Haas => ModuleTheme::Haas,
+        ModuleType::Empty => ModuleTheme::Empty,
     }
 }
 
@@ -282,6 +318,7 @@ fn module_type_name(mt: ModuleType) -> &'static str {
         ModuleType::Transformer => "Console/Tape",
         ModuleType::Punch => "PUNCH",
         ModuleType::Haas => "HAAS",
+        ModuleType::Empty => "EMPTY SLOT",
     }
 }
 
@@ -297,6 +334,9 @@ fn is_module_hidden(params: &Arc<BusChannelStripParams>, mt: ModuleType) -> bool
         ModuleType::Transformer => params.hide_transformer.value(),
         ModuleType::Punch => params.hide_punch.value(),
         ModuleType::Haas => params.hide_haas.value(),
+        // Empty slots are never collapsible: there is no module to hide and
+        // the picker affordance must stay reachable.
+        ModuleType::Empty => false,
     }
 }
 
@@ -311,6 +351,7 @@ fn module_type_short_name(mt: ModuleType) -> &'static str {
         ModuleType::Transformer => "TRF",
         ModuleType::Punch => "PCH",
         ModuleType::Haas => "HAS",
+        ModuleType::Empty => "—",
     }
 }
 
@@ -354,6 +395,8 @@ fn build_hide_button_for_type(cx: &mut Context, mt: ModuleType) {
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
+        // Empty slots have nothing to hide.
+        ModuleType::Empty => {}
     }
 }
 
@@ -396,14 +439,34 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
+        // Empty slots are never collapsed (is_module_hidden returns false).
+        ModuleType::Empty => {}
     }
 }
 
+/// Eject button — shown in the header of every filled slot. Clicking writes
+/// `ModuleType::Empty` to the slot's `module_order_*` param, returning the
+/// slot to the picker state. Distinct from the hide button (which only
+/// collapses the visual presentation) because eject removes the module from
+/// the audio chain entirely.
+///
+/// Wrapped in an HStack because vizia's `on_press` is reliably absorbed by
+/// container views; bare Labels often pass pointer events through to their
+/// parent, which would cause clicks to fall back to the drag handle row.
+fn build_eject_button(cx: &mut Context, slot_idx: usize) {
+    HStack::new(cx, |cx| {
+        Label::new(cx, "\u{23CF}").class("eject-btn-glyph"); // ⏏
+    })
+    .class("eject-btn")
+    .on_press(move |cx| cx.emit(AppEvent::SetSlotModule(slot_idx, ModuleType::Empty)))
+    .cursor(CursorIcon::Hand);
+}
+
 /// One-shot repair for saved sessions whose `module_order_*` values now collide
-/// (e.g. schema upgrades that added a new slot whose default overlaps with an
-/// existing slot). Walks slots 0..7, finds duplicated module types, and fires
-/// RawParamEvent writes to replace later duplicates with missing module types
-/// in canonical order. No-op when all 7 slots already hold unique types.
+/// on a real module (e.g. older schema migrations). Walks slots 0..7, finds
+/// duplicated *real* module types, and rewrites later duplicates to
+/// `ModuleType::Empty`. Empty slots are valid in any position and are
+/// skipped by the dedup check.
 fn repair_module_order(cx: &mut Context, params: &Arc<BusChannelStripParams>) {
     let raw = [
         params.module_order_1.value(),
@@ -414,9 +477,12 @@ fn repair_module_order(cx: &mut Context, params: &Arc<BusChannelStripParams>) {
         params.module_order_6.value(),
         params.module_order_7.value(),
     ];
-    let mut seen = [false; 7];
+    let mut seen = [false; 7]; // indices 0..6 cover real modules only
     let mut dupe_slots: Vec<usize> = Vec::new();
     for (i, mt) in raw.iter().enumerate() {
+        if *mt == ModuleType::Empty {
+            continue;
+        }
         let idx = module_type_to_usize(*mt);
         if seen[idx] {
             dupe_slots.push(i);
@@ -428,26 +494,12 @@ fn repair_module_order(cx: &mut Context, params: &Arc<BusChannelStripParams>) {
         return;
     }
 
-    // Fill in the missing types in canonical order — same order the plugin
-    // ships with on a fresh instance so the repaired chain looks predictable.
-    let canonical = [
-        ModuleType::Api5500EQ,
-        ModuleType::ButterComp2,
-        ModuleType::PultecEQ,
-        ModuleType::DynamicEQ,
-        ModuleType::Transformer,
-        ModuleType::Punch,
-        ModuleType::Haas,
-    ];
-    let missing: Vec<ModuleType> = canonical
-        .iter()
-        .copied()
-        .filter(|mt| !seen[module_type_to_usize(*mt)])
-        .collect();
-
-    for (dupe_slot, new_mt) in dupe_slots.iter().zip(missing.iter()) {
-        let ptr = slot_param_ptr(params, *dupe_slot);
-        let norm = slot_preview_normalized(params, *dupe_slot, *new_mt);
+    // Replace duplicates with Empty — preserves the user's intent
+    // (the first occurrence stays where it is) without inventing a new
+    // module the user didn't explicitly choose.
+    for dupe_slot in dupe_slots {
+        let ptr = slot_param_ptr(params, dupe_slot);
+        let norm = slot_preview_normalized(params, dupe_slot, ModuleType::Empty);
         cx.emit(RawParamEvent::BeginSetParameter(ptr));
         cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
         cx.emit(RawParamEvent::EndSetParameter(ptr));
@@ -463,6 +515,7 @@ fn module_type_subtitle(mt: ModuleType) -> &'static str {
         ModuleType::Transformer => "TRANSFORMER",
         ModuleType::Punch => "CLIP + TRANSIENT",
         ModuleType::Haas => "STEREO WIDENER",
+        ModuleType::Empty => "PICK A MODULE",
     }
 }
 
@@ -798,6 +851,12 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
             .height(Auto)
             .width(Stretch(1.0));
 
+            // Eject button — removes the module from the slot, returning
+            // the slot to its empty/picker state. Distinct from hide
+            // (which only collapses presentation) and bypass (which
+            // disables DSP but keeps the module in the chain).
+            build_eject_button(cx, slot_idx);
+
             // Hide button — collapses the slot to a narrow tab. Sits next to
             // the LED so it's discoverable but unobtrusive.
             build_hide_button_for_type(cx, mt);
@@ -819,7 +878,7 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
         build_bypass_button_for_type(cx, mt);
 
         // ── Parameter controls ───────────────────────────────────────
-        build_controls_for_type(cx, mt);
+        build_controls_for_type(cx, mt, slot_idx);
     })
     // alignment(TopLeft) packs children to the top-left instead of
     // the default center which distributes Stretch space around items.
@@ -916,6 +975,8 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
                 .with_label("")
                 .class("module-led-indicator");
         }
+        // No LED for empty slots — there is nothing to indicate.
+        ModuleType::Empty => {}
     }
 }
 
@@ -945,6 +1006,8 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
             #[cfg(feature = "haas")]
             components::create_active_led_button(cx, |p| &p.haas_bypass);
         }
+        // No bypass for empty slots — pass-through is unconditional.
+        ModuleType::Empty => {}
     }
 }
 
@@ -952,7 +1015,7 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
 // Parameter Controls — dispatched by module type
 // ============================================================================
 
-fn build_controls_for_type(cx: &mut Context, mt: ModuleType) {
+fn build_controls_for_type(cx: &mut Context, mt: ModuleType, slot_idx: usize) {
     match mt {
         ModuleType::Api5500EQ => build_api5500_controls(cx),
         ModuleType::ButterComp2 => build_buttercomp2_controls(cx),
@@ -961,7 +1024,64 @@ fn build_controls_for_type(cx: &mut Context, mt: ModuleType) {
         ModuleType::Transformer => build_transformer_controls(cx),
         ModuleType::Punch => build_punch_controls(cx),
         ModuleType::Haas => build_haas_controls(cx),
+        ModuleType::Empty => build_library_picker(cx, slot_idx),
     }
+}
+
+// ============================================================================
+// Library Picker — body content for empty slots
+// ============================================================================
+
+/// Renders the module library inside an empty slot. Lists every real
+/// ModuleType that is not currently assigned to another slot; clicking a
+/// row writes that ModuleType to this slot's `module_order_*` param.
+///
+/// Wrapped in a Binding over a "taken" bitset so it rebuilds whenever any
+/// slot's contents change — picking a module elsewhere immediately removes
+/// it from this picker's list.
+fn build_library_picker(cx: &mut Context, slot_idx: usize) {
+    let taken_lens = Data::params.map(move |p| {
+        let mut bits: u8 = 0;
+        for s in 0..7 {
+            let mt = slot_module_type(p, s);
+            if mt != ModuleType::Empty {
+                bits |= 1u8 << module_type_to_usize(mt);
+            }
+        }
+        bits
+    });
+
+    Binding::new(cx, taken_lens, move |cx, taken_b| {
+        let taken = taken_b.get(cx);
+        VStack::new(cx, |cx| {
+            Label::new(cx, "ADD MODULE").class("picker-header");
+            for mt in ALL_REAL_MODULES {
+                let bit = 1u8 << module_type_to_usize(mt);
+                if taken & bit != 0 {
+                    continue;
+                }
+                let theme = module_type_to_theme(mt);
+                let name = module_type_name(mt);
+                let subtitle = module_type_subtitle(mt);
+                VStack::new(cx, |cx| {
+                    Label::new(cx, name)
+                        .class("picker-row-name")
+                        .color(theme.accent_color());
+                    Label::new(cx, subtitle).class("picker-row-subtitle");
+                })
+                .class("picker-row")
+                .on_press(move |cx| cx.emit(AppEvent::SetSlotModule(slot_idx, mt)))
+                .cursor(CursorIcon::Hand)
+                .height(Auto)
+                .width(Stretch(1.0))
+                .gap(Pixels(2.0));
+            }
+        })
+        .class("library-picker")
+        .height(Auto)
+        .width(Stretch(1.0))
+        .gap(Pixels(4.0));
+    });
 }
 
 fn build_api5500_controls(cx: &mut Context) {
