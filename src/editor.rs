@@ -838,6 +838,13 @@ pub(crate) fn create(
             .height(Pixels(80.0))
             .width(Stretch(1.0));
 
+            // ── Chain mini-map ──────────────────────────────────────────────
+            // Compact horizontal pill strip showing the entire signal chain
+            // at a glance. Crucial in focus mode where the rack itself only
+            // shows one slot's contents — the mini-map keeps the whole
+            // chain visible. Clicking a pill jumps focus to that slot.
+            build_chain_minimap(cx);
+
             // ── Strip view ──────────────────────────────────────────────────
             // Library sidebar (left) + scrollable rack (right). The sidebar
             // is a global module palette: click a not-in-rack module to
@@ -900,6 +907,77 @@ pub(crate) fn create(
         // and the strip ScrollView reveals off-screen slots when content
         // grows past the window width.
     })
+}
+
+// Chain mini-map — horizontal strip of compact pills, one per slot, sitting
+// between the chassis header and the rack. Each pill shows the module's
+// 3-char tag in the module's accent color, with an arrow glyph between
+// adjacent pills to communicate signal flow. Empty slots render as dashed
+// outlines. Clicking a pill focuses that slot.
+//
+// Two reactive layers:
+//   • Data::params — rebuild the pill row when any module_order_* changes
+//   • Data::focused_slot — toggle a per-pill 'focused' class without
+//     rebuilding (so focus changes don't tear down the strip)
+fn build_chain_minimap(cx: &mut Context) {
+    HStack::new(cx, |cx| {
+        // Pack the 7 module indices into a u64 (3 bits each, 21 bits total).
+        // Vizia's `Data` trait is implemented for primitives but not for
+        // arbitrary arrays; bit-packing avoids both that constraint and any
+        // heap allocation in the lens computation, which is hot-path.
+        let order_lens = Data::params.map(|p| {
+            let mut packed: u64 = 0;
+            for s in 0..7 {
+                let idx = module_type_to_usize(slot_module_type(p, s)) as u64;
+                packed |= idx << (s * 3);
+            }
+            packed
+        });
+
+        Binding::new(cx, order_lens, |cx, order_b| {
+            let packed = order_b.get(cx);
+            for slot_idx in 0..7 {
+                if slot_idx > 0 {
+                    Label::new(cx, "\u{2192}").class("minimap-arrow"); // →
+                }
+                let idx = ((packed >> (slot_idx * 3)) & 0x7) as usize;
+                let mt = usize_to_module_type(idx);
+                let theme = module_type_to_theme(mt);
+                let tag = module_type_short_name(mt);
+                let is_empty = mt == ModuleType::Empty;
+
+                HStack::new(cx, |cx| {
+                    Label::new(cx, tag)
+                        .class("minimap-pill-tag")
+                        .color(theme.accent_color());
+                })
+                .class("minimap-pill")
+                .toggle_class("minimap-pill-empty", is_empty)
+                .toggle_class(
+                    "minimap-pill-focused",
+                    Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
+                )
+                .on_press(move |cx| {
+                    if !is_empty {
+                        cx.emit(AppEvent::ToggleFocusSlot(slot_idx));
+                    }
+                })
+                .cursor(if is_empty {
+                    CursorIcon::Default
+                } else {
+                    CursorIcon::Hand
+                })
+                .height(Pixels(20.0))
+                .width(Pixels(56.0))
+                .alignment(Alignment::Center);
+            }
+        });
+    })
+    .class("chain-minimap")
+    .height(Pixels(28.0))
+    .width(Stretch(1.0))
+    .gap(Pixels(2.0))
+    .alignment(Alignment::Center);
 }
 
 // Library sidebar — narrow vertical strip on the left edge of the rack

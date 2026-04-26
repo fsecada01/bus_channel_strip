@@ -421,6 +421,57 @@ pub const COMPONENT_STYLES: &str = r#"
     width: 1s;
 }
 
+/* ── Chain mini-map ────────────────────────────────────────────────────────
+   Slim band between the chassis header and the rack. One pill per slot,
+   arrows between them. The focused pill gains a bright outline so users
+   can see where they are even with the rack scrolled or in focus mode. */
+
+.chain-minimap {
+    background: linear-gradient(180deg, rgba(14, 16, 22, 0.6), rgba(10, 12, 18, 0.7));
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 5px;
+    padding: 4px 8px;
+}
+
+.minimap-arrow {
+    font-size: 12px;
+    color: #5d6672;
+    width: 12px;
+    height: 14px;
+    text-align: center;
+}
+
+.minimap-pill {
+    background: rgba(40, 44, 52, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    alignment: center;
+}
+
+.minimap-pill:hover {
+    background: rgba(60, 66, 78, 0.9);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.minimap-pill-empty {
+    background: transparent;
+    border: 1px dashed rgba(110, 116, 128, 0.5);
+}
+
+.minimap-pill-focused {
+    background: rgba(255, 220, 100, 0.12) !important;
+    border-color: rgba(255, 220, 100, 0.7) !important;
+}
+
+.minimap-pill-tag {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-align: center;
+    width: 1s;
+    height: 14px;
+}
+
 /* ── Zoom controls ─────────────────────────────────────────────────────────
    Discrete zoom buttons in the chassis header. Active level has a tinted
    background + brighter label so the current scale is unambiguous. */
