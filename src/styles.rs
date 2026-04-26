@@ -472,6 +472,23 @@ pub const COMPONENT_STYLES: &str = r#"
     height: 14px;
 }
 
+/* ── Drop target highlight ─────────────────────────────────────────────────
+   Applied to a slot when a drag is in progress and the cursor is over THIS
+   slot (and it isn't the drag source). The bright yellow ring matches the
+   selected-source ring so the source/target relationship reads visually as
+   "yellow connects to yellow". */
+
+.slot-drop-target {
+    border-color: rgb(255, 220, 50) !important;
+    background-color: rgb(56, 52, 36) !important;
+}
+
+.slot-drop-target.slot-collapsed {
+    /* Collapsed tabs are narrower; tighten the highlight so it doesn't
+       wash out the small surface. */
+    background-color: rgb(48, 44, 28) !important;
+}
+
 /* ── Zoom controls ─────────────────────────────────────────────────────────
    Discrete zoom buttons in the chassis header. Active level has a tinted
    background + brighter label so the current scale is unambiguous. */

@@ -24,7 +24,18 @@ use crate::{BusChannelStripParams, ModuleType};
 /// - Click the same slot again: cancels the selection.
 #[derive(Debug, Clone, Copy)]
 pub enum AppEvent {
-    SelectSlot(usize),
+    /// Mouse-down on a slot's drag handle. Begins a drag-drop session
+    /// (or, if a slot is already selected, treats the press as the
+    /// "click the swap target" half of a click-to-swap operation).
+    StartDrag(usize),
+    /// Set or clear the slot currently under the cursor. Drives the
+    /// drop-target highlight while a drag is active.
+    SetHoveredSlot(Option<usize>),
+    /// Mouse released — global, fires from the chassis WindowEvent::MouseUp
+    /// listener so a drag started inside a slot can be released anywhere.
+    /// If a valid drop target is hovered, commits the swap; otherwise
+    /// leaves drag_slot in click-to-swap selection mode.
+    EndDrag,
     /// Assign a specific ModuleType to a slot. Used by the library picker
     /// (Empty slot → fill with chosen module) and the eject action
     /// (filled slot → ModuleType::Empty).
@@ -94,32 +105,47 @@ pub struct Data {
     /// per-module hide flag. `None` returns the rack to its default,
     /// hide-flag-driven layout.
     pub focused_slot: Option<usize>,
+    /// Slot currently under the cursor. Only meaningful while `drag_slot`
+    /// is `Some(_)` — drives the drop-target visual highlight on the
+    /// hovered slot. Always cleared on EndDrag.
+    pub hovered_slot: Option<usize>,
 }
 
 impl Model for Data {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        // ── Keyboard shortcuts ──────────────────────────────────────────
+        // ── Window events: keyboard + global mouse-up ──────────────────
         // Esc      — exit focus mode and cancel any in-flight slot swap
         // 1..7     — focus the corresponding slot (Empty slots show picker)
+        // MouseUp  — completes a press-and-drag reorder: if the cursor is
+        //            over a different slot than the drag source, commit the
+        //            swap. If released on the source or outside the rack,
+        //            leave drag_slot set as click-to-swap selection.
         // Routed via WindowEvent so we don't need to make any single view
-        // explicitly focusable; vizia bubbles KeyDown up the entity tree.
-        event.map(|win: &WindowEvent, _| {
-            if let WindowEvent::KeyDown(code, _) = win {
-                match code {
-                    Code::Escape => {
-                        self.focused_slot = None;
-                        self.drag_slot = None;
-                    }
-                    Code::Digit1 => self.focused_slot = Some(0),
-                    Code::Digit2 => self.focused_slot = Some(1),
-                    Code::Digit3 => self.focused_slot = Some(2),
-                    Code::Digit4 => self.focused_slot = Some(3),
-                    Code::Digit5 => self.focused_slot = Some(4),
-                    Code::Digit6 => self.focused_slot = Some(5),
-                    Code::Digit7 => self.focused_slot = Some(6),
-                    _ => {}
+        // explicitly focusable; vizia bubbles these events up the tree.
+        event.map(|win: &WindowEvent, _| match win {
+            WindowEvent::KeyDown(code, _) => match code {
+                Code::Escape => {
+                    self.focused_slot = None;
+                    self.drag_slot = None;
+                    self.hovered_slot = None;
                 }
+                Code::Digit1 => self.focused_slot = Some(0),
+                Code::Digit2 => self.focused_slot = Some(1),
+                Code::Digit3 => self.focused_slot = Some(2),
+                Code::Digit4 => self.focused_slot = Some(3),
+                Code::Digit5 => self.focused_slot = Some(4),
+                Code::Digit6 => self.focused_slot = Some(5),
+                Code::Digit7 => self.focused_slot = Some(6),
+                _ => {}
+            },
+            WindowEvent::MouseUp(MouseButton::Left) => {
+                // Defer to the EndDrag handler so the press-and-drag commit
+                // logic lives in one place. Released on the source slot or
+                // outside the rack leaves drag_slot set as click-to-swap
+                // selection — Esc or clicking the source clears it.
+                cx.emit(AppEvent::EndDrag);
             }
+            _ => {}
         });
 
         event.map(|e: &AppEvent, _| match e {
@@ -271,42 +297,70 @@ impl Model for Data {
                 self.drag_slot = None;
             }
 
-            AppEvent::SelectSlot(idx) => {
-                let idx = *idx;
-                match self.drag_slot {
-                    None => {
-                        // Select this slot as the reorder source
-                        self.drag_slot = Some(idx);
-                    }
-                    Some(src) if src == idx => {
-                        // Click the same slot again = cancel
-                        self.drag_slot = None;
-                    }
-                    Some(src) => {
-                        // Swap the modules at `src` and `idx`
-                        let src_mt = slot_module_type(&self.params, src);
-                        let tgt_mt = slot_module_type(&self.params, idx);
-                        let src_ptr = slot_param_ptr(&self.params, src);
-                        let tgt_ptr = slot_param_ptr(&self.params, idx);
+            AppEvent::StartDrag(idx) => {
+                Self::handle_start_drag(self, cx, *idx);
+            }
 
-                        // src slot receives tgt_mt; tgt slot receives src_mt
-                        let src_norm = slot_preview_normalized(&self.params, src, tgt_mt);
-                        let tgt_norm = slot_preview_normalized(&self.params, idx, src_mt);
+            AppEvent::SetHoveredSlot(slot) => {
+                self.hovered_slot = *slot;
+            }
 
-                        // Safety: ParamPtr is valid as long as params lives, which outlives the editor.
-                        cx.emit(RawParamEvent::BeginSetParameter(src_ptr));
-                        cx.emit(RawParamEvent::SetParameterNormalized(src_ptr, src_norm));
-                        cx.emit(RawParamEvent::EndSetParameter(src_ptr));
-
-                        cx.emit(RawParamEvent::BeginSetParameter(tgt_ptr));
-                        cx.emit(RawParamEvent::SetParameterNormalized(tgt_ptr, tgt_norm));
-                        cx.emit(RawParamEvent::EndSetParameter(tgt_ptr));
-
-                        self.drag_slot = None;
+            AppEvent::EndDrag => {
+                if let Some(src) = self.drag_slot {
+                    if let Some(target) = self.hovered_slot {
+                        if target != src {
+                            self.swap_slots(cx, src, target);
+                            self.drag_slot = None;
+                        }
                     }
                 }
-            } // AppEvent::SelectSlot
+                self.hovered_slot = None;
+            }
         });
+    }
+}
+
+impl Data {
+    /// Press / click on slot `idx`'s drag handle. Implements the unified
+    /// click-to-swap + drag-start state machine:
+    ///   • no selection      → start selection on this slot
+    ///   • selection on idx  → cancel
+    ///   • selection on src  → commit swap(src, idx)
+    fn handle_start_drag(&mut self, cx: &mut EventContext, idx: usize) {
+        match self.drag_slot {
+            None => {
+                self.drag_slot = Some(idx);
+            }
+            Some(src) if src == idx => {
+                self.drag_slot = None;
+            }
+            Some(src) => {
+                self.swap_slots(cx, src, idx);
+                self.drag_slot = None;
+            }
+        }
+    }
+
+    /// Atomic swap of the modules at slots `src` and `tgt` via three pairs
+    /// of RawParamEvents per slot. Both module_order_* params change in the
+    /// same event frame so the audio thread sees the post-swap state on
+    /// its next block boundary.
+    fn swap_slots(&self, cx: &mut EventContext, src: usize, tgt: usize) {
+        let src_mt = slot_module_type(&self.params, src);
+        let tgt_mt = slot_module_type(&self.params, tgt);
+        let src_ptr = slot_param_ptr(&self.params, src);
+        let tgt_ptr = slot_param_ptr(&self.params, tgt);
+
+        let src_norm = slot_preview_normalized(&self.params, src, tgt_mt);
+        let tgt_norm = slot_preview_normalized(&self.params, tgt, src_mt);
+
+        cx.emit(RawParamEvent::BeginSetParameter(src_ptr));
+        cx.emit(RawParamEvent::SetParameterNormalized(src_ptr, src_norm));
+        cx.emit(RawParamEvent::EndSetParameter(src_ptr));
+
+        cx.emit(RawParamEvent::BeginSetParameter(tgt_ptr));
+        cx.emit(RawParamEvent::SetParameterNormalized(tgt_ptr, tgt_norm));
+        cx.emit(RawParamEvent::EndSetParameter(tgt_ptr));
     }
 }
 
@@ -797,6 +851,7 @@ pub(crate) fn create(
             analysis_result: analysis_result.clone(),
             zoom_level: 100,
             focused_slot: None,
+            hovered_slot: None,
         }
         .build(cx);
 
@@ -1273,7 +1328,13 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
             "drag-handle-active",
             Data::drag_slot.map(move |ds| *ds == Some(slot_idx)),
         )
-        .on_press(move |cx| cx.emit(AppEvent::SelectSlot(slot_idx)))
+        // on_press_down enters drag mode immediately on mouse-down so the
+        // user can press-and-drag-and-release in one motion. The chassis
+        // WindowEvent::MouseUp handler completes the swap when the cursor
+        // lands on a different slot. A press-release without movement
+        // leaves drag_slot set so click-to-swap (press source, then press
+        // target) still works.
+        .on_press_down(move |cx| cx.emit(AppEvent::StartDrag(slot_idx)))
         .cursor(CursorIcon::Hand)
         .top(Pixels(0.0))
         .bottom(Pixels(0.0))
@@ -1353,6 +1414,26 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
     .gap(Pixels(4.0))
     .class("module-slot")
     .class(theme.class_name())
+    // Drop-target highlight: when a drag is in progress AND this slot is
+    // the currently hovered candidate AND it isn't the drag source, paint
+    // it with a glowing yellow accent so the user can see exactly where
+    // a release will land.
+    .toggle_class(
+        "slot-drop-target",
+        Data::drag_slot
+            .map(move |ds| ds.is_some() && *ds != Some(slot_idx))
+            .and(Data::hovered_slot.map(move |hs| *hs == Some(slot_idx))),
+    )
+    // Track hover state so the chassis-level WindowEvent::MouseUp handler
+    // knows where a drag was released. on_over fires when the cursor
+    // enters the slot's bounds (including any child); on_over_out fires
+    // when it leaves the entire slot region.
+    .on_over(move |cx| cx.emit(AppEvent::SetHoveredSlot(Some(slot_idx))))
+    .on_over_out(move |cx| {
+        // Only clear if we're still recorded as hovered — otherwise a
+        // sibling's enter event could race us into clearing its state.
+        cx.emit(AppEvent::SetHoveredSlot(None))
+    })
     // Border turns bright white when this slot is selected for swap.
     .border_color(Data::drag_slot.map(move |ds| {
         if *ds == Some(slot_idx) {
@@ -1373,7 +1454,7 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
 /// Narrow collapsed tab — shows the 3-char module tag plus an expand button
 /// that toggles the hide flag back to false. Width is fixed regardless of
 /// zoom so several collapsed tabs stack neatly next to full slots.
-fn build_collapsed_slot(cx: &mut Context, _slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
+fn build_collapsed_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
     VStack::new(cx, |cx| {
         Label::new(cx, module_type_short_name(mt))
             .class("collapsed-name")
@@ -1386,6 +1467,16 @@ fn build_collapsed_slot(cx: &mut Context, _slot_idx: usize, mt: ModuleType, them
     .class("module-slot")
     .class("slot-collapsed")
     .class(theme.class_name())
+    // Same drop-target + hover wiring as the full slot so a drag can be
+    // released onto a collapsed sibling tab and the swap commits.
+    .toggle_class(
+        "slot-drop-target",
+        Data::drag_slot
+            .map(move |ds| ds.is_some() && *ds != Some(slot_idx))
+            .and(Data::hovered_slot.map(move |hs| *hs == Some(slot_idx))),
+    )
+    .on_over(move |cx| cx.emit(AppEvent::SetHoveredSlot(Some(slot_idx))))
+    .on_over_out(move |cx| cx.emit(AppEvent::SetHoveredSlot(None)))
     .border_color(theme.accent_color())
     .width(Pixels(56.0))
     .height(Stretch(1.0))
