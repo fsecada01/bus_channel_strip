@@ -39,6 +39,10 @@ pub enum AppEvent {
     /// swaps focus to this one. While focused, every other slot collapses
     /// to its narrow tab so the focused slot's controls dominate the rack.
     ToggleFocusSlot(usize),
+    /// Library sidebar action: if `mt` is already in the rack, focus that
+    /// slot; otherwise add it to the first empty slot. No-op if the rack
+    /// is full of other modules and there's no empty slot.
+    AddOrFocusModule(ModuleType),
     /// Exit focus mode entirely — every slot returns to its hide-flag-driven
     /// presentation. Wired to the chassis-header EXIT FOCUS button.
     ClearFocus,
@@ -173,6 +177,27 @@ impl Model for Data {
                 cx.emit(RawParamEvent::EndSetParameter(thresh_ptr));
             }
 
+            AppEvent::AddOrFocusModule(mt) => {
+                if let Some(slot) = slot_containing(&self.params, *mt) {
+                    // Module is already in the rack — focus that slot.
+                    self.focused_slot = Some(slot);
+                } else if let Some(slot) = first_empty_slot(&self.params) {
+                    // Add to first empty slot.
+                    let ptr = slot_param_ptr(&self.params, slot);
+                    let norm = slot_preview_normalized(&self.params, slot, *mt);
+                    cx.emit(RawParamEvent::BeginSetParameter(ptr));
+                    cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+                    cx.emit(RawParamEvent::EndSetParameter(ptr));
+                    // Focus the freshly filled slot — common workflow is
+                    // to add a module then immediately tweak its params.
+                    self.focused_slot = Some(slot);
+                }
+                // If neither: rack is full and module isn't in it. The user
+                // would have to eject something first; we silently no-op
+                // rather than showing an error dialog (which baseview
+                // doesn't support cleanly anyway).
+            }
+
             AppEvent::ToggleFocusSlot(idx) => {
                 let idx = *idx;
                 self.focused_slot = match self.focused_slot {
@@ -287,6 +312,18 @@ fn slot_param_ptr(params: &Arc<BusChannelStripParams>, slot: usize) -> ParamPtr 
         5 => params.module_order_6.as_ptr(),
         _ => params.module_order_7.as_ptr(),
     }
+}
+
+/// Returns the index of the first slot whose `module_order_*` value is
+/// `Empty`, or `None` if every slot is occupied.
+fn first_empty_slot(params: &Arc<BusChannelStripParams>) -> Option<usize> {
+    (0..7).find(|&s| slot_module_type(params, s) == ModuleType::Empty)
+}
+
+/// Returns the index of the first slot containing `mt`, or `None` if no
+/// slot holds that module type. Only meaningful for non-Empty types.
+fn slot_containing(params: &Arc<BusChannelStripParams>, mt: ModuleType) -> Option<usize> {
+    (0..7).find(|&s| slot_module_type(params, s) == mt)
 }
 
 fn slot_preview_normalized(
@@ -802,26 +839,35 @@ pub(crate) fn create(
             .width(Stretch(1.0));
 
             // ── Strip view ──────────────────────────────────────────────────
-            // Strip is wrapped in a horizontal ScrollView so that the default
-            // window (sized for 4 slots) reveals the other 2 via scroll while
-            // higher zoom levels keep every slot reachable.
-            ScrollView::new(cx, |cx| {
-                HStack::new(cx, |cx| {
-                    for slot_idx in 0..7_usize {
-                        create_dynamic_module_slot(cx, slot_idx);
-                    }
+            // Library sidebar (left) + scrollable rack (right). The sidebar
+            // is a global module palette: click a not-in-rack module to
+            // drop it into the first empty slot, click an in-rack module
+            // to focus it. Complements the per-slot "+ ADD MODULE" picker,
+            // which remains the primary affordance inside an empty slot.
+            HStack::new(cx, |cx| {
+                build_library_sidebar(cx);
+
+                ScrollView::new(cx, |cx| {
+                    HStack::new(cx, |cx| {
+                        for slot_idx in 0..7_usize {
+                            create_dynamic_module_slot(cx, slot_idx);
+                        }
+                    })
+                    .class("lunchbox-slots")
+                    .height(Stretch(1.0))
+                    // Inner width is driven by the slot widths themselves
+                    // (fixed 280px × N + gaps). Auto lets the HStack size to
+                    // its children so ScrollView can detect overflow.
+                    .width(Auto)
+                    .gap(Pixels(4.0));
                 })
-                .class("lunchbox-slots")
+                .class("strip-scroll")
                 .height(Stretch(1.0))
-                // Inner width is driven by the slot widths themselves (fixed
-                // 280px × 6 + gaps). Using Auto lets the HStack size to its
-                // children so ScrollView can detect overflow correctly.
-                .width(Auto)
-                .gap(Pixels(4.0));
+                .width(Stretch(1.0));
             })
-            .class("strip-scroll")
             .height(Stretch(1.0))
             .width(Stretch(1.0))
+            .gap(Pixels(4.0))
             .display(Data::dyneq_open.map(|o| {
                 if *o {
                     Display::None
@@ -854,6 +900,75 @@ pub(crate) fn create(
         // and the strip ScrollView reveals off-screen slots when content
         // grows past the window width.
     })
+}
+
+// Library sidebar — narrow vertical strip on the left edge of the rack
+// area. Lists every real module with a status indicator (in rack vs
+// available). Clicking an "available" row adds the module to the first
+// empty slot; clicking an "in rack" row focuses the slot containing it.
+//
+// This is the global counterpart to the per-slot picker: that one
+// answers "what can I put here?", this one answers "where is X / how
+// do I get X into the rack?". Both stay because they serve different
+// workflows — the per-slot picker is contextual, the sidebar is
+// inventory-oriented.
+fn build_library_sidebar(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        Label::new(cx, "LIBRARY").class("library-sidebar-header");
+
+        // Reactive bitset of which module types are currently in the rack.
+        // Rebuilds the row list whenever any slot's contents change.
+        let in_rack_lens = Data::params.map(|p| {
+            let mut bits: u8 = 0;
+            for s in 0..7 {
+                let mt = slot_module_type(p, s);
+                if mt != ModuleType::Empty {
+                    bits |= 1u8 << module_type_to_usize(mt);
+                }
+            }
+            bits
+        });
+
+        Binding::new(cx, in_rack_lens, |cx, bits_b| {
+            let in_rack = bits_b.get(cx);
+            for mt in ALL_REAL_MODULES {
+                let theme = module_type_to_theme(mt);
+                let bit = 1u8 << module_type_to_usize(mt);
+                let present = in_rack & bit != 0;
+                let tag = module_type_short_name(mt);
+
+                HStack::new(cx, |cx| {
+                    // Status dot — accent-colored if in rack, dim otherwise.
+                    Label::new(cx, if present { "\u{25CF}" } else { "\u{25CB}" })
+                        .class("library-row-dot")
+                        .color(if present {
+                            theme.accent_color()
+                        } else {
+                            Color::rgb(90, 96, 108)
+                        });
+                    Label::new(cx, tag)
+                        .class("library-row-tag")
+                        .color(if present {
+                            theme.accent_color()
+                        } else {
+                            Color::rgb(140, 146, 158)
+                        });
+                })
+                .class("library-row")
+                .toggle_class("library-row-in-rack", present)
+                .on_press(move |cx| cx.emit(AppEvent::AddOrFocusModule(mt)))
+                .cursor(CursorIcon::Hand)
+                .height(Pixels(28.0))
+                .width(Stretch(1.0))
+                .gap(Pixels(4.0))
+                .alignment(Alignment::Center);
+            }
+        });
+    })
+    .class("library-sidebar")
+    .height(Stretch(1.0))
+    .width(Pixels(72.0))
+    .gap(Pixels(2.0));
 }
 
 // Chain preset selector — horizontal row of compact buttons in the chassis

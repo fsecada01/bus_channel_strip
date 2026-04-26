@@ -367,6 +367,60 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #ffe0d4;
 }
 
+/* ── Library sidebar ───────────────────────────────────────────────────────
+   Narrow vertical strip at the left edge of the rack area. Compact rows
+   show a status dot + 3-char tag for each module. In-rack rows use the
+   module's accent color; available rows are muted. */
+
+.library-sidebar {
+    background: linear-gradient(180deg, rgba(20, 23, 30, 0.6), rgba(14, 16, 22, 0.7));
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+    padding: 6px 4px;
+}
+
+.library-sidebar-header {
+    font-size: 9px;
+    font-weight: 800;
+    color: #8c98a8;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    text-align: center;
+    height: 14px;
+    width: 1s;
+}
+
+.library-row {
+    padding: 2px 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+
+.library-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.library-row-in-rack {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.library-row-dot {
+    font-size: 11px;
+    height: 14px;
+    width: 12px;
+    text-align: center;
+}
+
+.library-row-tag {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    height: 14px;
+    width: 1s;
+}
+
 /* ── Zoom controls ─────────────────────────────────────────────────────────
    Discrete zoom buttons in the chassis header. Active level has a tinted
    background + brighter label so the current scale is unambiguous. */
