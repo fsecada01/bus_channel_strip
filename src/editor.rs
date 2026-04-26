@@ -29,6 +29,11 @@ pub enum AppEvent {
     /// (Empty slot → fill with chosen module) and the eject action
     /// (filled slot → ModuleType::Empty).
     SetSlotModule(usize, ModuleType),
+    /// Load one of the stock chain presets — writes all 7 module_order_*
+    /// params to the preset's prescribed order. Bypass states and per-module
+    /// parameters are left untouched (intentional: presets are a routing
+    /// shortcut, not a full plugin preset).
+    LoadChain(usize),
     /// Open the full-screen DynEQ back view.
     OpenDynEq,
     /// Return from DynEQ back view to the strip front view.
@@ -153,6 +158,23 @@ impl Model for Data {
                     thresh_norm,
                 ));
                 cx.emit(RawParamEvent::EndSetParameter(thresh_ptr));
+            }
+
+            AppEvent::LoadChain(idx) => {
+                if let Some(preset) = CHAIN_PRESETS.get(*idx) {
+                    // Write all seven slots in one batch so the host sees a
+                    // coherent state change. Bypasses are intentionally not
+                    // touched: presets define routing, not levels.
+                    for slot in 0..7 {
+                        let mt = preset.chain[slot];
+                        let ptr = slot_param_ptr(&self.params, slot);
+                        let norm = slot_preview_normalized(&self.params, slot, mt);
+                        cx.emit(RawParamEvent::BeginSetParameter(ptr));
+                        cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+                        cx.emit(RawParamEvent::EndSetParameter(ptr));
+                    }
+                    self.drag_slot = None;
+                }
             }
 
             AppEvent::SetSlotModule(slot, mt) => {
@@ -294,6 +316,112 @@ const ALL_REAL_MODULES: [ModuleType; 7] = [
     ModuleType::Transformer,
     ModuleType::Punch,
     ModuleType::Haas,
+];
+
+// ============================================================================
+// Chain Presets (a.k.a. "Dream Strips")
+// ============================================================================
+
+/// A named routing snapshot. Loading a chain rewrites every `module_order_*`
+/// param to match `chain[N]`. Per-module parameters and bypass states are
+/// intentionally left alone — the preset is a routing shortcut, not a full
+/// plugin preset. Users layer their own tone/level adjustments on top.
+struct ChainPreset {
+    name: &'static str,
+    /// Short tag used inside the compact selector button. Aim for 3–4 chars
+    /// so the button row fits across the chassis header.
+    tag: &'static str,
+    /// One ModuleType per slot. Use `ModuleType::Empty` for unused slots.
+    chain: [ModuleType; 7],
+}
+
+/// Stock chain presets. Order follows the design doc — first entry restores
+/// the plugin's shipped default, last entry is a clean slate for users who
+/// prefer to start from scratch.
+const CHAIN_PRESETS: &[ChainPreset] = &[
+    ChainPreset {
+        name: "Default",
+        tag: "DEF",
+        chain: [
+            ModuleType::Api5500EQ,
+            ModuleType::ButterComp2,
+            ModuleType::PultecEQ,
+            ModuleType::Transformer,
+            ModuleType::Haas,
+            ModuleType::Punch,
+            ModuleType::Empty,
+        ],
+    },
+    ChainPreset {
+        name: "Drum Bus",
+        tag: "DRM",
+        chain: [
+            ModuleType::Transformer,
+            ModuleType::Api5500EQ,
+            ModuleType::ButterComp2,
+            ModuleType::Punch,
+            ModuleType::Empty,
+            ModuleType::Empty,
+            ModuleType::Empty,
+        ],
+    },
+    ChainPreset {
+        name: "Vocal Bus",
+        tag: "VOX",
+        chain: [
+            ModuleType::PultecEQ,
+            ModuleType::Api5500EQ,
+            ModuleType::DynamicEQ,
+            ModuleType::ButterComp2,
+            ModuleType::Empty,
+            ModuleType::Empty,
+            ModuleType::Empty,
+        ],
+    },
+    ChainPreset {
+        name: "Mix Glue",
+        tag: "GLU",
+        chain: [
+            ModuleType::Api5500EQ,
+            ModuleType::ButterComp2,
+            ModuleType::PultecEQ,
+            ModuleType::Transformer,
+            ModuleType::Empty,
+            ModuleType::Empty,
+            ModuleType::Empty,
+        ],
+    },
+    ChainPreset {
+        name: "Master",
+        tag: "MST",
+        chain: [
+            ModuleType::DynamicEQ,
+            ModuleType::PultecEQ,
+            ModuleType::ButterComp2,
+            ModuleType::Punch,
+            ModuleType::Empty,
+            ModuleType::Empty,
+            ModuleType::Empty,
+        ],
+    },
+    ChainPreset {
+        name: "Wide Bus",
+        tag: "WID",
+        chain: [
+            ModuleType::Api5500EQ,
+            ModuleType::ButterComp2,
+            ModuleType::Haas,
+            ModuleType::Transformer,
+            ModuleType::Empty,
+            ModuleType::Empty,
+            ModuleType::Empty,
+        ],
+    },
+    ChainPreset {
+        name: "Empty",
+        tag: "—",
+        chain: [ModuleType::Empty; 7],
+    },
 ];
 
 fn module_type_to_theme(mt: ModuleType) -> ModuleTheme {
@@ -603,20 +731,14 @@ pub(crate) fn create(
                 .gap(Pixels(12.0))
                 .alignment(Alignment::Center);
 
-                // Signal flow / reorder hint — centered, takes remaining space.
-                VStack::new(cx, |cx| {
-                    Label::new(cx, "SIGNAL FLOW").class("signal-flow-label");
-                    Label::new(
-                        cx,
-                        "Click \u{2261} on a module to select, then click another to swap",
-                    )
-                    .class("signal-flow-hint");
-                    Label::new(cx, "DSP order: module_order_1 \u{2192} module_order_5")
-                        .class("signal-flow-params");
-                })
-                .class("signal-flow-section")
-                .left(Stretch(1.0))
-                .right(Stretch(1.0));
+                // Chain preset selector — centered, takes remaining space.
+                // One button per stock chain; clicking writes all 7
+                // module_order_* params atomically. Replaces the old
+                // signal-flow hint text (the rack itself now teaches the
+                // routing model better than a hint sentence could).
+                build_chain_preset_selector(cx)
+                    .left(Stretch(1.0))
+                    .right(Stretch(1.0));
 
                 // Zoom control band — discrete 75/100/125/150/200 buttons.
                 create_zoom_controls(cx);
@@ -680,6 +802,41 @@ pub(crate) fn create(
         // and the strip ScrollView reveals off-screen slots when content
         // grows past the window width.
     })
+}
+
+// Chain preset selector — horizontal row of compact buttons in the chassis
+// header. Each button shows a 3-char tag and the full preset name; clicking
+// emits AppEvent::LoadChain(idx) which rewrites module_order_*. Returns the
+// outer Handle so the caller can attach layout modifiers (Stretch margins,
+// etc.) at the call site.
+fn build_chain_preset_selector(cx: &mut Context) -> Handle<'_, VStack> {
+    VStack::new(cx, |cx| {
+        Label::new(cx, "CHAIN PRESETS").class("signal-flow-label");
+        HStack::new(cx, |cx| {
+            for (i, preset) in CHAIN_PRESETS.iter().enumerate() {
+                VStack::new(cx, |cx| {
+                    Label::new(cx, preset.tag).class("chain-preset-tag");
+                    Label::new(cx, preset.name).class("chain-preset-name");
+                })
+                .class("chain-preset-btn")
+                .on_press(move |cx| cx.emit(AppEvent::LoadChain(i)))
+                .cursor(CursorIcon::Hand)
+                .width(Pixels(64.0))
+                .height(Pixels(40.0))
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0));
+            }
+        })
+        .gap(Pixels(4.0))
+        .height(Pixels(40.0))
+        .width(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+    })
+    .class("signal-flow-section")
+    .height(Auto)
+    .width(Auto)
+    .gap(Pixels(4.0))
 }
 
 // Discrete zoom buttons (75/100/125/150/200%). Each button emits SetZoom on

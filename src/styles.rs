@@ -269,6 +269,55 @@ pub const COMPONENT_STYLES: &str = r#"
     font-family: monospace;
 }
 
+/* ── Chain preset selector ─────────────────────────────────────────────────
+   Compact horizontal button row inside the chassis header. Each button is
+   a tag (3-char code) over a name. Visually borrows the zoom-btn aesthetic
+   so the header reads as a unified control band, but with a slightly
+   brighter accent on hover to invite experimentation. */
+
+.chain-preset-btn {
+    background: linear-gradient(180deg, #222730, #1b1f27);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    cursor: pointer;
+    alignment: center;
+    padding: 2px 4px;
+    gap: 1px;
+}
+
+.chain-preset-btn:hover {
+    background: linear-gradient(180deg, #2c3340, #242a36);
+    border-color: rgba(180, 200, 255, 0.3);
+}
+
+.chain-preset-tag {
+    font-size: 11px;
+    font-weight: 800;
+    color: #c0c8d4;
+    letter-spacing: 1px;
+    text-align: center;
+    width: 1s;
+    height: 14px;
+}
+
+.chain-preset-name {
+    font-size: 9px;
+    font-weight: 600;
+    color: #8a929e;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    text-align: center;
+    width: 1s;
+    height: 12px;
+}
+
+.chain-preset-btn:hover .chain-preset-tag {
+    color: #ffffff;
+}
+.chain-preset-btn:hover .chain-preset-name {
+    color: #c8d0dc;
+}
+
 /* ── Zoom controls ─────────────────────────────────────────────────────────
    Discrete zoom buttons in the chassis header. Active level has a tinted
    background + brighter label so the current scale is unambiguous. */
