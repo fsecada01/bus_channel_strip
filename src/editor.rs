@@ -798,22 +798,27 @@ fn module_type_subtitle(mt: ModuleType) -> &'static str {
 /// Chassis sizing constants.
 ///
 /// Slot width is fixed at 280px per design (at zoom 100%). With exactly 4
-/// slots visible + 4px gaps + paddings, the default window fits four modules
-/// horizontally; the remaining two scroll into view via the strip ScrollView.
+/// slots visible + 4px gaps + paddings + the 72px library sidebar, the
+/// default window fits four modules horizontally; the remaining three
+/// scroll into view via the strip ScrollView.
 ///
 /// Math (at zoom 100%):
 ///   4 slots × 280 px           = 1120
 ///   3 gaps between slots × 4px =   12
+///   Library sidebar            =   72
+///   Sidebar / strip gap        =    4
 ///   Strip horizontal padding   =   32  (16 + 16)
 ///   Chassis outer padding      =   28  (14 + 14, reactive: 14 × zoom/100)
 ///   Scrollbar gutter + margin  =   28  (scrollbar ~12 + safety 16)
-///   Total                      ≈ 1220 px
+///   Total                      ≈ 1296 px → rounded up to 1300
 ///
 /// At higher zoom levels the slot width grows (BASE × zoom/100) and the
-/// chassis padding grows linearly as well; the window stays at 1220 px and
-/// users scroll horizontally to reveal off-screen slots.
-pub const DEFAULT_WINDOW_WIDTH: u32 = 1220;
-pub const DEFAULT_WINDOW_HEIGHT: u32 = 820;
+/// chassis padding grows linearly as well; the window stays at 1300 px and
+/// users scroll horizontally to reveal off-screen slots. Mini-map height
+/// (28 px) and chain-preset row height bumped HEIGHT to 860 to keep the
+/// rack body roughly the same vertical footprint as before the redesign.
+pub const DEFAULT_WINDOW_WIDTH: u32 = 1300;
+pub const DEFAULT_WINDOW_HEIGHT: u32 = 860;
 
 pub(crate) fn default_state() -> Arc<ViziaState> {
     // new_with_default_scale_factor persists the scale across sessions and
@@ -971,6 +976,16 @@ pub(crate) fn create(
             );
         })
         .class("lunchbox-chassis")
+        // Keyboard shortcuts (Esc, 1..7) are routed through
+        // WindowEvent::KeyDown which vizia targets at `cx.focused`. By
+        // making the chassis focusable AND seeding initial focus on it,
+        // shortcuts work from the first frame — without this, KeyDown
+        // events go to Entity::null() and never reach the Data model.
+        // Subsequent clicks on Sliders/Buttons move focus into those
+        // widgets, but events still bubble up through the chassis to
+        // the model.
+        .focusable(true)
+        .focused(true)
         .toggle_class("zoom-75", Data::zoom_level.map(|z| *z == 75))
         .toggle_class("zoom-100", Data::zoom_level.map(|z| *z == 100))
         .toggle_class("zoom-125", Data::zoom_level.map(|z| *z == 125))
