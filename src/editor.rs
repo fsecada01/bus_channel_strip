@@ -98,6 +98,30 @@ pub struct Data {
 
 impl Model for Data {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        // ── Keyboard shortcuts ──────────────────────────────────────────
+        // Esc      — exit focus mode and cancel any in-flight slot swap
+        // 1..7     — focus the corresponding slot (Empty slots show picker)
+        // Routed via WindowEvent so we don't need to make any single view
+        // explicitly focusable; vizia bubbles KeyDown up the entity tree.
+        event.map(|win: &WindowEvent, _| {
+            if let WindowEvent::KeyDown(code, _) = win {
+                match code {
+                    Code::Escape => {
+                        self.focused_slot = None;
+                        self.drag_slot = None;
+                    }
+                    Code::Digit1 => self.focused_slot = Some(0),
+                    Code::Digit2 => self.focused_slot = Some(1),
+                    Code::Digit3 => self.focused_slot = Some(2),
+                    Code::Digit4 => self.focused_slot = Some(3),
+                    Code::Digit5 => self.focused_slot = Some(4),
+                    Code::Digit6 => self.focused_slot = Some(5),
+                    Code::Digit7 => self.focused_slot = Some(6),
+                    _ => {}
+                }
+            }
+        });
+
         event.map(|e: &AppEvent, _| match e {
             AppEvent::OpenDynEq => {
                 self.dyneq_open = true;
