@@ -318,6 +318,55 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #c8d0dc;
 }
 
+/* ── Focus mode ────────────────────────────────────────────────────────────
+   The clickable module-name target reads as a normal header by default but
+   gains a subtle hover glow so users discover the focus affordance. The
+   focused slot's name target gets a brighter top accent so the rack
+   communicates "this one is the active focus". */
+
+.module-name-target {
+    padding: 2px 4px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+}
+
+.module-name-target:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.module-name-target-focused {
+    background: rgba(255, 220, 100, 0.06);
+    border-color: rgba(255, 220, 100, 0.25);
+}
+
+/* EXIT FOCUS pill in the chassis header. Sits beside the brand block while
+   focus mode is active; matches the chain-preset button family but in an
+   alert tone so it reads as "leave this mode". */
+.exit-focus-btn {
+    background: linear-gradient(180deg, #4a2018, #381610);
+    border: 1px solid rgba(255, 140, 100, 0.4);
+    border-radius: 4px;
+    padding: 4px 10px;
+    alignment: center;
+}
+.exit-focus-btn:hover {
+    background: linear-gradient(180deg, #5c2820, #4a1d16);
+    border-color: rgba(255, 180, 140, 0.6);
+}
+.exit-focus-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #ffb098;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    height: 14px;
+    width: Auto;
+}
+.exit-focus-btn:hover .exit-focus-label {
+    color: #ffe0d4;
+}
+
 /* ── Zoom controls ─────────────────────────────────────────────────────────
    Discrete zoom buttons in the chassis header. Active level has a tinted
    background + brighter label so the current scale is unambiguous. */

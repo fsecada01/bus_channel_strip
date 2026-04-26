@@ -34,6 +34,14 @@ pub enum AppEvent {
     /// parameters are left untouched (intentional: presets are a routing
     /// shortcut, not a full plugin preset).
     LoadChain(usize),
+    /// Toggle "focus mode" for a slot. If the slot is already focused,
+    /// returns to the all-slots view. If a different slot is focused,
+    /// swaps focus to this one. While focused, every other slot collapses
+    /// to its narrow tab so the focused slot's controls dominate the rack.
+    ToggleFocusSlot(usize),
+    /// Exit focus mode entirely — every slot returns to its hide-flag-driven
+    /// presentation. Wired to the chassis-header EXIT FOCUS button.
+    ClearFocus,
     /// Open the full-screen DynEQ back view.
     OpenDynEq,
     /// Return from DynEQ back view to the strip front view.
@@ -77,6 +85,11 @@ pub struct Data {
     /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
     /// Applied via toggle_class to the chassis root; CSS scales slot width + padding.
     pub zoom_level: u8,
+    /// When `Some(slot)`, the rack is in focus mode: that slot renders full
+    /// and every other slot collapses to its narrow tab regardless of its
+    /// per-module hide flag. `None` returns the rack to its default,
+    /// hide-flag-driven layout.
+    pub focused_slot: Option<usize>,
 }
 
 impl Model for Data {
@@ -160,6 +173,18 @@ impl Model for Data {
                 cx.emit(RawParamEvent::EndSetParameter(thresh_ptr));
             }
 
+            AppEvent::ToggleFocusSlot(idx) => {
+                let idx = *idx;
+                self.focused_slot = match self.focused_slot {
+                    Some(cur) if cur == idx => None,
+                    _ => Some(idx),
+                };
+            }
+
+            AppEvent::ClearFocus => {
+                self.focused_slot = None;
+            }
+
             AppEvent::LoadChain(idx) => {
                 if let Some(preset) = CHAIN_PRESETS.get(*idx) {
                     // Write all seven slots in one batch so the host sees a
@@ -173,7 +198,11 @@ impl Model for Data {
                         cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
                         cx.emit(RawParamEvent::EndSetParameter(ptr));
                     }
+                    // Reset transient view state so the loaded chain shows
+                    // as the overview instead of focused on whatever was
+                    // there before.
                     self.drag_slot = None;
+                    self.focused_slot = None;
                 }
             }
 
@@ -706,6 +735,7 @@ pub(crate) fn create(
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
             zoom_level: 100,
+            focused_slot: None,
         }
         .build(cx);
 
@@ -730,6 +760,28 @@ pub(crate) fn create(
                 .height(Auto)
                 .gap(Pixels(12.0))
                 .alignment(Alignment::Center);
+
+                // EXIT FOCUS pill — only visible while a slot is focused.
+                // Returns the rack to the all-slots overview. Sized small
+                // because the rest of the header is already busy; positioned
+                // next to the brand so users always know where to look.
+                HStack::new(cx, |cx| {
+                    Label::new(cx, "\u{2715} EXIT FOCUS").class("exit-focus-label");
+                })
+                .class("exit-focus-btn")
+                .display(Data::focused_slot.map(|f| {
+                    if f.is_some() {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    }
+                }))
+                .on_press(|cx| cx.emit(AppEvent::ClearFocus))
+                .cursor(CursorIcon::Hand)
+                .height(Pixels(28.0))
+                .width(Auto)
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0));
 
                 // Chain preset selector — centered, takes remaining space.
                 // One button per stock chain; clicking writes all 7
@@ -918,34 +970,55 @@ fn create_master_section(cx: &mut Context) {
 // ============================================================================
 
 /// Creates one 500-series slot that reactively renders whatever module is
-/// currently assigned to `module_order_{slot_idx+1}`. The entire slot content
-/// is wrapped in a `Binding` so it rebuilds when the module type changes
-/// (i.e. after a swap). The drag-source highlight is toggled separately via
-/// `toggle_class` which reacts to `Data::drag_slot` without a full rebuild.
+/// currently assigned to `module_order_{slot_idx+1}`. Three layers of
+/// `Binding` track independent inputs that affect what gets rendered:
+///   1. `Data::focused_slot` — focus mode collapses every non-focused slot
+///   2. `Data::params` (module type) — rebuild when a swap or library pick
+///      changes which module lives here
+///   3. `Data::params` (hide flag for that module) — collapse when hidden
+///
+/// The drag-source highlight is toggled separately via `toggle_class` which
+/// reacts to `Data::drag_slot` without a full rebuild.
 fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
-    // Use usize as the Binding target because vizia requires `Target: Data`,
-    // and usize satisfies that bound whereas our ModuleType enum does not.
-    Binding::new(
-        cx,
-        Data::params.map(move |p| module_type_to_usize(slot_module_type(p, slot_idx))),
-        move |cx, mt_lens| {
-            let mt = usize_to_module_type(mt_lens.get(cx));
-            let theme = module_type_to_theme(mt);
+    Binding::new(cx, Data::focused_slot, move |cx, focus_b| {
+        let focus = focus_b.get(cx);
+        let this_focused = focus == Some(slot_idx);
+        let any_focused = focus.is_some();
 
-            // Inner binding watches the hide flag for this module type. When
-            // hidden, render a narrow click-to-expand tab; otherwise render
-            // the full slot content.
-            let hide_lens = Data::params.map(move |p| is_module_hidden(p, mt));
-            Binding::new(cx, hide_lens, move |cx, hide_binding| {
-                let hidden = hide_binding.get(cx);
-                if hidden {
-                    build_collapsed_slot(cx, slot_idx, mt, theme);
-                } else {
-                    build_full_slot(cx, slot_idx, mt, theme);
-                }
-            });
-        },
-    );
+        // Use usize as the Binding target because vizia requires `Target: Data`,
+        // and usize satisfies that bound whereas our ModuleType enum does not.
+        Binding::new(
+            cx,
+            Data::params.map(move |p| module_type_to_usize(slot_module_type(p, slot_idx))),
+            move |cx, mt_lens| {
+                let mt = usize_to_module_type(mt_lens.get(cx));
+                let theme = module_type_to_theme(mt);
+
+                // Inner binding watches the hide flag for this module type.
+                // Render rule:
+                //   • this_focused                       → full (focus wins)
+                //   • any other slot is focused          → collapsed
+                //   • nothing focused, hide flag set     → collapsed
+                //   • nothing focused, not hidden        → full
+                let hide_lens = Data::params.map(move |p| is_module_hidden(p, mt));
+                Binding::new(cx, hide_lens, move |cx, hide_binding| {
+                    let hidden = hide_binding.get(cx);
+                    let render_full = if this_focused {
+                        true
+                    } else if any_focused {
+                        false
+                    } else {
+                        !hidden
+                    };
+                    if render_full {
+                        build_full_slot(cx, slot_idx, mt, theme);
+                    } else {
+                        build_collapsed_slot(cx, slot_idx, mt, theme);
+                    }
+                });
+            },
+        );
+    });
 }
 
 /// Full expanded slot — drag handle, module header (with hide button), bypass
@@ -992,6 +1065,11 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
 
         // ── Module header ────────────────────────────────────────────
         HStack::new(cx, |cx| {
+            // Module name + subtitle. Wrapped in a focus-toggle target:
+            // clicking the name area enters focus mode for this slot, or
+            // exits if it's already focused. Empty slots are not
+            // focusable — there's nothing to inspect.
+            let focusable = mt != ModuleType::Empty;
             VStack::new(cx, |cx| {
                 Label::new(cx, module_type_name(mt))
                     .class("module-name")
@@ -1004,6 +1082,21 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
                         }
                     }));
                 Label::new(cx, module_type_subtitle(mt)).class("module-type");
+            })
+            .class("module-name-target")
+            .toggle_class(
+                "module-name-target-focused",
+                Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
+            )
+            .on_press(move |cx| {
+                if focusable {
+                    cx.emit(AppEvent::ToggleFocusSlot(slot_idx));
+                }
+            })
+            .cursor(if focusable {
+                CursorIcon::Hand
+            } else {
+                CursorIcon::Default
             })
             .height(Auto)
             .width(Stretch(1.0));
