@@ -40,17 +40,44 @@ pub const COMPONENT_STYLES: &str = r#"
     alignment: center;
 }
 
+/* Brass plate — the brand mark IS the front-panel surface for the hidden
+   Sheen module. vizia's CSS in this version does NOT reliably render
+   multi-stop diagonal gradients on arbitrary stacks (the rule parses but
+   the surface paints transparent), so we use a flat brass fill plus a
+   bright border for the "stamped" feel. :hover brightens the fill;
+   .brand-plate-active stays bright while the back view is open so users
+   always know how to flip back. */
+.brand-plate-brass {
+    background-color: #c8a04a;
+    border: 2px solid #806020;
+    border-radius: 4px;
+    padding: 6px 14px;
+}
+
+.brand-plate-brass:hover {
+    background-color: #e8c878;
+    border-color: #ffd870;
+}
+
+.brand-plate-active {
+    background-color: #b89040;
+    border-color: #ffd870;
+}
+
+/* Brand text colors are tuned for the brass surface. Kept light enough that
+   even if the brass fails to render the text remains readable against the
+   dark chassis (instead of the previous near-invisible #2a1f0a). */
 .chassis-brand {
     font-size: 24px;
-    font-weight: 700;
-    color: #d4d8e0;
+    font-weight: 800;
+    color: #1a1004;
     letter-spacing: 2px;
 }
 
 .chassis-title {
     font-size: 18px;
-    font-weight: 500;
-    color: #ffffff;
+    font-weight: 700;
+    color: #1a1004;
     margin-left: 20px;
 }
 
@@ -1129,6 +1156,133 @@ scrollbar .thumb:hover {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+/* ── Sheen back view ───────────────────────────────────────────────────────
+   Brass theme matches the front-panel plate. Deep warm-charcoal background
+   with brass border so the back view feels like the inside of a vintage
+   compressor — not a different plugin altogether. */
+.sheen-back-view {
+    background: linear-gradient(165deg, #1d1610 0%, #14100a 45%, #0d0a06);
+    border: 2px solid #c8a04a;
+    border-radius: 8px;
+}
+
+.sheen-back-btn {
+    background: linear-gradient(145deg, #2a2218, #36281c);
+    border: 1px solid #c8a04a;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sheen-back-btn:hover {
+    background: linear-gradient(145deg, #36281c, #463420);
+    border-color: #ffd870;
+}
+
+.sheen-back-btn-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #e8c878;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.sheen-back-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: #e8c878;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    text-shadow: 0 0 12px rgba(232, 200, 120, 0.4);
+}
+
+.sheen-master-bypass {
+    background: linear-gradient(145deg, #2a2218, #1d1610);
+    border: 1px solid #806020;
+    border-radius: 4px;
+    color: #e8c878;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.sheen-master-bypass:checked {
+    background: linear-gradient(145deg, #c8a04a, #a0822e);
+    color: #1a1206;
+    border-color: #ffd870;
+}
+
+.sheen-restore-btn {
+    background: linear-gradient(145deg, #2a2218, #1d1610);
+    border: 1px solid #806020;
+    border-radius: 4px;
+    color: #c8a04a;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-align: center;
+    padding: 6px 10px;
+}
+
+.sheen-restore-btn:hover {
+    background: linear-gradient(145deg, #36281c, #463420);
+    color: #ffd870;
+}
+
+/* Per-stage column on the Sheen back view. Wide gap, subtle internal
+   panel so the five columns read as separate stages of one chain. */
+.sheen-stage-column {
+    background: linear-gradient(180deg, rgba(40, 30, 16, 0.55), rgba(24, 18, 10, 0.65));
+    border: 1px solid rgba(200, 160, 74, 0.18);
+    border-radius: 6px;
+    padding: 12px 8px;
+    alignment: center;
+}
+
+.sheen-stage-name {
+    font-size: 16px;
+    font-weight: 800;
+    color: #e8c878;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-align: center;
+}
+
+.sheen-stage-sub {
+    font-size: 10px;
+    font-weight: 600;
+    color: #806020;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-align: center;
+}
+
+.sheen-slider {
+    /* Inherits from the global .param-slider; brass tint applied via
+       border-color so user feedback (drag highlight) still uses default. */
+    border-color: rgba(200, 160, 74, 0.4);
+}
+
+.sheen-stage-bypass {
+    background: linear-gradient(145deg, #1d1610, #14100a);
+    border: 1px solid rgba(200, 160, 74, 0.28);
+    border-radius: 3px;
+    color: #c8a04a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.sheen-stage-bypass:checked {
+    background: linear-gradient(145deg, #806020, #604818);
+    color: #1a1206;
+    border-color: #c8a04a;
 }
 
 .dyneq-spectrum-title {

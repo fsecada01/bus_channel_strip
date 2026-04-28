@@ -47,6 +47,11 @@ mod haas;
 #[cfg(feature = "haas")]
 use haas::{CombMode, HaasModule};
 
+#[cfg(feature = "sheen")]
+mod sheen;
+#[cfg(feature = "sheen")]
+use sheen::SheenModule;
+
 #[cfg(feature = "gui")]
 mod components;
 #[cfg(feature = "gui")]
@@ -147,6 +152,11 @@ struct BusChannelStrip {
     /// Haas psychoacoustic stereo widener
     #[cfg(feature = "haas")]
     haas: HaasModule,
+    /// Sheen — pinned master-end "polish coat". Always last in the chain
+    /// (post-Punch, pre-master-gain). Not user-reorderable; not in
+    /// `module_order_*`. Default-on at factory tonality (see SHEEN_MODULE_SPEC.md).
+    #[cfg(feature = "sheen")]
+    sheen: SheenModule,
 
     /// Buffers for module reordering
     temp_buffer_1: Vec<Vec<f32>>,
@@ -592,6 +602,49 @@ pub struct BusChannelStripParams {
     #[id = "haas_mix"]
     pub haas_mix: FloatParam,
 
+    // ── Sheen Module Parameters ──────────────────────────────────────────
+    // Pinned master-end "polish coat". Always default-ON; the brass plate in
+    // the chassis header opens the back view that exposes these sliders.
+    // Factory values are research-grounded (see SHEEN_MODULE_SPEC.md §3).
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_bypass"]
+    pub sheen_bypass: BoolParam,
+
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_body_db"]
+    pub sheen_body_db: FloatParam,
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_body_bypass"]
+    pub sheen_body_bypass: BoolParam,
+
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_presence_db"]
+    pub sheen_presence_db: FloatParam,
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_presence_bypass"]
+    pub sheen_presence_bypass: BoolParam,
+
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_air_db"]
+    pub sheen_air_db: FloatParam,
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_air_bypass"]
+    pub sheen_air_bypass: BoolParam,
+
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_warmth"]
+    pub sheen_warmth: FloatParam,
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_warmth_bypass"]
+    pub sheen_warmth_bypass: BoolParam,
+
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_width"]
+    pub sheen_width: FloatParam,
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_width_bypass"]
+    pub sheen_width_bypass: BoolParam,
+
     // Module Ordering Parameters
     #[id = "module_order_1"]
     pub module_order_1: EnumParam<ModuleType>,
@@ -651,6 +704,8 @@ impl Default for BusChannelStrip {
             punch: PunchModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "haas")]
             haas: HaasModule::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "sheen")]
+            sheen: SheenModule::new(44100.0), // default sample rate; will be overwritten in initialize()
             temp_buffer_1: Vec::new(),
             temp_buffer_2: Vec::new(),
             spectrum_data: Arc::new(spectral::SpectrumData::new()),
@@ -1649,6 +1704,72 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            // ── Sheen factory defaults ─────────────────────────────────
+            // Default ON (sheen_bypass = false). Per-stage values follow
+            // the polish-plugin consensus synthesis (see SHEEN_MODULE_SPEC.md).
+            #[cfg(feature = "sheen")]
+            sheen_bypass: BoolParam::new("Sheen Bypass", false),
+
+            #[cfg(feature = "sheen")]
+            sheen_body_db: FloatParam::new(
+                "Sheen Body",
+                1.0,
+                FloatRange::Linear { min: -2.0, max: 3.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit(" dB")
+            .with_step_size(0.1),
+            #[cfg(feature = "sheen")]
+            sheen_body_bypass: BoolParam::new("Sheen Body Bypass", false),
+
+            #[cfg(feature = "sheen")]
+            sheen_presence_db: FloatParam::new(
+                "Sheen Presence",
+                0.0,
+                FloatRange::Linear { min: -3.0, max: 3.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit(" dB")
+            .with_step_size(0.1),
+            #[cfg(feature = "sheen")]
+            sheen_presence_bypass: BoolParam::new("Sheen Presence Bypass", false),
+
+            #[cfg(feature = "sheen")]
+            sheen_air_db: FloatParam::new(
+                "Sheen Air",
+                1.8,
+                FloatRange::Linear { min: 0.0, max: 4.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit(" dB")
+            .with_step_size(0.1),
+            #[cfg(feature = "sheen")]
+            sheen_air_bypass: BoolParam::new("Sheen Air Bypass", false),
+
+            #[cfg(feature = "sheen")]
+            sheen_warmth: FloatParam::new(
+                "Sheen Warmth",
+                0.20,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit("")
+            .with_step_size(0.01),
+            #[cfg(feature = "sheen")]
+            sheen_warmth_bypass: BoolParam::new("Sheen Warmth Bypass", false),
+
+            #[cfg(feature = "sheen")]
+            sheen_width: FloatParam::new(
+                "Sheen Width",
+                0.50,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(5.0))
+            .with_unit("")
+            .with_step_size(0.01),
+            #[cfg(feature = "sheen")]
+            sheen_width_bypass: BoolParam::new("Sheen Width Bypass", false),
+
             // Module Ordering Parameters (default signal chain)
             // Default order places Haas before Punch so the clipper catches
             // any residual peaks introduced by the widener. Slot 7 is Empty
@@ -2238,6 +2359,10 @@ impl Plugin for BusChannelStrip {
         {
             self.haas = HaasModule::new(sr);
         }
+        #[cfg(feature = "sheen")]
+        {
+            self.sheen = SheenModule::new(sr);
+        }
 
         // Initialize temporary buffers for module reordering
         let max_buffer_size = _buffer_config.max_buffer_size as usize;
@@ -2317,6 +2442,10 @@ impl Plugin for BusChannelStrip {
         {
             self.haas.reset();
         }
+        #[cfg(feature = "sheen")]
+        {
+            self.sheen.reset();
+        }
     }
 
     fn process(
@@ -2366,6 +2495,37 @@ impl Plugin for BusChannelStrip {
             }
             seen[idx] = true;
             self.dispatch_module(mt, buffer, aux);
+        }
+
+        // 6.5) Sheen — pinned master-end polish coat. Always last in the
+        // chain (post-Punch, pre-master-gain). Excluded from auto-gain
+        // intentionally per SHEEN_MODULE_SPEC.md §7: auto-comp on a polish
+        // stage defeats its purpose. Param state is forwarded once per
+        // buffer; the module compares against its cache and only
+        // regenerates filter coefficients when a slider actually moved.
+        //
+        // We use `.value()` not `.smoothed.next()` because `next()`
+        // advances only ONE sample per call, and we call it once per
+        // buffer — so the smoother takes ~240 buffers to reach a new
+        // target (perceptually unresponsive). Filter biquad state acts
+        // as the per-sample smoother; param-level snapping into a fresh
+        // set of coefficients is fine for a slow user-drag rate.
+        #[cfg(feature = "sheen")]
+        {
+            self.sheen.update_parameters(
+                self.params.sheen_bypass.value(),
+                self.params.sheen_body_db.value(),
+                self.params.sheen_body_bypass.value(),
+                self.params.sheen_presence_db.value(),
+                self.params.sheen_presence_bypass.value(),
+                self.params.sheen_air_db.value(),
+                self.params.sheen_air_bypass.value(),
+                self.params.sheen_warmth.value(),
+                self.params.sheen_warmth_bypass.value(),
+                self.params.sheen_width.value(),
+                self.params.sheen_width_bypass.value(),
+            );
+            self.sheen.process(buffer);
         }
 
         // 7) Auto-gain compensation (before master trim so it doesn't fight the user's gain knob).

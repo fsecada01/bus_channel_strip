@@ -7,8 +7,8 @@ set shell := ["cmd", "/c"]
 set dotenv-load := true
 
 # Feature sets
-FEATURES      := "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui"
-CORE_FEATURES := "api5500,buttercomp2,pultec,transformer,punch,dynamic_eq"
+FEATURES      := "api5500,buttercomp2,pultec,transformer,punch,haas,dynamic_eq,sheen,gui"
+CORE_FEATURES := "api5500,buttercomp2,pultec,transformer,punch,haas,dynamic_eq,sheen"
 
 # Plugin install paths (Windows) — backslashes required for CMD if/md/copy
 VST3_DIR := "C:\\Program Files\\Common Files\\VST3"

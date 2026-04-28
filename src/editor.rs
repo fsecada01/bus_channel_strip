@@ -77,6 +77,16 @@ pub enum AppEvent {
     OpenDynEq,
     /// Return from DynEQ back view to the strip front view.
     CloseDynEq,
+    /// Open the Sheen back view (brass-plate click). Mutually exclusive
+    /// with `OpenDynEq` — opening one closes the other.
+    OpenSheen,
+    /// Return from Sheen back view to the strip front view.
+    CloseSheen,
+    /// Restore every Sheen parameter to its factory default. Wired to the
+    /// "RESTORE FACTORY" button on the Sheen back view. Implemented as a
+    /// batch of `RawParamEvent::Set*` writes so the host sees the change
+    /// as automation, not as a model-only state mutation.
+    RestoreSheenFactory,
     /// Toggle the expand/collapse state of a DynEQ band (0–3). GUI-only state.
     ToggleDynEQBand(usize),
     /// Set the chassis zoom level (percentage: 75, 100, 125, 150, 200).
@@ -116,6 +126,10 @@ pub struct Data {
     pub cursor_y: f32,
     /// When true, the DynEQ back view is shown instead of the strip.
     pub dyneq_open: bool,
+    /// When true, the Sheen back view is shown instead of the strip.
+    /// Mutually exclusive with `dyneq_open` — handlers for either Open*
+    /// event clear the other so the model never has two back views true.
+    pub sheen_open: bool,
     /// GUI-only expand state for each of the 4 DynEQ bands. Never accessed from audio thread.
     pub dyneq_band_expand: Arc<[AtomicBool; 4]>,
     /// Incremented on every ToggleDynEQBand — used as lens target to trigger .display() re-evaluation.
@@ -150,6 +164,10 @@ impl Model for Data {
                     self.focused_slot = None;
                     self.drag_source = None;
                     self.drop_target = None;
+                    // Esc also closes any open back view so users have a
+                    // single universal "get me back to the strip" key.
+                    self.dyneq_open = false;
+                    self.sheen_open = false;
                 }
                 Code::Digit1 => self.focus_if_real(0),
                 Code::Digit2 => self.focus_if_real(1),
@@ -183,9 +201,51 @@ impl Model for Data {
         event.map(|e: &AppEvent, _| match e {
             AppEvent::OpenDynEq => {
                 self.dyneq_open = true;
+                // Mutual exclusion with Sheen back view.
+                self.sheen_open = false;
             }
             AppEvent::CloseDynEq => {
                 self.dyneq_open = false;
+            }
+            AppEvent::OpenSheen => {
+                self.sheen_open = true;
+                // Mutual exclusion with DynEQ back view.
+                self.dyneq_open = false;
+            }
+            AppEvent::CloseSheen => {
+                self.sheen_open = false;
+            }
+            AppEvent::RestoreSheenFactory => {
+                // Re-write every Sheen param to the factory default in one
+                // event-frame batch. Values mirror SHEEN_MODULE_SPEC.md §3
+                // and the lib.rs `Default for BusChannelStripParams` impl.
+                let restore = |cx: &mut EventContext, ptr: ParamPtr, plain: f32| {
+                    // SAFETY: ParamPtr is taken from `self.params` (Arc'd,
+                    // outlives the editor). preview_normalized maps plain
+                    // → 0..1 using the same range the param was built with.
+                    let norm = unsafe { ptr.preview_normalized(plain) };
+                    cx.emit(RawParamEvent::BeginSetParameter(ptr));
+                    cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+                    cx.emit(RawParamEvent::EndSetParameter(ptr));
+                };
+                let restore_bool = |cx: &mut EventContext, ptr: ParamPtr, val: bool| {
+                    let plain: f32 = if val { 1.0 } else { 0.0 };
+                    let norm = unsafe { ptr.preview_normalized(plain) };
+                    cx.emit(RawParamEvent::BeginSetParameter(ptr));
+                    cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+                    cx.emit(RawParamEvent::EndSetParameter(ptr));
+                };
+                restore_bool(cx, self.params.sheen_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen_body_db.as_ptr(), 1.0);
+                restore_bool(cx, self.params.sheen_body_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen_presence_db.as_ptr(), 0.0);
+                restore_bool(cx, self.params.sheen_presence_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen_air_db.as_ptr(), 1.8);
+                restore_bool(cx, self.params.sheen_air_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen_warmth.as_ptr(), 0.20);
+                restore_bool(cx, self.params.sheen_warmth_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen_width.as_ptr(), 0.50);
+                restore_bool(cx, self.params.sheen_width_bypass.as_ptr(), false);
             }
 
             AppEvent::ToggleDynEQBand(band) => {
@@ -283,6 +343,8 @@ impl Model for Data {
                 self.focused_slot = None;
                 self.drag_source = None;
                 self.drop_target = None;
+                self.dyneq_open = false;
+                self.sheen_open = false;
             }
 
             AppEvent::LoadChain(idx) => {
@@ -964,6 +1026,7 @@ pub(crate) fn create(
             cursor_x: 0.0,
             cursor_y: 0.0,
             dyneq_open: false,
+            sheen_open: false,
             dyneq_band_expand: Arc::new([
                 AtomicBool::new(false),
                 AtomicBool::new(false),
@@ -991,10 +1054,34 @@ pub(crate) fn create(
             // same translucent fill so the whole header reads as one gradient
             // surface rather than a row of clunky boxes.
             HStack::new(cx, |cx| {
+                // Brass plate — the brand mark IS the front-panel surface
+                // for the hidden Sheen module. Click anywhere on it to
+                // flip the chassis to the Sheen back view. Active class
+                // lights up while the back view is open so users know
+                // how to flip back.
+                //
+                // Vizia routing note: `on_press` only fires when
+                // `cx.current == meta.target`, and `meta.target` is the
+                // deepest hovered view at click time. Since the two child
+                // Labels fill the parent's content area, clicks land on a
+                // Label (target=Label) and the parent's on_press never
+                // fires. So we attach `on_press` to BOTH labels AND the
+                // parent — wherever the click lands inside the plate it
+                // emits OpenSheen.
                 HStack::new(cx, |cx| {
-                    Label::new(cx, "API").class("chassis-brand");
-                    Label::new(cx, "Bus Channel Strip").class("chassis-title");
+                    Label::new(cx, "API")
+                        .class("chassis-brand")
+                        .on_press(|cx| cx.emit(AppEvent::OpenSheen))
+                        .cursor(CursorIcon::Hand);
+                    Label::new(cx, "Bus Channel Strip")
+                        .class("chassis-title")
+                        .on_press(|cx| cx.emit(AppEvent::OpenSheen))
+                        .cursor(CursorIcon::Hand);
                 })
+                .class("brand-plate-brass")
+                .toggle_class("brand-plate-active", Data::sheen_open.map(|s| *s))
+                .on_press(|cx| cx.emit(AppEvent::OpenSheen))
+                .cursor(CursorIcon::Hand)
                 .width(Auto)
                 .height(Auto)
                 .gap(Pixels(12.0))
@@ -1070,8 +1157,11 @@ pub(crate) fn create(
             .height(Stretch(1.0))
             .width(Stretch(1.0))
             .gap(Pixels(4.0))
-            .display(Data::dyneq_open.map(|o| {
-                if *o {
+            // Strip view hides whenever EITHER back view (DynEQ or Sheen)
+            // is open. `OrLens` short-circuits — no need for nested
+            // Bindings or a derived state field.
+            .display(Data::dyneq_open.or(Data::sheen_open).map(|open| {
+                if *open {
                     Display::None
                 } else {
                     Display::Flex
@@ -1085,6 +1175,11 @@ pub(crate) fn create(
                 analysis_result.clone(),
                 gr_data.clone(),
             );
+
+            // ── Sheen back view ─────────────────────────────────────────────
+            // Pinned master-end polish coat. Brass plate in the chassis
+            // header opens this; mutually exclusive with the DynEQ back view.
+            build_sheen_back_view(cx);
 
             // ── Floating drag ghost ─────────────────────────────────────────
             // While a drag is in flight, render a small pill next to the
@@ -2579,6 +2674,198 @@ fn build_dyneq_back_view(
     .gap(Pixels(12.0))
     .padding(Pixels(16.0))
     .display(Data::dyneq_open.map(|o| if *o { Display::Flex } else { Display::None }));
+}
+
+// ============================================================================
+// Sheen Back View — five sliders behind the brass plate
+// ============================================================================
+
+/// Sheen back view. Header (BACK pill + brass SHEEN wordmark + master
+/// bypass + RESTORE FACTORY) sits above five vertical slider columns
+/// (BODY / PRESENCE / AIR / WARMTH / WIDTH), each with its own per-stage
+/// bypass. Brass theme throughout to match the front-panel plate.
+fn build_sheen_back_view(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        // ── Header row: back button + wordmark ─────────────────────────
+        HStack::new(cx, |cx| {
+            VStack::new(cx, |cx| {
+                Label::new(cx, "\u{25C0} STRIP VIEW")
+                    .class("sheen-back-btn-label")
+                    .height(Pixels(16.0))
+                    .width(Stretch(1.0));
+            })
+            .class("sheen-back-btn")
+            .on_press(|cx| cx.emit(AppEvent::CloseSheen))
+            .cursor(CursorIcon::Hand)
+            .height(Pixels(32.0))
+            .width(Pixels(140.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
+
+            Label::new(cx, "SHEEN")
+                .class("sheen-back-title")
+                .height(Pixels(28.0))
+                .top(Pixels(0.0))
+                .bottom(Pixels(0.0));
+
+            // Right-side spacer — pushes the master strip below it.
+            Label::new(cx, "").width(Stretch(1.0)).height(Pixels(1.0));
+        })
+        .height(Pixels(40.0))
+        .width(Stretch(1.0))
+        .gap(Pixels(12.0))
+        .alignment(Alignment::Center);
+
+        // ── Master strip: bypass + restore ─────────────────────────────
+        HStack::new(cx, |cx| {
+            VStack::new(cx, |cx| {
+                Label::new(cx, "MASTER BYPASS")
+                    .class("param-label")
+                    .height(Pixels(14.0))
+                    .width(Stretch(1.0));
+                ParamButton::new(cx, Data::params, |p| &p.sheen_bypass)
+                    .class("sheen-master-bypass")
+                    .height(Pixels(32.0))
+                    .width(Stretch(1.0));
+            })
+            .height(Auto)
+            .width(Pixels(180.0))
+            .gap(Pixels(4.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
+
+            // Spacer takes the rest so RESTORE FACTORY sits at the right.
+            Label::new(cx, "").width(Stretch(1.0)).height(Pixels(1.0));
+
+            VStack::new(cx, |cx| {
+                Label::new(cx, "")
+                    .class("param-label")
+                    .height(Pixels(14.0))
+                    .width(Stretch(1.0));
+                Label::new(cx, "\u{21BA} RESTORE FACTORY")
+                    .class("sheen-restore-btn")
+                    .height(Pixels(32.0))
+                    .width(Stretch(1.0));
+            })
+            .on_press(|cx| cx.emit(AppEvent::RestoreSheenFactory))
+            .cursor(CursorIcon::Hand)
+            .height(Auto)
+            .width(Pixels(180.0))
+            .gap(Pixels(4.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
+        })
+        .height(Auto)
+        .width(Stretch(1.0))
+        .gap(Pixels(12.0))
+        .alignment(Alignment::Center);
+
+        // ── Five slider columns ────────────────────────────────────────
+        // Each column shares the same vertical layout: stage label →
+        // ParamSlider → per-stage bypass. ParamSlider in this version
+        // renders horizontally; we lay them out in their own rows so the
+        // visual grouping per stage stays cohesive even though the slider
+        // glyph itself is horizontal.
+        HStack::new(cx, |cx| {
+            sheen_stage_column(cx, "BODY", "100 Hz", true);
+            sheen_stage_column(cx, "PRESENCE", "3 kHz", false);
+            sheen_stage_column(cx, "AIR", "14 kHz", false);
+            sheen_stage_column(cx, "WARMTH", "Inflator", false);
+            sheen_stage_column(cx, "WIDTH", "M/S", false);
+        })
+        .height(Stretch(1.0))
+        .width(Stretch(1.0))
+        .gap(Pixels(12.0))
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+    })
+    .class("sheen-back-view")
+    .height(Stretch(1.0))
+    .width(Stretch(1.0))
+    .gap(Pixels(12.0))
+    .padding(Pixels(16.0))
+    .display(Data::sheen_open.map(|o| if *o { Display::Flex } else { Display::None }));
+}
+
+/// One vertical column for a Sheen stage. The `is_first` flag decides which
+/// concrete param accessors to bind — Rust closures can't be polymorphic
+/// over field selectors so we dispatch by string match. Adding a stage
+/// later means adding a branch here, not refactoring the whole layout.
+fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _is_first: bool) {
+    VStack::new(cx, |cx| {
+        // Stage header: large brass-typography name + small unit hint.
+        Label::new(cx, name)
+            .class("sheen-stage-name")
+            .height(Pixels(22.0))
+            .width(Stretch(1.0));
+        Label::new(cx, sub)
+            .class("sheen-stage-sub")
+            .height(Pixels(14.0))
+            .width(Stretch(1.0));
+
+        // Param slider + per-stage bypass — branched by stage name. Each
+        // branch wires both the value param and the corresponding bypass
+        // param so the two sliders below stay in sync visually.
+        match name {
+            "BODY" => {
+                ParamSlider::new(cx, Data::params, |p| &p.sheen_body_db)
+                    .class("sheen-slider")
+                    .height(Pixels(22.0))
+                    .width(Stretch(1.0));
+                ParamButton::new(cx, Data::params, |p| &p.sheen_body_bypass)
+                    .class("sheen-stage-bypass")
+                    .height(Pixels(24.0))
+                    .width(Stretch(1.0));
+            }
+            "PRESENCE" => {
+                ParamSlider::new(cx, Data::params, |p| &p.sheen_presence_db)
+                    .class("sheen-slider")
+                    .height(Pixels(22.0))
+                    .width(Stretch(1.0));
+                ParamButton::new(cx, Data::params, |p| &p.sheen_presence_bypass)
+                    .class("sheen-stage-bypass")
+                    .height(Pixels(24.0))
+                    .width(Stretch(1.0));
+            }
+            "AIR" => {
+                ParamSlider::new(cx, Data::params, |p| &p.sheen_air_db)
+                    .class("sheen-slider")
+                    .height(Pixels(22.0))
+                    .width(Stretch(1.0));
+                ParamButton::new(cx, Data::params, |p| &p.sheen_air_bypass)
+                    .class("sheen-stage-bypass")
+                    .height(Pixels(24.0))
+                    .width(Stretch(1.0));
+            }
+            "WARMTH" => {
+                ParamSlider::new(cx, Data::params, |p| &p.sheen_warmth)
+                    .class("sheen-slider")
+                    .height(Pixels(22.0))
+                    .width(Stretch(1.0));
+                ParamButton::new(cx, Data::params, |p| &p.sheen_warmth_bypass)
+                    .class("sheen-stage-bypass")
+                    .height(Pixels(24.0))
+                    .width(Stretch(1.0));
+            }
+            "WIDTH" => {
+                ParamSlider::new(cx, Data::params, |p| &p.sheen_width)
+                    .class("sheen-slider")
+                    .height(Pixels(22.0))
+                    .width(Stretch(1.0));
+                ParamButton::new(cx, Data::params, |p| &p.sheen_width_bypass)
+                    .class("sheen-stage-bypass")
+                    .height(Pixels(24.0))
+                    .width(Stretch(1.0));
+            }
+            _ => {}
+        }
+    })
+    .class("sheen-stage-column")
+    .height(Stretch(1.0))
+    .width(Stretch(1.0))
+    .gap(Pixels(8.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
 }
 
 fn build_transformer_controls(cx: &mut Context) {
