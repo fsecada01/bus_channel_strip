@@ -280,12 +280,16 @@ These are deliberately out of scope for this redesign:
 
 ## Open Questions
 
-1. **Slot count.** VMR has 8; we have 7 modules. Fix to 7 slots or
-   allow up to 8 with empty slots? Recommendation: 6 slots, enforce
-   one-instance-per-module — matches current `module_order_1..6`.
-2. **Library position.** Left sidebar (VMR) or top-bar dropdown
-   (Mix Locker)? Sidebar eats width in a bus plugin; dropdown is
-   tighter. Recommendation: top-bar dropdown, revisit if library grows.
+1. **Slot count.** ~~VMR has 8; we have 7 modules.~~ **Decided: 7 slots.**
+   Matches the existing `module_order_1..7` parameter set, gives users
+   one extra "Empty" lane for routing flexibility, and preserves
+   backward compatibility with saved sessions.
+2. **Library position.** ~~Left sidebar vs top-bar dropdown.~~
+   **Decided: left sidebar, sole add path.** The per-slot picker that
+   used to live inside empty slots was removed in the consolidation
+   pass — the sidebar now targets the focused empty slot first, falling
+   back to first-empty. One mental model for adding modules instead of
+   two competing affordances.
 3. **Slot width normalization.** Several modules currently use wider
    panels (Dynamic EQ 200px, Transformer 320px, Punch 320px). Enforce
    220px uniform or allow declared "double-wide"? Recommendation:
@@ -293,6 +297,73 @@ These are deliberately out of scope for this redesign:
 4. **Chain preset storage.** Embed in plugin preset file or separate
    JSON? Recommendation: embedded — ensures DAW session restores
    everything atomically.
+
+## Consolidation Pass (post-integration testing)
+
+Live test on Reaper surfaced three issues addressed in a unified pass:
+
+- **Click responsiveness.** Chassis-level `WindowEvent::MouseUp(Left)`
+  was emitting `EndDrag` on every left-mouse-up — including ordinary
+  button releases. Now gated on `drag_slot.is_some()`.
+- **Empty slots overpowered.** Empty slots used to render full-size
+  with an inline picker. They now render as slim dashed-outline tabs
+  (same width as a collapsed module tab), no body, no expansion. The
+  sidebar is the only path to add a module.
+- **Mini-map redundancy.** Mini-map duplicated the rack when nothing
+  was focused. Now only renders while focus mode is active.
+
+## Drag-and-drop Redesign (research-driven)
+
+After two iterations of broken drag-drop, a five-agent deep-research pass
+(see `claudedocs/research_synthesis_20260426-203348.md`) confirmed the
+hand-rolled `on_press_down` + chassis-`MouseUp` state machine was the
+wrong shape for vizia. Rewritten to use vizia's built-in drag-drop API
+plus VMR-aligned interaction conventions.
+
+**Drag mechanic**
+- The slot body itself is the drag source (no separate `≡` handle —
+  matches Slate VMR convention)
+- Vizia's `on_drag` modifier auto-marks the source `Abilities::DRAGGABLE`
+  and fires the moment the cursor leaves the source view with LMB held
+- `on_drop` fires on the target's `MouseUp`, routed through normal hover
+  resolution (not capture-trapped)
+
+**Drop semantics — swap or push** (matches user-stated requirement)
+Hit-test cursor X within target slot bounds at release:
+- Left third → `DropPos::Before` (insert before, push later slots right)
+- Middle third → `DropPos::Onto` (swap source ↔ target)
+- Right third → `DropPos::After` (insert after, push later slots right)
+
+The `Data::reorder` method writes the new order back, only emitting
+`RawParamEvent`s for slots that actually changed — minimises preset diff
+size and avoids spurious automation events.
+
+**Visual states**
+- `.slot-drag-source` — the slot being dragged (desaturated + dashed)
+- `.slot-eligible-target` — every other slot during a drag (subtle inner
+  glow, "you can drop here")
+- `.slot-eligible-target:hover` — bright yellow ring on the slot the
+  cursor is actually over (CSS handles it; no reactive hover state needed)
+
+**Defensive cleanup**
+Hooked `WindowEvent::MouseLeave` at the chassis root to emit `DragCancel`
+if a drag is in flight when the cursor leaves the editor window. Mitigates
+[vizia#407](https://github.com/vizia/vizia/issues/407) — baseview's
+Win32 `SetCapture` lifecycle has no `WM_CAPTURECHANGED` handler, so a
+mouse-up delivered outside the host window can leave capture stuck.
+
+**Removed in this pass**
+- Mini-map (redundant with always-visible rack — VMR uses scroll instead)
+- Click-to-focus on module name (the body is now the drag source; clicks
+  shouldn't compete with drag-start)
+- `≡ DRAG` handle row + label (no longer needed)
+- `AppEvent::StartDrag`, `SetHoveredSlot`, `EndDrag`, `ToggleFocusSlot`
+  (replaced by `DragStarted`, `DropOnSlot`, `DragCancel` + direct
+  `focus_if_real` calls from keyboard handlers)
+
+**Focus mode** — demoted to keyboard-only (`1..7` to focus a real-module
+slot, Esc to exit). Empty slots remain non-focusable. EXIT FOCUS pill
+in the chassis header still works as the explicit exit affordance.
 
 ## References
 
