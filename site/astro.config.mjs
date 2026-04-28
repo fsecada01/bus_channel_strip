@@ -7,7 +7,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Bus Channel Strip',
-      description: 'Seven classic processors. One signal chain. Mix, compress, shape, widen, and maximize — with analog transformer character.',
+      description: 'Seven classic processors plus a hidden master-end polish coat. One signal chain. Mix, compress, shape, widen, maximize, and polish — with analog transformer character.',
       social: {
         github: 'https://github.com/fsecada01/bus_channel_strip',
       },
@@ -31,6 +31,7 @@ export default defineConfig({
             { label: 'Transformer', link: '/modules/transformer/' },
             { label: 'Haas', link: '/modules/haas/' },
             { label: 'Punch', link: '/modules/punch/' },
+            { label: 'Sheen (master-end polish)', link: '/modules/sheen/' },
           ],
         },
         {
@@ -54,6 +55,7 @@ export default defineConfig({
           label: 'Release Notes',
           items: [
             { label: 'Changelog', link: '/changelog/' },
+            { label: 'v2.0 Roadmap', link: '/roadmap/' },
           ],
         },
       ],

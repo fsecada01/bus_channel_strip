@@ -7,6 +7,58 @@ For full release notes, binaries, and platform-specific archives, see the [GitHu
 
 ---
 
+## v1.0.0 — 2026-04
+
+Two major workstreams shipped together: **Sheen** (a hidden master-end polish coat) and a **full multi-fx rack UX redesign** that finally makes module reordering feel native.
+
+### Sheen — master-end polish coat
+
+A new pinned DSP stage at the end of the chain (post-Punch, pre-master-gain) that makes the chassis sound finished out of the box. The brushed-brass **API** brand plate in the chassis header is the only front-panel surface — click it to flip into a hidden back view with five sliders.
+
+Always-on by default at research-grounded factory tuning:
+
+- **BODY** — low shelf @ 100 Hz, default +1.0 dB
+- **PRESENCE** — peak EQ @ 3 kHz, Q=1.0, default 0.0 dB (transparent at default)
+- **AIR** — high shelf @ 14 kHz, Q=0.5, default +1.8 dB
+- **WARMTH** — Sonnox Inflator polynomial @ Curve=0, 2× oversampled, default 20% mix
+- **WIDTH** — M/S side-only HPF @ 150 Hz + shelf @ 500 Hz, default 50%
+
+Defaults are anchored in three parallel research reports — classic console-bus measurements (SSL G, Neve 33609, API 2500, Studer, Trident), polish-plugin teardowns (Slate Revival, Kush AR-1, Maag EQ4, Sonnox Inflator, Pensado, Vitamin, Ozone, PSP Vintage Warmer, bx_console), and tape + transformer harmonic profiles (Studer A800, Ampex ATR-102, Jensen, Lundahl, Carnhill). See [`docs/SHEEN_MODULE_SPEC.md`](https://github.com/fsecada01/bus_channel_strip/blob/main/docs/SHEEN_MODULE_SPEC.md) for citations and stage-by-stage rationale.
+
+Sheen is **excluded from `global_auto_gain`** — auto-comp on a polish stage defeats its purpose. See the [Sheen module page](/bus_channel_strip/modules/sheen/) for the full reference.
+
+### Multi-fx rack redesign
+
+The seven-slot rack got a ground-up UX overhaul:
+
+- **Native vizia drag-drop** replaces the previous hand-rolled mouse-capture state machine that was silently failing under baseview's Win32 `SetCapture` lifecycle.
+- **Swap-or-insert semantics** decided by cursor X within the target slot at release time: left third = insert before, middle = swap, right third = insert after.
+- **Live drop-position preview** while dragging — bright cyan bar pinned to the target slot's left or right edge (insert) or full yellow ring around the slot (swap), so you see the resolved drop intent before releasing.
+- **Floating drag-ghost label** tracks the cursor showing the dragged module's tag.
+- **Empty slots collapse by default** to narrow dashed tabs; the **library sidebar** is now the sole "add module" affordance.
+- **Focus mode** — press `1`..`7` to focus a real-module slot (collapses every other slot to a tab); `Esc` exits focus, cancels drag, or closes any open back view.
+- **Chain mini-map** appears as a band above the chassis only when a slot is focused, hidden otherwise.
+- **Brushed-brass brand plate** is the entry point to the Sheen back view; mutually exclusive with the DynEQ back view.
+- **Click-lag fix** — the chassis-level `MouseUp` listener that previously routed every click through the broken drag state machine has been removed.
+
+### Compatibility
+
+11 new automation params (Sheen) on top of the existing ~75 — no reused IDs. Existing DAW sessions load with Sheen ON at factory defaults; playback will subtly differ from pre-1.0 sessions. For bit-identical playback, flip the back-panel master Sheen bypass.
+
+### Other improvements
+
+- `justfile` `FEATURES` and `CORE_FEATURES` lists corrected (`sheen` and `haas` were missing from the bundle commands)
+- vizia event-routing documentation: clickable HStacks need `on_press` on each child Label because vizia's `on_press` is leaf-targeted, not bubbling
+- Module-level cached params now use `.value()` instead of `.smoothed.next()` — the latter advances 1 sample per call
+
+### Test coverage
+
+- 8 new Sheen unit tests
+- 159 lib tests passing
+- Verified in Reaper across drum / bass / vocal / full-mix material; rack drag-drop verified with swap, insert-before, insert-after, drag-to-empty-slot, and drag-cancel-by-leaving-window
+
+---
+
 ## v0.5.0 — 2026-04
 
 ### Pultec EQ — authentic LCR resonance and bandwidth control

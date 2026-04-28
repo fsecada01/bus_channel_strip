@@ -1,11 +1,11 @@
 ---
 title: Bus Channel Strip
-description: Professional 7-module bus processor — VST3 & CLAP plugin for Reaper, Bitwig, Cubase, and more.
+description: Professional 8-module bus processor — seven reorderable slots plus a pinned master-end polish coat. VST3 & CLAP plugin for Reaper, Bitwig, Cubase, and more.
 template: splash
 hero:
-  tagline: Seven classic processors. One signal chain. Zero compromises.
+  tagline: Seven classic processors. One pinned polish coat. One signal chain.
   actions:
-    - text: Download v0.5.0
+    - text: Download v1.0.0
       link: https://github.com/fsecada01/bus_channel_strip/releases/latest
       icon: external
       variant: primary
@@ -13,16 +13,20 @@ hero:
       link: /bus_channel_strip/modules/
       icon: right-arrow
       variant: secondary
+    - text: v2.0 Roadmap
+      link: /bus_channel_strip/roadmap/
+      icon: rocket
+      variant: minimal
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-<Card title="New in v0.5.0">
-**Pultec EQ is completely remodeled.** The LF section now includes an authentic LCR resonant bump (45% of shelf gain at Q=1.8) that matches the inductor resonance of the original hardware. LF Boost and LF Cut ranges extended to 18 dB. LF Boost Freq now spans 20–300 Hz. New Bandwidth controls on both LF Boost and LF Cut let you dial in shelf width from narrow (Q=1.0) to wide (Q=0.25), making the boost present in the musical 100–300 Hz range.
+<Card title="New in v1.0.0 — Sheen + multi-fx rack redesign">
+**Sheen** is a hidden master-end polish coat pinned post-Punch. Click the brushed-brass **API** brand plate in the chassis header to flip into a back view with five sliders: BODY (low shelf 100 Hz), PRESENCE (peak 3 kHz), AIR (high shelf 14 kHz), WARMTH (Sonnox Inflator polynomial @ 2× oversample), WIDTH (M/S side-only with mono lows protected). Default-on at research-grounded factory tuning so the plugin sounds finished out of the box.
 
-**New: Haas module** — psychoacoustic stereo widening via M/S encoding and Haas effect comb filtering. Two modes: Side Comb (mono-compatible) and Wide Comb (diffuse). Hermite-interpolated delay from 1–20 ms with smooth automation and RMS-safe automatic output trim.
+**Multi-fx rack redesign** — the seven-slot rack got a ground-up UX overhaul: native vizia drag-drop replacing the previous broken state machine, swap-or-insert hit-test (drop in left third / middle / right third), live cyan/yellow drop-position preview, floating ghost label tracking the cursor, focus mode (`1`..`7` / `Esc`), library sidebar as the sole add path, and brushed-brass brand plate.
 
-[See the full changelog](/bus_channel_strip/changelog/)
+[Full v1.0.0 release notes →](https://github.com/fsecada01/bus_channel_strip/releases/tag/v1.0.0) · [What's coming in v2.0 →](/bus_channel_strip/roadmap/)
 </Card>
 
 ## Signal Chain
@@ -41,9 +45,11 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   <span class="node node-haas">Haas</span>
   <span class="arrow">→</span>
   <span class="node node-punch">Punch</span>
+  <span class="arrow">→</span>
+  <span class="node node-pultec">Sheen</span>
 </div>
 
-Every module is independently bypassable, fully automatable, and reorderable at runtime via the drag-to-swap UI.
+The first seven modules are reorderable at runtime via native drag-and-drop with a live drop-position preview (cyan bar = insert; yellow ring = swap). **Sheen** is pinned at the master end (post-Punch, pre-master-gain) — it's the chassis-level "polish coat" exposed via the brushed-brass brand plate. Every module is independently bypassable and fully automatable.
 
 ## Modules
 
@@ -75,6 +81,10 @@ Every module is independently bypassable, fully automatable, and reorderable at 
   <div class="module-card card-punch">
     <h3>Punch</h3>
     <p>Transparent clipper with Hard/Soft/Cubic modes, up to 8x oversampling, and pre-clip transient shaper for loudness maximization without pumping.</p>
+  </div>
+  <div class="module-card card-pultec">
+    <h3>Sheen <em>(pinned, master-end)</em></h3>
+    <p>Hidden five-stage polish coat: BODY low shelf, PRESENCE peak, AIR high shelf, WARMTH (Sonnox Inflator @ 2× oversample), WIDTH M/S side-only. Default-on at research-grounded factory tuning. Click the brushed-brass brand plate to open the back view.</p>
   </div>
 </div>
 

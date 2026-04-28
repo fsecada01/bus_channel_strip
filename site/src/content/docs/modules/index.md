@@ -1,13 +1,13 @@
 ---
 title: Module Reference
-description: Overview of all seven Bus Channel Strip DSP modules and their signal chain order.
+description: Overview of the seven slot DSP modules plus the pinned master-end Sheen polish stage.
 ---
 
-Bus Channel Strip contains seven DSP modules in a serial signal chain. Each module:
+Bus Channel Strip contains **seven reorderable slot modules** plus a **pinned master-end "polish coat"** (Sheen). Each module:
 
 - Has an individual **bypass** switch
 - Is **fully automatable** (VST3 and CLAP)
-- Can be **reordered** via the drag-to-swap handles in the GUI
+- Can be **reordered** via native drag-and-drop with live drop-position preview *(slot modules only — Sheen is pinned at the master end)*
 - Runs on a **lock-free, allocation-free** audio thread
 
 ## Signal Chain (default order)
@@ -26,6 +26,8 @@ Bus Channel Strip contains seven DSP modules in a serial signal chain. Each modu
   <span class="node node-haas">Haas</span>
   <span class="arrow">→</span>
   <span class="node node-punch">Punch</span>
+  <span class="arrow">→</span>
+  <span class="node node-pultec">Sheen</span>
 </div>
 
 This default order reflects a classic mastering/bus processing workflow:
@@ -37,6 +39,7 @@ This default order reflects a classic mastering/bus processing workflow:
 5. **Harmonic coloration** (Transformer) — analog warmth and character
 6. **Stereo widening** (Haas) — spatial placement before the final ceiling
 7. **Peak limiting** (Punch) — transparent ceiling catches any widener-induced peaks
+8. **Polish coat** (Sheen, pinned) — research-grounded five-stage default-on tonality applied to the master end. Hidden behind the brushed-brass brand plate.
 
 ## Modules
 
@@ -49,3 +52,4 @@ This default order reflects a classic mastering/bus processing workflow:
 | [Transformer](/bus_channel_strip/modules/transformer/) | Custom Rust | Analog transformer coloration (4 models) |
 | [Haas](/bus_channel_strip/modules/haas/) | Custom Rust | Psychoacoustic stereo widener (M/S + comb) |
 | [Punch](/bus_channel_strip/modules/punch/) | Custom Rust | Clipper + transient shaper, 8× oversampling |
+| [Sheen (pinned)](/bus_channel_strip/modules/sheen/) | Custom Rust | Master-end polish coat — 5 stages, default-on, brass-plate UX |
