@@ -18,24 +18,45 @@ use crate::{BusChannelStripParams, ModuleType};
 // App Events
 // ============================================================================
 
-/// Click-to-select/swap module reordering events.
-/// - First click on a slot: selects it (highlights it).
-/// - Click on a different slot: swaps the two modules, clears selection.
-/// - Click the same slot again: cancels the selection.
+/// Drop-position relative to a target slot, computed from cursor X at
+/// drop time. Drives swap-vs-insert semantics:
+/// - `Onto` (middle third): swap source ↔ target
+/// - `Before`/`After` (left/right third): remove source, insert before/after target
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropPos {
+    Before,
+    Onto,
+    After,
+}
+
+// Manual `vizia::Data` impl — the local `pub struct Data` (our model)
+// shadows the prelude's `Data` trait, so the derive macro can't resolve it.
+// Spelling out the trait via its absolute path sidesteps the shadowing.
+impl vizia_plug::vizia::binding::Data for DropPos {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum AppEvent {
-    /// Mouse-down on a slot's drag handle. Begins a drag-drop session
-    /// (or, if a slot is already selected, treats the press as the
-    /// "click the swap target" half of a click-to-swap operation).
-    StartDrag(usize),
-    /// Set or clear the slot currently under the cursor. Drives the
-    /// drop-target highlight while a drag is active.
-    SetHoveredSlot(Option<usize>),
-    /// Mouse released — global, fires from the chassis WindowEvent::MouseUp
-    /// listener so a drag started inside a slot can be released anywhere.
-    /// If a valid drop target is hovered, commits the swap; otherwise
-    /// leaves drag_slot in click-to-swap selection mode.
-    EndDrag,
+    /// Emitted from a slot's `on_drag` callback the moment vizia detects
+    /// drag-start (cursor leaves source view with LMB held). Sets the
+    /// reactive `drag_source` so eligible drop targets can light up.
+    DragStarted(usize),
+    /// Emitted from a slot's `on_drop` callback. `position` is computed
+    /// from cursor X within the target slot's bounds at release time.
+    /// Handler resolves the actual reorder against `drag_source`.
+    DropOnSlot { target: usize, position: DropPos },
+    /// Cancel any in-flight drag without committing. Wired to Esc and to
+    /// a defensive `MouseLeave` on the chassis root (vizia#407 / baseview
+    /// stuck-capture mitigation).
+    DragCancel,
+    /// Live cursor-over-target update emitted from each slot's `on_mouse_move`
+    /// while a drag is in flight. Drives the directional drop indicator
+    /// (left bar / full ring / right bar) and lets the user see the resolved
+    /// drop intent before releasing.
+    DragHover { target: usize, position: DropPos },
     /// Assign a specific ModuleType to a slot. Used by the library picker
     /// (Empty slot → fill with chosen module) and the eject action
     /// (filled slot → ModuleType::Empty).
@@ -45,11 +66,6 @@ pub enum AppEvent {
     /// parameters are left untouched (intentional: presets are a routing
     /// shortcut, not a full plugin preset).
     LoadChain(usize),
-    /// Toggle "focus mode" for a slot. If the slot is already focused,
-    /// returns to the all-slots view. If a different slot is focused,
-    /// swaps focus to this one. While focused, every other slot collapses
-    /// to its narrow tab so the focused slot's controls dominate the rack.
-    ToggleFocusSlot(usize),
     /// Library sidebar action: if `mt` is already in the rack, focus that
     /// slot; otherwise add it to the first empty slot. No-op if the rack
     /// is full of other modules and there's no empty slot.
@@ -85,8 +101,19 @@ pub enum AppEvent {
 #[derive(Lens)]
 pub struct Data {
     pub params: Arc<BusChannelStripParams>,
-    /// The slot index currently selected for swapping, or None.
-    pub drag_slot: Option<usize>,
+    /// `Some(slot)` while a drag-drop is in flight from that source slot.
+    /// Set by `AppEvent::DragStarted`, cleared on `DropOnSlot`/`DragCancel`.
+    /// Drives the "eligible drop target" visual class on every other slot.
+    pub drag_source: Option<usize>,
+    /// Resolved drop site while a drag is in flight: `(target_slot, position)`.
+    /// Updated continuously by per-slot `on_mouse_move` so the rack can
+    /// preview the drop visually before release. Cleared on drag end.
+    pub drop_target: Option<(usize, DropPos)>,
+    /// Window-local cursor position, refreshed every `MouseMove` while a
+    /// drag is in flight. Used to anchor the floating ghost label so the
+    /// user always sees what they're dragging next to the cursor.
+    pub cursor_x: f32,
+    pub cursor_y: f32,
     /// When true, the DynEQ back view is shown instead of the strip.
     pub dyneq_open: bool,
     /// GUI-only expand state for each of the 4 DynEQ bands. Never accessed from audio thread.
@@ -102,48 +129,53 @@ pub struct Data {
     pub zoom_level: u8,
     /// When `Some(slot)`, the rack is in focus mode: that slot renders full
     /// and every other slot collapses to its narrow tab regardless of its
-    /// per-module hide flag. `None` returns the rack to its default,
-    /// hide-flag-driven layout.
+    /// per-module hide flag. Set only via keyboard `1..7`; click-to-focus
+    /// was removed when the slot body became the drag source.
     pub focused_slot: Option<usize>,
-    /// Slot currently under the cursor. Only meaningful while `drag_slot`
-    /// is `Some(_)` — drives the drop-target visual highlight on the
-    /// hovered slot. Always cleared on EndDrag.
-    pub hovered_slot: Option<usize>,
 }
 
 impl Model for Data {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        // ── Window events: keyboard + global mouse-up ──────────────────
-        // Esc      — exit focus mode and cancel any in-flight slot swap
-        // 1..7     — focus the corresponding slot (Empty slots show picker)
-        // MouseUp  — completes a press-and-drag reorder: if the cursor is
-        //            over a different slot than the drag source, commit the
-        //            swap. If released on the source or outside the rack,
-        //            leave drag_slot set as click-to-swap selection.
-        // Routed via WindowEvent so we don't need to make any single view
-        // explicitly focusable; vizia bubbles these events up the tree.
+        // ── Window events: keyboard shortcuts + drag cancel ─────────────
+        // Esc       — exit focus mode and cancel any in-flight drag
+        // 1..7      — focus the corresponding real-module slot
+        // MouseLeave at chassis root — defensive cancel for vizia#407
+        //             baseview stuck-capture footgun (see synthesis report)
+        //
+        // No MouseUp listener: vizia's on_drop fires on the actually-hovered
+        // target, so the hand-rolled state machine is gone.
         event.map(|win: &WindowEvent, _| match win {
             WindowEvent::KeyDown(code, _) => match code {
                 Code::Escape => {
                     self.focused_slot = None;
-                    self.drag_slot = None;
-                    self.hovered_slot = None;
+                    self.drag_source = None;
+                    self.drop_target = None;
                 }
-                Code::Digit1 => self.focused_slot = Some(0),
-                Code::Digit2 => self.focused_slot = Some(1),
-                Code::Digit3 => self.focused_slot = Some(2),
-                Code::Digit4 => self.focused_slot = Some(3),
-                Code::Digit5 => self.focused_slot = Some(4),
-                Code::Digit6 => self.focused_slot = Some(5),
-                Code::Digit7 => self.focused_slot = Some(6),
+                Code::Digit1 => self.focus_if_real(0),
+                Code::Digit2 => self.focus_if_real(1),
+                Code::Digit3 => self.focus_if_real(2),
+                Code::Digit4 => self.focus_if_real(3),
+                Code::Digit5 => self.focus_if_real(4),
+                Code::Digit6 => self.focus_if_real(5),
+                Code::Digit7 => self.focus_if_real(6),
                 _ => {}
             },
-            WindowEvent::MouseUp(MouseButton::Left) => {
-                // Defer to the EndDrag handler so the press-and-drag commit
-                // logic lives in one place. Released on the source slot or
-                // outside the rack leaves drag_slot set as click-to-swap
-                // selection — Esc or clicking the source clears it.
-                cx.emit(AppEvent::EndDrag);
+            WindowEvent::MouseLeave => {
+                // Cursor left the editor window. If a drag was in flight,
+                // the OS may not deliver MouseUp back to us — drop the
+                // session defensively so we don't leave drag_source stuck.
+                if self.drag_source.is_some() {
+                    cx.emit(AppEvent::DragCancel);
+                }
+            }
+            WindowEvent::MouseMove(x, y) => {
+                // Track cursor while dragging so the floating ghost label
+                // can follow. Outside a drag we ignore (saves needless lens
+                // notifications since cursor_x/y feed only the ghost view).
+                if self.drag_source.is_some() {
+                    self.cursor_x = *x;
+                    self.cursor_y = *y;
+                }
             }
             _ => {}
         });
@@ -232,40 +264,25 @@ impl Model for Data {
                     // Module is already in the rack — focus that slot.
                     self.focused_slot = Some(slot);
                 } else if let Some(slot) = first_empty_slot(&self.params) {
-                    // Add to first empty slot.
+                    // Add to the leftmost empty slot, then focus it so
+                    // the user can immediately tweak the new module.
                     let ptr = slot_param_ptr(&self.params, slot);
                     let norm = slot_preview_normalized(&self.params, slot, *mt);
                     cx.emit(RawParamEvent::BeginSetParameter(ptr));
                     cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
                     cx.emit(RawParamEvent::EndSetParameter(ptr));
-                    // Focus the freshly filled slot — common workflow is
-                    // to add a module then immediately tweak its params.
                     self.focused_slot = Some(slot);
+                } else {
+                    // If no empty slot exists, silently no-op (the user
+                    // would have to eject something first; baseview lacks
+                    // a clean error-dialog primitive).
                 }
-                // If neither: rack is full and module isn't in it. The user
-                // would have to eject something first; we silently no-op
-                // rather than showing an error dialog (which baseview
-                // doesn't support cleanly anyway).
-            }
-
-            AppEvent::ToggleFocusSlot(idx) => {
-                let idx = *idx;
-                self.focused_slot = match self.focused_slot {
-                    Some(cur) if cur == idx => None,
-                    _ => Some(idx),
-                };
-                // Clear any stale click-to-swap selection — entering focus
-                // mode is a context switch and a half-completed swap from
-                // before the focus shift would surprise the user on their
-                // next drag-handle click.
-                self.drag_slot = None;
-                self.hovered_slot = None;
             }
 
             AppEvent::ClearFocus => {
                 self.focused_slot = None;
-                self.drag_slot = None;
-                self.hovered_slot = None;
+                self.drag_source = None;
+                self.drop_target = None;
             }
 
             AppEvent::LoadChain(idx) => {
@@ -284,7 +301,8 @@ impl Model for Data {
                     // Reset transient view state so the loaded chain shows
                     // as the overview instead of focused on whatever was
                     // there before.
-                    self.drag_slot = None;
+                    self.drag_source = None;
+                    self.drop_target = None;
                     self.focused_slot = None;
                 }
             }
@@ -300,75 +318,164 @@ impl Model for Data {
                 cx.emit(RawParamEvent::BeginSetParameter(ptr));
                 cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
                 cx.emit(RawParamEvent::EndSetParameter(ptr));
-                // Clear any in-flight swap selection — replacing a slot's
-                // contents while a swap is staged would be ambiguous.
-                self.drag_slot = None;
+                // Clear any in-flight drag — replacing a slot's contents
+                // while a swap is staged would be ambiguous.
+                self.drag_source = None;
+                self.drop_target = None;
             }
 
-            AppEvent::StartDrag(idx) => {
-                Self::handle_start_drag(self, cx, *idx);
+            AppEvent::DragStarted(idx) => {
+                self.drag_source = Some(*idx);
+                self.drop_target = None;
             }
 
-            AppEvent::SetHoveredSlot(slot) => {
-                self.hovered_slot = *slot;
+            AppEvent::DragCancel => {
+                self.drag_source = None;
+                self.drop_target = None;
             }
 
-            AppEvent::EndDrag => {
-                if let Some(src) = self.drag_slot {
-                    if let Some(target) = self.hovered_slot {
-                        if target != src {
-                            self.swap_slots(cx, src, target);
-                            self.drag_slot = None;
-                        }
+            AppEvent::DragHover { target, position } => {
+                // Only update if the cursor is over a different slot than
+                // the drag source — self-hover is meaningless and would
+                // light up the source as its own target.
+                if self.drag_source.is_some() && self.drag_source != Some(*target) {
+                    let next = Some((*target, *position));
+                    if self.drop_target != next {
+                        self.drop_target = next;
                     }
                 }
-                self.hovered_slot = None;
+            }
+
+            AppEvent::DropOnSlot { target, position } => {
+                // Resolve drop into a concrete reorder operation. If
+                // drag_source is None (defensive — shouldn't happen because
+                // on_drop only fires after a drag started), no-op.
+                if let Some(src) = self.drag_source {
+                    self.reorder(cx, src, *target, *position);
+                }
+                self.drag_source = None;
+                self.drop_target = None;
             }
         });
     }
 }
 
 impl Data {
-    /// Press / click on slot `idx`'s drag handle. Implements the unified
-    /// click-to-swap + drag-start state machine:
-    ///   • no selection      → start selection on this slot
-    ///   • selection on idx  → cancel
-    ///   • selection on src  → commit swap(src, idx)
-    fn handle_start_drag(&mut self, cx: &mut EventContext, idx: usize) {
-        match self.drag_slot {
-            None => {
-                self.drag_slot = Some(idx);
-            }
-            Some(src) if src == idx => {
-                self.drag_slot = None;
-            }
-            Some(src) => {
-                self.swap_slots(cx, src, idx);
-                self.drag_slot = None;
-            }
+    /// Focus a slot ONLY if it holds a real module. Empty slots silently
+    /// stay unfocused — focusing one would collapse every real slot via
+    /// the "any-other-focused → collapsed" render rule, leaving nothing
+    /// to inspect.
+    fn focus_if_real(&mut self, idx: usize) {
+        if slot_module_type(&self.params, idx) != ModuleType::Empty {
+            self.focused_slot = Some(idx);
+            self.drag_source = None;
+            self.drop_target = None;
         }
     }
 
-    /// Atomic swap of the modules at slots `src` and `tgt` via three pairs
-    /// of RawParamEvents per slot. Both module_order_* params change in the
-    /// same event frame so the audio thread sees the post-swap state on
-    /// its next block boundary.
-    fn swap_slots(&self, cx: &mut EventContext, src: usize, tgt: usize) {
-        let src_mt = slot_module_type(&self.params, src);
-        let tgt_mt = slot_module_type(&self.params, tgt);
-        let src_ptr = slot_param_ptr(&self.params, src);
-        let tgt_ptr = slot_param_ptr(&self.params, tgt);
+    /// Apply a reorder operation against the seven `module_order_*` params
+    /// in one event frame. `position` decides semantics:
+    ///   • `Onto`   → swap src ↔ tgt (two slots change)
+    ///   • `Before` → remove src, insert before tgt (rotation; up to 7 change)
+    ///   • `After`  → remove src, insert after tgt (rotation; up to 7 change)
+    ///
+    /// Reads the current order, computes the new order in-memory, then
+    /// writes back any slot that actually changed. This minimises host
+    /// preset diff size and avoids spurious automation events.
+    fn reorder(&self, cx: &mut EventContext, src: usize, tgt: usize, position: DropPos) {
+        if src == tgt && position == DropPos::Onto {
+            return; // self-drop, nothing to do
+        }
 
-        let src_norm = slot_preview_normalized(&self.params, src, tgt_mt);
-        let tgt_norm = slot_preview_normalized(&self.params, tgt, src_mt);
+        let mut order: [ModuleType; 7] = [
+            self.params.module_order_1.value(),
+            self.params.module_order_2.value(),
+            self.params.module_order_3.value(),
+            self.params.module_order_4.value(),
+            self.params.module_order_5.value(),
+            self.params.module_order_6.value(),
+            self.params.module_order_7.value(),
+        ];
 
-        cx.emit(RawParamEvent::BeginSetParameter(src_ptr));
-        cx.emit(RawParamEvent::SetParameterNormalized(src_ptr, src_norm));
-        cx.emit(RawParamEvent::EndSetParameter(src_ptr));
+        match position {
+            DropPos::Onto => {
+                order.swap(src, tgt);
+            }
+            DropPos::Before | DropPos::After => {
+                let moving = order[src];
+                // Remove src, then insert at the resolved index.
+                // After removal, indices > src shift down by one — the
+                // insert index must account for this.
+                let raw_insert = match position {
+                    DropPos::Before => tgt,
+                    DropPos::After => tgt + 1,
+                    DropPos::Onto => unreachable!(),
+                };
+                let mut tail: [ModuleType; 6] = [ModuleType::Empty; 6];
+                let mut j = 0;
+                for (i, &mt) in order.iter().enumerate() {
+                    if i == src {
+                        continue;
+                    }
+                    tail[j] = mt;
+                    j += 1;
+                }
+                let insert = raw_insert
+                    .min(6)
+                    .saturating_sub(if raw_insert > src { 1 } else { 0 });
+                let mut rebuilt = [ModuleType::Empty; 7];
+                let mut k = 0;
+                for (i, &mt) in tail.iter().enumerate() {
+                    if i == insert {
+                        rebuilt[k] = moving;
+                        k += 1;
+                    }
+                    rebuilt[k] = mt;
+                    k += 1;
+                }
+                if k < 7 {
+                    rebuilt[k] = moving;
+                }
+                order = rebuilt;
+            }
+        }
 
-        cx.emit(RawParamEvent::BeginSetParameter(tgt_ptr));
-        cx.emit(RawParamEvent::SetParameterNormalized(tgt_ptr, tgt_norm));
-        cx.emit(RawParamEvent::EndSetParameter(tgt_ptr));
+        // Write back only the slots that actually changed.
+        let before: [ModuleType; 7] = [
+            self.params.module_order_1.value(),
+            self.params.module_order_2.value(),
+            self.params.module_order_3.value(),
+            self.params.module_order_4.value(),
+            self.params.module_order_5.value(),
+            self.params.module_order_6.value(),
+            self.params.module_order_7.value(),
+        ];
+        for slot in 0..7usize {
+            if before[slot] == order[slot] {
+                continue;
+            }
+            let ptr = slot_param_ptr(&self.params, slot);
+            let norm = slot_preview_normalized(&self.params, slot, order[slot]);
+            cx.emit(RawParamEvent::BeginSetParameter(ptr));
+            cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
+            cx.emit(RawParamEvent::EndSetParameter(ptr));
+        }
+    }
+}
+
+/// Hit-test cursor X within a slot's bounds → DropPos.
+/// Left third → Before, middle third → Onto, right third → After.
+fn hit_test_drop_pos(cursor_x: f32, bounds: BoundingBox) -> DropPos {
+    if bounds.w <= 0.0 {
+        return DropPos::Onto;
+    }
+    let rel = (cursor_x - bounds.x) / bounds.w;
+    if rel < 0.33 {
+        DropPos::Before
+    } else if rel > 0.66 {
+        DropPos::After
+    } else {
+        DropPos::Onto
     }
 }
 
@@ -735,7 +842,8 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
 /// parent, which would cause clicks to fall back to the drag handle row.
 fn build_eject_button(cx: &mut Context, slot_idx: usize) {
     HStack::new(cx, |cx| {
-        Label::new(cx, "\u{23CF}").class("eject-btn-glyph"); // ⏏
+        Label::new(cx, "\u{2715}").class("eject-btn-glyph"); // ✕
+        Label::new(cx, "REMOVE").class("eject-btn-label");
     })
     .class("eject-btn")
     .on_press(move |cx| cx.emit(AppEvent::SetSlotModule(slot_idx, ModuleType::Empty)))
@@ -851,7 +959,10 @@ pub(crate) fn create(
 
         Data {
             params: params.clone(),
-            drag_slot: None,
+            drag_source: None,
+            drop_target: None,
+            cursor_x: 0.0,
+            cursor_y: 0.0,
             dyneq_open: false,
             dyneq_band_expand: Arc::new([
                 AtomicBool::new(false),
@@ -864,7 +975,6 @@ pub(crate) fn create(
             analysis_result: analysis_result.clone(),
             zoom_level: 100,
             focused_slot: None,
-            hovered_slot: None,
         }
         .build(cx);
 
@@ -930,19 +1040,12 @@ pub(crate) fn create(
             .height(Pixels(80.0))
             .width(Stretch(1.0));
 
-            // ── Chain mini-map ──────────────────────────────────────────────
-            // Compact horizontal pill strip showing the entire signal chain
-            // at a glance. Crucial in focus mode where the rack itself only
-            // shows one slot's contents — the mini-map keeps the whole
-            // chain visible. Clicking a pill jumps focus to that slot.
-            build_chain_minimap(cx);
-
             // ── Strip view ──────────────────────────────────────────────────
             // Library sidebar (left) + scrollable rack (right). The sidebar
-            // is a global module palette: click a not-in-rack module to
-            // drop it into the first empty slot, click an in-rack module
-            // to focus it. Complements the per-slot "+ ADD MODULE" picker,
-            // which remains the primary affordance inside an empty slot.
+            // is the SOLE add affordance: clicking an available (not-in-rack)
+            // module drops it into the focused empty slot if there is one,
+            // otherwise the first empty slot. Clicking an in-rack row
+            // focuses that slot.
             HStack::new(cx, |cx| {
                 build_library_sidebar(cx);
 
@@ -982,6 +1085,26 @@ pub(crate) fn create(
                 analysis_result.clone(),
                 gr_data.clone(),
             );
+
+            // ── Floating drag ghost ─────────────────────────────────────────
+            // While a drag is in flight, render a small pill next to the
+            // cursor showing the dragged module's tag. Position-type Absolute
+            // takes it out of the layout flow; left/top track cursor_x/y
+            // updated by the chassis MouseMove handler. Only built (Display:
+            // Flex) when drag_source is Some.
+            Binding::new(cx, Data::drag_source, |cx, ds_lens| {
+                let Some(slot) = ds_lens.get(cx) else {
+                    return;
+                };
+                let params = Data::params.get(cx);
+                let mt = slot_module_type(&params, slot);
+                let tag = module_type_short_name(mt);
+                Label::new(cx, tag)
+                    .class("drag-ghost")
+                    .position_type(PositionType::Absolute)
+                    .left(Data::cursor_x.map(|x| Pixels(*x + 14.0)))
+                    .top(Data::cursor_y.map(|y| Pixels(*y + 14.0)));
+            });
         })
         .class("lunchbox-chassis")
         // Keyboard shortcuts (Esc, 1..7) are routed through
@@ -1009,73 +1132,6 @@ pub(crate) fn create(
         // and the strip ScrollView reveals off-screen slots when content
         // grows past the window width.
     })
-}
-
-// Chain mini-map — horizontal strip of compact pills, one per slot, sitting
-// between the chassis header and the rack. Each pill shows the module's
-// 3-char tag in the module's accent color, with an arrow glyph between
-// adjacent pills to communicate signal flow. Empty slots render as dashed
-// outlines. Clicking a pill focuses that slot.
-//
-// Two reactive layers:
-//   • Data::params — rebuild the pill row when any module_order_* changes
-//   • Data::focused_slot — toggle a per-pill 'focused' class without
-//     rebuilding (so focus changes don't tear down the strip)
-fn build_chain_minimap(cx: &mut Context) {
-    HStack::new(cx, |cx| {
-        // Pack the 7 module indices into a u64 (3 bits each, 21 bits total).
-        // Vizia's `Data` trait is implemented for primitives but not for
-        // arbitrary arrays; bit-packing avoids both that constraint and any
-        // heap allocation in the lens computation, which is hot-path.
-        let order_lens = Data::params.map(|p| {
-            let mut packed: u64 = 0;
-            for s in 0..7 {
-                let idx = module_type_to_usize(slot_module_type(p, s)) as u64;
-                packed |= idx << (s * 3);
-            }
-            packed
-        });
-
-        Binding::new(cx, order_lens, |cx, order_b| {
-            let packed = order_b.get(cx);
-            for slot_idx in 0..7 {
-                if slot_idx > 0 {
-                    Label::new(cx, "\u{2192}").class("minimap-arrow"); // →
-                }
-                let idx = ((packed >> (slot_idx * 3)) & 0x7) as usize;
-                let mt = usize_to_module_type(idx);
-                let theme = module_type_to_theme(mt);
-                let tag = module_type_short_name(mt);
-                let is_empty = mt == ModuleType::Empty;
-
-                HStack::new(cx, |cx| {
-                    Label::new(cx, tag)
-                        .class("minimap-pill-tag")
-                        .color(theme.accent_color());
-                })
-                .class("minimap-pill")
-                .toggle_class("minimap-pill-empty", is_empty)
-                .toggle_class(
-                    "minimap-pill-focused",
-                    Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
-                )
-                // Empty pills are clickable too — focusing one promotes
-                // the slot to full-size and surfaces the library picker,
-                // matching the keyboard 1..7 behavior and the module-name
-                // click on filled slots.
-                .on_press(move |cx| cx.emit(AppEvent::ToggleFocusSlot(slot_idx)))
-                .cursor(CursorIcon::Hand)
-                .height(Pixels(20.0))
-                .width(Pixels(56.0))
-                .alignment(Alignment::Center);
-            }
-        });
-    })
-    .class("chain-minimap")
-    .height(Pixels(28.0))
-    .width(Stretch(1.0))
-    .gap(Pixels(2.0))
-    .alignment(Alignment::Center);
 }
 
 // Library sidebar — narrow vertical strip on the left edge of the rack
@@ -1268,8 +1324,8 @@ fn create_master_section(cx: &mut Context) {
 ///      changes which module lives here
 ///   3. `Data::params` (hide flag for that module) — collapse when hidden
 ///
-/// The drag-source highlight is toggled separately via `toggle_class` which
-/// reacts to `Data::drag_slot` without a full rebuild.
+/// The drag-source highlight is toggled separately via `toggle_class`
+/// which reacts to `Data::drag_source` without a full rebuild.
 fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
     Binding::new(cx, Data::focused_slot, move |cx, focus_b| {
         let focus = focus_b.get(cx);
@@ -1291,6 +1347,16 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
                 //   • any other slot is focused          → collapsed
                 //   • nothing focused, hide flag set     → collapsed
                 //   • nothing focused, not hidden        → full
+                // Empty slots are ALWAYS rendered as a slim placeholder tab
+                // regardless of focus or hide flags. There is no body to
+                // expand — adding a module is now done via the global
+                // library sidebar (which auto-targets the focused empty
+                // slot when one exists, falling back to first-empty).
+                if mt == ModuleType::Empty {
+                    build_empty_slot(cx, slot_idx);
+                    return;
+                }
+
                 let hide_lens = Data::params.map(move |p| is_module_hidden(p, mt));
                 Binding::new(cx, hide_lens, move |cx, hide_binding| {
                     let hidden = hide_binding.get(cx);
@@ -1312,72 +1378,19 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
     });
 }
 
-/// Full expanded slot — drag handle, module header (with hide button), bypass
-/// LED + button, and module-specific parameter controls.
+/// Full expanded slot — module header, bypass LED, parameter controls.
+/// The slot body itself is the drag source AND drop target (per VMR
+/// convention — no separate `≡` handle). Vizia's `on_drag` fires when
+/// the cursor leaves this view with LMB held; `on_drop` fires on a sibling
+/// when MouseUp lands there with active `drop_data`.
 fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
     VStack::new(cx, |cx| {
-        // ── Drag handle ─────────────────────────────────────────────
+        // ── Module header (name + eject + hide + LED) ────────────────
         HStack::new(cx, |cx| {
-            Label::new(cx, "\u{2261}") // ≡ hamburger icon
-                .class("drag-handle-icon");
-            // Reactive label: context changes based on drag state
-            Label::new(
-                cx,
-                Data::drag_slot.map(move |ds| match *ds {
-                    Some(src) if src == slot_idx => "CANCEL",
-                    Some(_) => "SWAP HERE",
-                    None => "MOVE",
-                }),
-            )
-            .class("drag-handle-label");
-            // "SELECTED" indicator — only visible when this slot is
-            // the active swap source.
-            Label::new(cx, "\u{25CF} SELECTED")
-                .class("drag-selected-indicator")
-                .display(Data::drag_slot.map(move |ds| {
-                    if *ds == Some(slot_idx) {
-                        Display::Flex
-                    } else {
-                        Display::None
-                    }
-                }));
-        })
-        .class("drag-handle")
-        .toggle_class(
-            "drag-handle-active",
-            Data::drag_slot.map(move |ds| *ds == Some(slot_idx)),
-        )
-        // on_press_down enters drag mode immediately on mouse-down so the
-        // user can press-and-drag-and-release in one motion. The chassis
-        // WindowEvent::MouseUp handler completes the swap when the cursor
-        // lands on a different slot. A press-release without movement
-        // leaves drag_slot set so click-to-swap (press source, then press
-        // target) still works.
-        .on_press_down(move |cx| cx.emit(AppEvent::StartDrag(slot_idx)))
-        .cursor(CursorIcon::Hand)
-        .top(Pixels(0.0))
-        .bottom(Pixels(0.0))
-        .height(Auto)
-        .width(Stretch(1.0));
-
-        // ── Module header ────────────────────────────────────────────
-        HStack::new(cx, |cx| {
-            // Module name + subtitle. Wrapped in a focus-toggle target:
-            // clicking the name area enters focus mode for this slot, or
-            // exits if it's already focused. Empty slots ARE focusable —
-            // focusing one renders the slot full-size, which surfaces the
-            // library picker. This matches the keyboard 1..7 behavior.
             VStack::new(cx, |cx| {
                 Label::new(cx, module_type_name(mt))
                     .class("module-name")
-                    // Name turns bright yellow when this slot is selected.
-                    .color(Data::drag_slot.map(move |ds| {
-                        if *ds == Some(slot_idx) {
-                            Color::rgb(255, 220, 50)
-                        } else {
-                            theme.accent_color()
-                        }
-                    }));
+                    .color(theme.accent_color());
                 Label::new(cx, module_type_subtitle(mt)).class("module-type");
             })
             .class("module-name-target")
@@ -1385,28 +1398,13 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
                 "module-name-target-focused",
                 Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
             )
-            .on_press(move |cx| cx.emit(AppEvent::ToggleFocusSlot(slot_idx)))
-            .cursor(CursorIcon::Hand)
             .height(Auto)
             .width(Stretch(1.0));
 
-            // Eject button — removes the module from the slot, returning
-            // the slot to its empty/picker state. Distinct from hide
-            // (which only collapses presentation) and bypass (which
-            // disables DSP but keeps the module in the chain). Skipped
-            // on Empty slots since there's nothing to eject.
             if mt != ModuleType::Empty {
                 build_eject_button(cx, slot_idx);
             }
-
-            // Hide button — collapses the slot to a narrow tab. Sits next to
-            // the LED so it's discoverable but unobtrusive.
             build_hide_button_for_type(cx, mt);
-
-            // Always-visible LED status dot: green when the module is
-            // active, dark when bypassed. Clicking it toggles bypass
-            // (vizia CSS lacks pointer-events:none, so we accept the
-            // double-toggle-path and make both lead to the same result).
             build_led_indicator_for_type(cx, mt);
         })
         .class("module-header")
@@ -1416,48 +1414,71 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
         .width(Stretch(1.0))
         .gap(Pixels(6.0));
 
-        // ── Bypass button ────────────────────────────────────────────
         build_bypass_button_for_type(cx, mt);
-
-        // ── Parameter controls ───────────────────────────────────────
         build_controls_for_type(cx, mt, slot_idx);
     })
-    // alignment(TopLeft) packs children to the top-left instead of
-    // the default center which distributes Stretch space around items.
     .alignment(Alignment::TopLeft)
     .gap(Pixels(4.0))
     .class("module-slot")
     .class(theme.class_name())
-    // Drop-target highlight: when a drag is in progress AND this slot is
-    // the currently hovered candidate AND it isn't the drag source, paint
-    // it with a glowing yellow accent so the user can see exactly where
-    // a release will land.
+    // Eligible-target class: lit on every slot OTHER than the drag source
+    // while a drag is in flight. CSS pairs this with `:hover` to show the
+    // active drop-target outline only on the slot the cursor is over.
     .toggle_class(
-        "slot-drop-target",
-        Data::drag_slot
-            .map(move |ds| ds.is_some() && *ds != Some(slot_idx))
-            .and(Data::hovered_slot.map(move |hs| *hs == Some(slot_idx))),
+        "slot-eligible-target",
+        Data::drag_source.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
     )
-    // Track hover state so the chassis-level WindowEvent::MouseUp handler
-    // knows where a drag was released. on_over fires when the cursor
-    // enters the slot's bounds (including any child); on_over_out fires
-    // when it leaves the entire slot region.
-    .on_over(move |cx| cx.emit(AppEvent::SetHoveredSlot(Some(slot_idx))))
-    .on_over_out(move |cx| {
-        // Only clear if we're still recorded as hovered — otherwise a
-        // sibling's enter event could race us into clearing its state.
-        cx.emit(AppEvent::SetHoveredSlot(None))
+    // Source class: visual feedback that THIS slot is being dragged.
+    .toggle_class(
+        "slot-drag-source",
+        Data::drag_source.map(move |ds| *ds == Some(slot_idx)),
+    )
+    // Live drop-position indicator: which third of THIS slot is the cursor
+    // currently over? Drives the directional bar (left edge / full ring /
+    // right edge) so the user previews swap-vs-insert before releasing.
+    .toggle_class(
+        "drop-pos-before",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
+    )
+    .toggle_class(
+        "drop-pos-onto",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
+    )
+    .toggle_class(
+        "drop-pos-after",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
+    )
+    // Drag-source: vizia auto-marks Abilities::DRAGGABLE; the closure
+    // fires the moment the cursor leaves this view with LMB held.
+    .on_drag(move |ex| {
+        ex.set_drop_data(ex.current());
+        ex.emit(AppEvent::DragStarted(slot_idx));
+        ex.emit(WindowEvent::SetCursor(CursorIcon::Grabbing));
     })
-    // Border turns bright white when this slot is selected for swap.
-    .border_color(Data::drag_slot.map(move |ds| {
-        if *ds == Some(slot_idx) {
-            Color::rgba(255, 255, 255, 230)
-        } else {
-            theme.accent_color()
-        }
-    }))
-    // Slot width scales with the chassis zoom level. Content that
-    // overflows the window is reachable via the strip ScrollView.
+    // Per-slot live cursor track. Fires while the cursor is inside this
+    // slot's bounds, including during a drag. We compute DropPos from
+    // window-x relative to slot bounds and emit DragHover; the model
+    // gates on `drag_source.is_some()` so events outside a drag are no-ops.
+    .on_mouse_move(move |ex, x, _y| {
+        let bounds = ex.bounds();
+        let pos = hit_test_drop_pos(x, bounds);
+        ex.emit(AppEvent::DragHover {
+            target: slot_idx,
+            position: pos,
+        });
+    })
+    // Drop target: hit-test cursor X within this slot's bounds at release
+    // time → DropPos. Position decides swap vs insert-before vs insert-after.
+    .on_drop(move |ex, _data| {
+        let bounds = ex.bounds();
+        let pos = hit_test_drop_pos(ex.mouse().cursor_x, bounds);
+        ex.emit(AppEvent::DropOnSlot {
+            target: slot_idx,
+            position: pos,
+        });
+        ex.emit(WindowEvent::SetCursor(CursorIcon::Default));
+    })
+    .border_color(theme.accent_color())
     .width(Data::zoom_level.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
     .height(Stretch(1.0))
     .border_width(Pixels(3.0))
@@ -1473,7 +1494,6 @@ fn build_collapsed_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme
         Label::new(cx, module_type_short_name(mt))
             .class("collapsed-name")
             .color(theme.accent_color());
-        // Expand button fills the rest of the tab.
         build_expand_button_for_type(cx, mt);
     })
     .alignment(Alignment::Center)
@@ -1481,16 +1501,48 @@ fn build_collapsed_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme
     .class("module-slot")
     .class("slot-collapsed")
     .class(theme.class_name())
-    // Same drop-target + hover wiring as the full slot so a drag can be
-    // released onto a collapsed sibling tab and the swap commits.
     .toggle_class(
-        "slot-drop-target",
-        Data::drag_slot
-            .map(move |ds| ds.is_some() && *ds != Some(slot_idx))
-            .and(Data::hovered_slot.map(move |hs| *hs == Some(slot_idx))),
+        "slot-eligible-target",
+        Data::drag_source.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
     )
-    .on_over(move |cx| cx.emit(AppEvent::SetHoveredSlot(Some(slot_idx))))
-    .on_over_out(move |cx| cx.emit(AppEvent::SetHoveredSlot(None)))
+    .toggle_class(
+        "slot-drag-source",
+        Data::drag_source.map(move |ds| *ds == Some(slot_idx)),
+    )
+    .toggle_class(
+        "drop-pos-before",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
+    )
+    .toggle_class(
+        "drop-pos-onto",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
+    )
+    .toggle_class(
+        "drop-pos-after",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
+    )
+    .on_drag(move |ex| {
+        ex.set_drop_data(ex.current());
+        ex.emit(AppEvent::DragStarted(slot_idx));
+        ex.emit(WindowEvent::SetCursor(CursorIcon::Grabbing));
+    })
+    .on_mouse_move(move |ex, x, _y| {
+        let bounds = ex.bounds();
+        let pos = hit_test_drop_pos(x, bounds);
+        ex.emit(AppEvent::DragHover {
+            target: slot_idx,
+            position: pos,
+        });
+    })
+    .on_drop(move |ex, _data| {
+        let bounds = ex.bounds();
+        let pos = hit_test_drop_pos(ex.mouse().cursor_x, bounds);
+        ex.emit(AppEvent::DropOnSlot {
+            target: slot_idx,
+            position: pos,
+        });
+        ex.emit(WindowEvent::SetCursor(CursorIcon::Default));
+    })
     .border_color(theme.accent_color())
     .width(Pixels(56.0))
     .height(Stretch(1.0))
@@ -1588,6 +1640,7 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
 // ============================================================================
 
 fn build_controls_for_type(cx: &mut Context, mt: ModuleType, slot_idx: usize) {
+    let _ = slot_idx;
     match mt {
         ModuleType::Api5500EQ => build_api5500_controls(cx),
         ModuleType::ButterComp2 => build_buttercomp2_controls(cx),
@@ -1596,64 +1649,72 @@ fn build_controls_for_type(cx: &mut Context, mt: ModuleType, slot_idx: usize) {
         ModuleType::Transformer => build_transformer_controls(cx),
         ModuleType::Punch => build_punch_controls(cx),
         ModuleType::Haas => build_haas_controls(cx),
-        ModuleType::Empty => build_library_picker(cx, slot_idx),
+        // Empty slots short-circuit before reaching this dispatcher
+        // (see create_dynamic_module_slot — Empty renders build_empty_slot
+        // directly). This arm is unreachable in practice.
+        ModuleType::Empty => {}
     }
 }
 
 // ============================================================================
-// Library Picker — body content for empty slots
+// Empty slot placeholder — slim dashed tab, sole add path is the sidebar
 // ============================================================================
 
-/// Renders the module library inside an empty slot. Lists every real
-/// ModuleType that is not currently assigned to another slot; clicking a
-/// row writes that ModuleType to this slot's `module_order_*` param.
-///
-/// Wrapped in a Binding over a "taken" bitset so it rebuilds whenever any
-/// slot's contents change — picking a module elsewhere immediately removes
-/// it from this picker's list.
-fn build_library_picker(cx: &mut Context, slot_idx: usize) {
-    let taken_lens = Data::params.map(move |p| {
-        let mut bits: u8 = 0;
-        for s in 0..7 {
-            let mt = slot_module_type(p, s);
-            if mt != ModuleType::Empty {
-                bits |= 1u8 << module_type_to_usize(mt);
-            }
-        }
-        bits
-    });
-
-    Binding::new(cx, taken_lens, move |cx, taken_b| {
-        let taken = taken_b.get(cx);
-        VStack::new(cx, |cx| {
-            Label::new(cx, "ADD MODULE").class("picker-header");
-            for mt in ALL_REAL_MODULES {
-                let bit = 1u8 << module_type_to_usize(mt);
-                if taken & bit != 0 {
-                    continue;
-                }
-                let theme = module_type_to_theme(mt);
-                let name = module_type_name(mt);
-                let subtitle = module_type_subtitle(mt);
-                VStack::new(cx, |cx| {
-                    Label::new(cx, name)
-                        .class("picker-row-name")
-                        .color(theme.accent_color());
-                    Label::new(cx, subtitle).class("picker-row-subtitle");
-                })
-                .class("picker-row")
-                .on_press(move |cx| cx.emit(AppEvent::SetSlotModule(slot_idx, mt)))
-                .cursor(CursorIcon::Hand)
-                .height(Auto)
-                .width(Stretch(1.0))
-                .gap(Pixels(2.0));
-            }
-        })
-        .class("library-picker")
-        .height(Auto)
-        .width(Stretch(1.0))
-        .gap(Pixels(4.0));
-    });
+/// Renders an empty rack slot as a narrow dashed-outline tab the same width
+/// as a collapsed module tab. Adding a module is done via the global library
+/// sidebar. Empty slots are valid drop targets — dropping a real module here
+/// is the same as inserting between the surrounding slots.
+fn build_empty_slot(cx: &mut Context, slot_idx: usize) {
+    let theme = ModuleTheme::Empty;
+    VStack::new(cx, |cx| {
+        Label::new(cx, "+").class("empty-slot-glyph");
+        Label::new(cx, format!("SLOT {}", slot_idx + 1).as_str()).class("empty-slot-label");
+    })
+    .alignment(Alignment::Center)
+    .gap(Pixels(2.0))
+    .class("module-slot")
+    .class("slot-collapsed")
+    .class("slot-empty")
+    .class(theme.class_name())
+    .toggle_class(
+        "slot-eligible-target",
+        Data::drag_source.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
+    )
+    .toggle_class(
+        "drop-pos-before",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
+    )
+    .toggle_class(
+        "drop-pos-onto",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
+    )
+    .toggle_class(
+        "drop-pos-after",
+        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
+    )
+    .on_mouse_move(move |ex, x, _y| {
+        let bounds = ex.bounds();
+        let pos = hit_test_drop_pos(x, bounds);
+        ex.emit(AppEvent::DragHover {
+            target: slot_idx,
+            position: pos,
+        });
+    })
+    .on_drop(move |ex, _data| {
+        let bounds = ex.bounds();
+        let pos = hit_test_drop_pos(ex.mouse().cursor_x, bounds);
+        ex.emit(AppEvent::DropOnSlot {
+            target: slot_idx,
+            position: pos,
+        });
+        ex.emit(WindowEvent::SetCursor(CursorIcon::Default));
+    })
+    .border_color(theme.accent_color())
+    .width(Pixels(56.0))
+    .height(Stretch(1.0))
+    .border_width(Pixels(2.0))
+    .background_color(Color::rgb(36, 36, 38))
+    .padding(Pixels(6.0));
 }
 
 fn build_api5500_controls(cx: &mut Context) {

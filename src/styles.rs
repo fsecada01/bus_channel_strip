@@ -407,72 +407,96 @@ pub const COMPONENT_STYLES: &str = r#"
     width: 1s;
 }
 
-/* ── Chain mini-map ────────────────────────────────────────────────────────
-   Slim band between the chassis header and the rack. One pill per slot,
-   arrows between them. The focused pill gains a bright outline so users
-   can see where they are even with the rack scrolled or in focus mode. */
+/* ── Drag-and-drop: source + eligible target + active hover ────────────────
+   Vizia's on_drag/on_drop API drives reorder. Three visual states:
 
-.chain-minimap {
-    background: linear-gradient(180deg, rgba(14, 16, 22, 0.6), rgba(10, 12, 18, 0.7));
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 5px;
-    padding: 4px 8px;
+   .slot-drag-source         the slot currently being dragged — slight
+                             desaturation + dashed outline so the user can
+                             see what they picked up
+
+   .slot-eligible-target     every other slot while a drag is in flight —
+                             subtle inner glow signalling "you can drop here"
+
+   .slot-eligible-target:hover  the slot the cursor is actually over right
+                                now — bright yellow ring matching VMR
+                                conventions for "release commits here"
+
+   The :hover compounded selector means we don't need a separate "hovered"
+   reactive state; the CSS engine handles it. */
+
+.slot-drag-source {
+    opacity: 0.45;
+    border-style: dashed !important;
 }
 
-.minimap-arrow {
-    font-size: 12px;
-    color: #5d6672;
-    width: 12px;
-    height: 14px;
-    text-align: center;
+.slot-eligible-target {
+    background-color: rgb(34, 38, 46) !important;
 }
 
-.minimap-pill {
-    background: rgba(40, 44, 52, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 3px;
-    alignment: center;
-}
-
-.minimap-pill:hover {
-    background: rgba(60, 66, 78, 0.9);
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-.minimap-pill-empty {
-    background: transparent;
-    border: 1px dashed rgba(110, 116, 128, 0.5);
-}
-
-.minimap-pill-focused {
-    background: rgba(255, 220, 100, 0.12) !important;
-    border-color: rgba(255, 220, 100, 0.7) !important;
-}
-
-.minimap-pill-tag {
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.8px;
-    text-align: center;
-    width: 1s;
-    height: 14px;
-}
-
-/* ── Drop target highlight ─────────────────────────────────────────────────
-   Applied to a slot when a drag is in progress and the cursor is over THIS
-   slot (and it isn't the drag source). The bright yellow ring matches the
-   selected-source ring so the source/target relationship reads visually as
-   "yellow connects to yellow". */
-
-.slot-drop-target {
+.slot-eligible-target:hover {
     border-color: rgb(255, 220, 50) !important;
     background-color: rgb(56, 52, 36) !important;
 }
 
-.slot-drop-target.slot-collapsed {
-    /* Collapsed tabs are narrower; tighten the highlight so it doesn't
-       wash out the small surface. */
+.slot-eligible-target.slot-collapsed:hover {
+    /* Tighten the highlight on narrow tabs so it doesn't wash out. */
     background-color: rgb(48, 44, 28) !important;
+}
+
+/* ── Live drop-position indicator ─────────────────────────────────────────
+   While a drag is in flight, the per-slot on_mouse_move handler resolves
+   the cursor X within the slot's bounds → DropPos and writes it to
+   Data::drop_target. The model toggles one of these classes on the slot
+   under the cursor so the user can preview the resolved drop intent
+   *before* releasing:
+
+   .drop-pos-before  cyan bar pinned to the LEFT edge — release here to
+                     insert the dragged module in front of this slot
+   .drop-pos-after   cyan bar pinned to the RIGHT edge — release here to
+                     insert after this slot
+   .drop-pos-onto    full bright ring + warm tint — release here to swap
+                     the dragged module with this slot's contents
+
+   The before/after bars use a thick, asymmetric border so the directional
+   meaning reads at a glance. The onto state intensifies the existing
+   :hover yellow into a fully saturated ring. */
+
+.drop-pos-before {
+    border-left-width: 6px !important;
+    border-left-color: rgb(80, 220, 255) !important;
+    background-color: rgb(28, 46, 60) !important;
+}
+
+.drop-pos-after {
+    border-right-width: 6px !important;
+    border-right-color: rgb(80, 220, 255) !important;
+    background-color: rgb(28, 46, 60) !important;
+}
+
+.drop-pos-onto {
+    border-color: rgb(255, 220, 50) !important;
+    border-width: 4px !important;
+    background-color: rgb(72, 64, 32) !important;
+}
+
+/* ── Floating drag ghost ───────────────────────────────────────────────────
+   Small pill anchored to cursor while dragging. Built via a Binding gated
+   on Data::drag_source so it only exists during a drag. position-type:
+   absolute takes it out of layout flow; left/top track Data::cursor_x/y.
+   pointer-events disabled so it doesn't intercept the on_drop on the slot
+   underneath the cursor. */
+
+.drag-ghost {
+    background-color: rgba(20, 24, 32, 0.92);
+    color: rgb(240, 244, 252);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    pointer-events: none;
+    z-index: 9999;
 }
 
 /* ── Zoom controls ─────────────────────────────────────────────────────────
@@ -730,30 +754,37 @@ pub const COMPONENT_STYLES: &str = r#"
    uses the eject glyph (⏏) and a faint amber tint on hover so it reads as a
    destructive action without screaming for attention. */
 .eject-btn {
-    width: 18px;
-    height: 18px;
-    min-width: 18px;
-    min-height: 18px;
-    padding: 0;
-    background: transparent;
-    border: 1px solid transparent;
+    height: 20px;
+    min-height: 20px;
+    padding: 0 6px;
+    gap: 4px;
+    background: rgba(60, 30, 30, 0.45);
+    border: 1px solid #5a3030;
     border-radius: 3px;
     alignment: center;
 }
 .eject-btn:hover {
-    border-color: #6a4a18;
-    background: rgba(220, 160, 50, 0.08);
+    background: rgba(180, 60, 60, 0.55);
+    border-color: #c46060;
 }
 .eject-btn-glyph {
-    font-size: 13px;
-    font-weight: 700;
-    color: #7a8090;
+    font-size: 11px;
+    font-weight: 800;
+    color: #d89090;
     text-align: center;
     height: 14px;
-    width: 1s;
 }
-.eject-btn:hover .eject-btn-glyph {
-    color: #ffd070;
+.eject-btn-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #d89090;
+    text-align: center;
+    height: 14px;
+}
+.eject-btn:hover .eject-btn-glyph,
+.eject-btn:hover .eject-btn-label {
+    color: #ffe0e0;
 }
 
 /* Empty slot theme — neutral steel border, dashed feel via a subtle muted
@@ -771,45 +802,43 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #6e7480;
 }
 
-/* Library picker — the body of an empty slot. Vertical stack of one row per
-   available module type. Each row reads as a clickable card with the
-   module's accent color in the title; the subtitle stays muted. */
-.library-picker {
-    padding-top: 4px;
+/* Empty rack slot — slim dashed-outline tab same width as a collapsed
+   module tab. Single + glyph centered, with a small SLOT N label below.
+   Clicking focuses the slot, which makes the next sidebar click target
+   it specifically. */
+.slot-empty {
+    border-style: dashed !important;
+    background: linear-gradient(170deg, #20232a 0%, #181a20 100%) !important;
 }
-.picker-header {
-    font-size: 11px;
-    font-weight: 700;
-    color: #c8ccd4;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    text-align: center;
-    margin-bottom: 4px;
-    height: 16px;
+.slot-empty:hover {
+    border-color: #c8ccd4 !important;
+    background: linear-gradient(170deg, #2a2e36 0%, #1e2026 100%) !important;
 }
-.picker-row {
-    padding: 6px 8px;
-    background: rgba(40, 44, 52, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 4px;
+.slot-empty-focused {
+    border-color: #ffd83a !important;
+    background: linear-gradient(170deg, #2c2e2a 0%, #1f211c 100%) !important;
 }
-.picker-row:hover {
-    background: rgba(60, 66, 78, 0.85);
-    border-color: rgba(255, 255, 255, 0.18);
-}
-.picker-row-name {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    height: 14px;
-}
-.picker-row-subtitle {
-    font-size: 10px;
-    font-weight: 500;
+.empty-slot-glyph {
+    font-size: 24px;
+    font-weight: 300;
     color: #8a909a;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
+    text-align: center;
+    width: 1s;
+    height: 28px;
+}
+.slot-empty:hover .empty-slot-glyph {
+    color: #ffe26a;
+}
+.slot-empty-focused .empty-slot-glyph {
+    color: #ffd83a;
+}
+.empty-slot-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #6e7480;
+    text-align: center;
+    width: 1s;
     height: 12px;
 }
 
@@ -1002,62 +1031,10 @@ scrollbar .thumb:hover {
     animation: glow-pulse 2s ease-in-out infinite;
 }
 
-/* ── Drag-to-reorder handle ──────────────────────────────────────────────── */
-
-.drag-handle {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 3px;
-    padding: 2px 6px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    transition: background 0.12s ease, border-color 0.12s ease;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.drag-handle:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-/* Applied when this slot is the selected source */
-.drag-handle-active {
-    background: rgba(64, 160, 255, 0.35) !important;
-    border-color: rgba(64, 160, 255, 0.95) !important;
-}
-
-/* "● SELECTED" badge shown inside the drag handle when active */
-.drag-selected-indicator {
-    font-size: 9px;
-    font-weight: 700;
-    color: #ffdc32;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    margin-left: auto;
-}
-
-.drag-handle-icon {
-    font-size: 15px;
-    font-weight: 900;
-    color: #cccccc;
-    line-height: 1;
-}
-
-.drag-handle-label {
-    font-size: 10px;
-    font-weight: 700;
-    color: #bbbbbb;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-/* Module slot highlighted as the selected reorder source.
-   Note: box-shadow has limited support in vizia; use border-color +
-   background instead. Border and name color are also set reactively
-   in Rust (see create_dynamic_module_slot) for reliable rendering. */
-.drag-source {
-    background-color: rgba(64, 160, 255, 0.10) !important;
-}
+/* Drag-handle styles removed: vizia's on_drag/on_drop API binds drag to
+   the slot body itself (per VMR convention), no separate `≡` affordance.
+   See `.slot-drag-source` / `.slot-eligible-target` above for the active
+   drag visuals. */
 
 /* ── DynEQ flip-view styles ──────────────────────────────────────────────── */
 
