@@ -9,17 +9,18 @@ This document provides context and guidelines for AI assistance with the bus cha
 
 ## Project Overview
 
-A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-based DSP modules in Rust.
+A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-based DSP modules in Rust. **Currently at v1.0.0** (see GitHub releases for v1.0.0 notes).
 
-**Signal Flow**: `[API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer] → [Haas] → [Punch]`
+**Signal Flow**: `[API5500 EQ] → [ButterComp2] → [Pultec EQ] → [Dynamic EQ] → [Transformer] → [Haas] → [Punch] → [Sheen]`
 
-**Current Status**:
-- ✅ ALL 7 CORE MODULES IMPLEMENTED AND FUNCTIONAL (including Haas and Punch modules)
-- ✅ MODULE REORDERING SYSTEM COMPLETE
-- ✅ PROFESSIONAL PARAMETER SET (~75 parameters)
-- ✅ ALL COMPILATION ERRORS FIXED
-- ✅ LOCAL BUILD AND BUNDLE WORKING
-- ✅ vizia-plug GUI INTEGRATION WORKING (September 2025)
+The first seven modules occupy reorderable slots driven by the `module_order_*` params. **Sheen** is pinned to the master end of the chain (post-Punch, pre-master-gain) and is not a slot module — it's a chassis-level "polish coat" exposed only via the brushed-brass brand plate that flips into a hidden back view.
+
+**Current Status (v1.0.0)**:
+- ✅ ALL 7 SLOT MODULES + SHEEN POLISH STAGE IMPLEMENTED
+- ✅ MULTI-FX RACK REDESIGN: native vizia drag-drop, swap-or-insert hit-test, live drop preview, floating ghost label, focus mode (1-7 / Esc), library sidebar as sole add path
+- ✅ BRUSHED-BRASS BRAND PLATE → SHEEN BACK VIEW (mutually exclusive with DynEQ back view)
+- ✅ ~86 AUTOMATION PARAMETERS
+- ✅ LOCAL BUILD, BUNDLE, AND DEPLOY WORKING
 - ✅ SUCCESSFUL VST3 AND CLAP BUNDLE CREATION
 - 🔧 CI/CD pipeline needs bundle command fixes
 
@@ -69,13 +70,14 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - **Run tests**: `cargo test`
 
 ### Plugin Bundle Creation (Production)
-- **RECOMMENDED**: Manual command with minimal environment:
+- **RECOMMENDED**: `just bundle` — uses the `FEATURES` var (api5500,buttercomp2,pultec,transformer,punch,haas,dynamic_eq,sheen,gui) and handles env vars automatically.
+- **Manual full-feature command**:
   ```cmd
-  set FORCE_SKIA_BINARIES_DOWNLOAD=1
-  cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,gui"
+  set LLVM_HOME=C:\Program Files\LLVM
+  set LIBCLANG_PATH=C:\Program Files\LLVM\bin
+  cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer,punch,haas,dynamic_eq,sheen,gui"
   ```
-- **Core modules only**: `cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features "api5500,buttercomp2,pultec,transformer"`
-- **Simplified build script**: `bin\preflight_build_simple.bat`
+- **Core modules only (no GUI, fast iteration)**: `just bundle-core` — same feature list minus `gui`
 
 ### Code Quality
 - **Format code**: `cargo +nightly fmt` or `pre-commit run rustfmt-nightly --all-files`  
@@ -91,7 +93,7 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 ## File Structure
 
 **Core Plugin:**
-- `src/lib.rs` - Main plugin entry point with ~90 parameters and module reordering
+- `src/lib.rs` - Main plugin entry point (~86 parameters, slot reordering, master-end Sheen dispatch)
 - `src/api5500.rs` - 5-band semi-parametric EQ (custom implementation)
 - `src/buttercomp2.rs` - Airwindows ButterComp2 FFI wrapper
 - `src/pultec.rs` - Custom Pultec EQP-1A style EQ with tube saturation
@@ -99,18 +101,23 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - `src/transformer.rs` - Transformer coloration module (4 vintage models)
 - `src/haas.rs` - Psychoacoustic stereo widener (M/S encoding + Haas effect comb filtering, two modes)
 - `src/punch.rs` - Clipper + Transient Shaper module (hard/soft/cubic clip, 8x oversampling, transient detection)
-- `src/editor.rs` - Professional vizia GUI implementation (working, responsive 1800x650 default)
+- `src/sheen.rs` - **Pinned master-end "polish coat"** — 5 stages (BODY low shelf, PRESENCE peak, AIR high shelf, WARMTH Sonnox Inflator polynomial @ 2× oversample, WIDTH M/S side-only). Not a slot module. Default-on at factory tuning.
+- `src/editor.rs` - vizia GUI: chassis header + brass plate, library sidebar, scrollable rack with native drag-drop + live drop preview + floating ghost, DynEQ back view, Sheen back view (mutually exclusive)
 - `src/components.rs` - Reusable vizia UI components
-- `src/styles.rs` - CSS-like styling for vizia GUI
-- `src/shaping.rs` - Common DSP shaping functions
+- `src/styles.rs` - CSS-like styling for vizia GUI (includes brass plate + Sheen back view themes)
+- `src/shaping.rs` - Common DSP shaping functions and `biquad_coeffs` helper that works around the biquad 0.5.0 frequency-normalization bug
 - `src/spectral.rs` - FFT analysis utilities
 
 **Build System:**
 - `cpp/` - FFI wrappers for Airwindows modules
 - `xtask/` - Build tooling and bundling scripts
 - `build.rs` - C++ compilation for FFI
+- `justfile` - Recipes (`check`, `build`, `bundle`, `install`, `deploy`, `qa`); `FEATURES` and `CORE_FEATURES` are the canonical feature lists used by every recipe
 
 **Documentation:**
+- `docs/SYSTEM_PROMPT.md` - Extended AI session context (orchestration protocol, audio-thread rules, code standards)
+- `docs/SHEEN_MODULE_SPEC.md` - Sheen module DSP spec, factory-default rationale, citations from the three research reports
+- `docs/MULTI_FX_UI_DESIGN.md` - Rack UX design (consolidation pass + drag-drop redesign with hit-test semantics)
 - `docs/AGENTS.md` - Original project specification and agent roles
 - `docs/GUI_DESIGN.md` - Complete GUI specifications and design
 - `docs/PUNCH_MODULE_SPEC.md` - Punch module DSP specification and psychoacoustic research
@@ -136,10 +143,11 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 ## Architecture Notes
 
 **Plugin Architecture:**
-- Built on NIH-Plug framework with ~75 automation parameters
-- 5 DSP modules with configurable processing order
+- Built on NIH-Plug framework with ~86 automation parameters
+- 7 reorderable slot modules + 1 pinned master-end module (Sheen)
 - Lock-free, allocation-free audio processing thread
 - FFI wrapper for C++ Airwindows modules via `build.rs`
+- GUI uses vizia's native drag-drop API (`on_drag` / `on_drop`) — the previous hand-rolled `on_press_down` capture state machine was silently failing under baseview's Win32 `SetCapture` lifecycle (vizia#407)
 
 **Key Dependencies:**
 - `nih_plug` - Plugin framework
@@ -153,10 +161,9 @@ A multi-module bus channel strip VST plugin built with NIH-Plug and Airwindows-b
 - Custom C++ FFI wrappers in `cpp/`
 
 **Feature Flags:**
-- Default features: `api5500`, `buttercomp2`, `pultec`, `transformer`, `punch`, `haas`, `gui`
-- Optional: `dynamic_eq` (4-band dynamic EQ with hierarchical sub-features)
-- Optional: `punch` (Clipper + Transient Shaper with oversampling)
-- Optional: `haas` (Haas stereo widener module)
+- Default features: `api5500`, `buttercomp2`, `pultec`, `transformer`, `punch`, `haas`, `dynamic_eq`, `sheen`
+- `gui` is NOT in defaults (kept opt-in so CI builds without GUI don't compile Skia for nothing); the justfile `FEATURES` recipe variable adds it for `bundle` / `deploy`
+- Sheen is a default feature because it's part of the chassis identity (always present in v1.0.0+)
 - Build with specific modules: `cargo build --features "api5500,pultec,punch"`
 
 ## Known Issues & Fixes
