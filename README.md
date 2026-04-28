@@ -83,6 +83,49 @@ The seven-slot rack got a ground-up UX overhaul:
 
 ---
 
+## Coming in v2.0
+
+Theme: **"Stop sounding digital."** A perceived-quality release targeting the four artifacts that read as "digital" to a trained ear — top-octave aliasing, midrange phase smear, lifeless memoryless saturation, and overly-precise stereo imaging. ~3-month scope. Full requirements in [`docs/V2_ROADMAP.md`](docs/V2_ROADMAP.md).
+
+### DSP track (weeks 1-6)
+
+- [ ] **Universal 4× internal oversampling** across every module containing a nonlinearity (ButterComp2, Pultec tube saturation, Transformer, Sheen WARMTH). Punch oversampling normalized as a global quality preset.
+- [ ] **TPT (topology-preserving transform) state-variable filter cores** replace biquad direct-form-1 in API5500, Pultec, DynamicEQ, and Sheen EQ stages — eliminates phase smear at extreme Q and cleanly accepts coefficient automation.
+- [ ] **Optional linear-phase mode** on Pultec (mastering EQ) — windowed-sinc FIR with FFT convolution, ~512-sample latency at 4×.
+- [ ] **Single-cell Preisach hysteresis model** in Transformer core + as an opt-in "tape" mode on Sheen WARMTH — gives saturation actual *memory* (output depends on input history, not just present input), which is what "lifeless" really means perceptually.
+- [ ] **Per-channel coefficient micro-detuning** (TMT-style ±0.3%) on API5500, Pultec, Transformer, Sheen — produces natural stereo decorrelation rather than the unnaturally precise center image of identical L/R coefficients.
+- [ ] **ButterComp2 adaptive envelope** — program-dependent attack curve that softens on transient-dense material (drum bus auto-softening, vocal bus auto-tightening).
+- [ ] **Punch true-peak detection** (ITU-R BS.1770-4) with intersample peak metering and a -1 dBTP default ceiling.
+
+### UI track (weeks 4-10)
+
+- [ ] **Resizable window** (1100×750 to 2400×1400, locked aspect) with HiDPI awareness — currently locked at 1300×860.
+- [ ] **Preset system** — 20 factory presets across genres (rock drum bus, pop vocal bus, hip-hop master, jazz acoustic, EDM master, podcast voice, classical orchestra, etc.), browser UI with categories, user save/load to `~/Documents/Bus Channel Strip/Presets/`, current-preset name in chassis header with diff indicator.
+- [ ] **Per-module inline metering** — tiny reactive spectrum strip atop each EQ module, consistent GR meters on compressors, saturation meters on Transformer / Punch / Sheen WARMTH.
+- [ ] **Visual polish pass** — typography rhythm (12/14/16/20/24px scale), spacing rhythm (4/8/12/16/24px grid), knob spring-back micro-interactions, follow-cursor value tooltips during drag, custom SVG icon set replacing Unicode glyphs.
+- [ ] **Theming** — ships with two curated themes (Studio dark, Daylight bright). User-customizable colors deferred to v2.1.
+- [ ] **Tooltips** — hover any control >800ms for control name + one-sentence description (text lives in `src/tooltips.rs`).
+
+### Foundation work (opportunistic, no dedicated track)
+
+- [ ] **`lib.rs` refactor** — extract per-module parameter definitions into a `params/` module (forced by the preset system work).
+- [ ] **CI/CD fix** — repair the macOS / Linux GitHub Actions builds that currently fail (forced by the signed-installer work).
+- [ ] **macOS code signing + notarization** — required for "broader audience" distribution.
+- [ ] **Installer packages** (Windows MSI, macOS pkg) replacing zip extraction.
+- [ ] **Test coverage expansion** — every new DSP module tested at the same density as Sheen.
+
+### Compatibility notes (planned)
+
+- Parameter IDs from v1.0 stay stable.
+- TPT EQ migration is a *breaking sound change* — sessions saved in v1.0 will load and play in v2.0 but null within ~0.1 dB of the biquad versions at moderate settings, larger at extreme Q.
+- Hysteresis on Transformer is a *bigger sound change* — a new `transformer_hysteresis_bypass` BoolParam (default OFF, i.e. hysteresis on) lets users flip back to v1.0 behavior for bit-identical playback.
+
+### Deferred to v2.1+
+
+A/B compare snapshots · MIDI parameter learn · multi-instance link · sidechain routing for non-DynEQ modules · new DSP modules · user-customizable theme colors · workflow features generally.
+
+---
+
 ## The Signal Chain
 
 ```
