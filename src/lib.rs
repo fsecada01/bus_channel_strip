@@ -78,7 +78,13 @@ const AUTO_GAIN_SMOOTH: f32 = 0.9975;
 const AUTO_GAIN_MAX: f32 = 8.0; // +18.06 dB
 const AUTO_GAIN_MIN: f32 = 0.125; // −18.06 dB
 
-/// Module identifiers for reordering
+/// Module identifiers for reordering.
+///
+/// `Empty` is the sentinel for an unoccupied slot — the audio dispatcher
+/// treats it as pass-through and the GUI renders it as an "add module"
+/// picker. It is intentionally the LAST variant so existing sessions
+/// (saved before Empty existed) still decode their non-Empty values
+/// against the same enum indices 0..6.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Enum)]
 pub enum ModuleType {
     #[name = "API5500 EQ"]
@@ -95,6 +101,8 @@ pub enum ModuleType {
     Haas,
     #[name = "Punch"]
     Punch,
+    #[name = "Empty"]
+    Empty,
 }
 
 impl Default for ModuleType {
@@ -1643,15 +1651,17 @@ impl Default for BusChannelStripParams {
 
             // Module Ordering Parameters (default signal chain)
             // Default order places Haas before Punch so the clipper catches
-            // any residual peaks introduced by the widener. DynamicEQ is
-            // the reserve slot 7.
+            // any residual peaks introduced by the widener. Slot 7 is Empty
+            // by default — users can drop any module (including DynamicEQ)
+            // into it via the rack picker. Existing sessions saved before
+            // this default change retain their stored slot 7 value.
             module_order_1: EnumParam::new("Module Order 1", ModuleType::Api5500EQ),
             module_order_2: EnumParam::new("Module Order 2", ModuleType::ButterComp2),
             module_order_3: EnumParam::new("Module Order 3", ModuleType::PultecEQ),
             module_order_4: EnumParam::new("Module Order 4", ModuleType::Transformer),
             module_order_5: EnumParam::new("Module Order 5", ModuleType::Haas),
             module_order_6: EnumParam::new("Module Order 6", ModuleType::Punch),
-            module_order_7: EnumParam::new("Module Order 7", ModuleType::DynamicEQ),
+            module_order_7: EnumParam::new("Module Order 7", ModuleType::Empty),
 
             // Hide flags — all modules visible by default. Marked non-automatable
             // so hosts don't clutter automation lists with per-module view state.
@@ -1666,9 +1676,12 @@ impl Default for BusChannelStripParams {
     }
 }
 
-/// Compact 0..6 index for ModuleType — used for duplicate-detection when
+/// Compact 0..7 index for ModuleType — used for duplicate-detection when
 /// dispatching modules in user-chosen order. Keep in lock-step with the
 /// enum definition; any reorder there requires updating this match.
+/// Empty is included so the dedup `seen` array in process() has a stable
+/// slot for it; duplicate Empties are harmless (no-op dispatch) but the
+/// dedup loop still needs a valid index.
 fn module_type_index(mt: ModuleType) -> usize {
     match mt {
         ModuleType::Api5500EQ => 0,
@@ -1678,6 +1691,7 @@ fn module_type_index(mt: ModuleType) -> usize {
         ModuleType::Transformer => 4,
         ModuleType::Punch => 5,
         ModuleType::Haas => 6,
+        ModuleType::Empty => 7,
     }
 }
 
@@ -2105,6 +2119,10 @@ impl BusChannelStrip {
                     let _ = buffer;
                 }
             }
+            // Empty slot: pass-through. No DSP runs, no buffers touched.
+            ModuleType::Empty => {
+                let _ = (buffer, aux);
+            }
         }
     }
 }
@@ -2334,8 +2352,14 @@ impl Plugin for BusChannelStrip {
             self.params.module_order_6.value(),
             self.params.module_order_7.value(),
         ];
-        let mut seen = [false; 7];
+        // Sized to 8: indices 0..6 are real modules, index 7 is Empty.
+        // Empties are skipped before the dedup check so the slot can be
+        // unoccupied in any number of positions without losing pass-through.
+        let mut seen = [false; 8];
         for mt in order {
+            if mt == ModuleType::Empty {
+                continue;
+            }
             let idx = module_type_index(mt);
             if seen[idx] {
                 continue;

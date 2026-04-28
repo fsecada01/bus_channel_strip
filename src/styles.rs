@@ -255,18 +255,248 @@ pub const COMPONENT_STYLES: &str = r#"
     letter-spacing: 1.2px;
 }
 
-.signal-flow-hint {
-    font-size: 10px;
-    font-weight: 400;
-    color: #707886;
-    font-style: italic;
+/* ── Chain preset selector ─────────────────────────────────────────────────
+   Compact horizontal button row inside the chassis header. Each button is
+   a tag (3-char code) over a name. Visually borrows the zoom-btn aesthetic
+   so the header reads as a unified control band, but with a slightly
+   brighter accent on hover to invite experimentation. */
+
+.chain-preset-btn {
+    background: linear-gradient(180deg, #222730, #1b1f27);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    cursor: pointer;
+    alignment: center;
+    padding: 2px 4px;
+    gap: 1px;
 }
 
-.signal-flow-params {
+.chain-preset-btn:hover {
+    background: linear-gradient(180deg, #2c3340, #242a36);
+    border-color: rgba(180, 200, 255, 0.3);
+}
+
+.chain-preset-tag {
+    font-size: 11px;
+    font-weight: 800;
+    color: #c0c8d4;
+    letter-spacing: 1px;
+    text-align: center;
+    width: 1s;
+    height: 14px;
+}
+
+.chain-preset-name {
     font-size: 9px;
-    font-weight: 400;
-    color: #5d6672;
-    font-family: monospace;
+    font-weight: 600;
+    color: #8a929e;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    text-align: center;
+    width: 1s;
+    height: 12px;
+}
+
+.chain-preset-btn:hover .chain-preset-tag {
+    color: #ffffff;
+}
+.chain-preset-btn:hover .chain-preset-name {
+    color: #c8d0dc;
+}
+
+/* ── Focus mode ────────────────────────────────────────────────────────────
+   The clickable module-name target reads as a normal header by default but
+   gains a subtle hover glow so users discover the focus affordance. The
+   focused slot's name target gets a brighter top accent so the rack
+   communicates "this one is the active focus". */
+
+.module-name-target {
+    padding: 2px 4px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+}
+
+.module-name-target:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.module-name-target-focused {
+    background: rgba(255, 220, 100, 0.06);
+    border-color: rgba(255, 220, 100, 0.25);
+}
+
+/* EXIT FOCUS pill in the chassis header. Sits beside the brand block while
+   focus mode is active; matches the chain-preset button family but in an
+   alert tone so it reads as "leave this mode". */
+.exit-focus-btn {
+    background: linear-gradient(180deg, #4a2018, #381610);
+    border: 1px solid rgba(255, 140, 100, 0.4);
+    border-radius: 4px;
+    padding: 4px 10px;
+    alignment: center;
+}
+.exit-focus-btn:hover {
+    background: linear-gradient(180deg, #5c2820, #4a1d16);
+    border-color: rgba(255, 180, 140, 0.6);
+}
+.exit-focus-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #ffb098;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    height: 14px;
+    width: Auto;
+}
+.exit-focus-btn:hover .exit-focus-label {
+    color: #ffe0d4;
+}
+
+/* ── Library sidebar ───────────────────────────────────────────────────────
+   Narrow vertical strip at the left edge of the rack area. Compact rows
+   show a status dot + 3-char tag for each module. In-rack rows use the
+   module's accent color; available rows are muted. */
+
+.library-sidebar {
+    background: linear-gradient(180deg, rgba(20, 23, 30, 0.6), rgba(14, 16, 22, 0.7));
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+    padding: 6px 4px;
+}
+
+.library-sidebar-header {
+    font-size: 9px;
+    font-weight: 800;
+    color: #8c98a8;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    text-align: center;
+    height: 14px;
+    width: 1s;
+}
+
+.library-row {
+    padding: 2px 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+
+.library-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.library-row-in-rack {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.library-row-dot {
+    font-size: 11px;
+    height: 14px;
+    width: 12px;
+    text-align: center;
+}
+
+.library-row-tag {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    height: 14px;
+    width: 1s;
+}
+
+/* ── Drag-and-drop: source + eligible target + active hover ────────────────
+   Vizia's on_drag/on_drop API drives reorder. Three visual states:
+
+   .slot-drag-source         the slot currently being dragged — slight
+                             desaturation + dashed outline so the user can
+                             see what they picked up
+
+   .slot-eligible-target     every other slot while a drag is in flight —
+                             subtle inner glow signalling "you can drop here"
+
+   .slot-eligible-target:hover  the slot the cursor is actually over right
+                                now — bright yellow ring matching VMR
+                                conventions for "release commits here"
+
+   The :hover compounded selector means we don't need a separate "hovered"
+   reactive state; the CSS engine handles it. */
+
+.slot-drag-source {
+    opacity: 0.45;
+    border-style: dashed !important;
+}
+
+.slot-eligible-target {
+    background-color: rgb(34, 38, 46) !important;
+}
+
+.slot-eligible-target:hover {
+    border-color: rgb(255, 220, 50) !important;
+    background-color: rgb(56, 52, 36) !important;
+}
+
+.slot-eligible-target.slot-collapsed:hover {
+    /* Tighten the highlight on narrow tabs so it doesn't wash out. */
+    background-color: rgb(48, 44, 28) !important;
+}
+
+/* ── Live drop-position indicator ─────────────────────────────────────────
+   While a drag is in flight, the per-slot on_mouse_move handler resolves
+   the cursor X within the slot's bounds → DropPos and writes it to
+   Data::drop_target. The model toggles one of these classes on the slot
+   under the cursor so the user can preview the resolved drop intent
+   *before* releasing:
+
+   .drop-pos-before  cyan bar pinned to the LEFT edge — release here to
+                     insert the dragged module in front of this slot
+   .drop-pos-after   cyan bar pinned to the RIGHT edge — release here to
+                     insert after this slot
+   .drop-pos-onto    full bright ring + warm tint — release here to swap
+                     the dragged module with this slot's contents
+
+   The before/after bars use a thick, asymmetric border so the directional
+   meaning reads at a glance. The onto state intensifies the existing
+   :hover yellow into a fully saturated ring. */
+
+.drop-pos-before {
+    border-left-width: 6px !important;
+    border-left-color: rgb(80, 220, 255) !important;
+    background-color: rgb(28, 46, 60) !important;
+}
+
+.drop-pos-after {
+    border-right-width: 6px !important;
+    border-right-color: rgb(80, 220, 255) !important;
+    background-color: rgb(28, 46, 60) !important;
+}
+
+.drop-pos-onto {
+    border-color: rgb(255, 220, 50) !important;
+    border-width: 4px !important;
+    background-color: rgb(72, 64, 32) !important;
+}
+
+/* ── Floating drag ghost ───────────────────────────────────────────────────
+   Small pill anchored to cursor while dragging. Built via a Binding gated
+   on Data::drag_source so it only exists during a drag. position-type:
+   absolute takes it out of layout flow; left/top track Data::cursor_x/y.
+   pointer-events disabled so it doesn't intercept the on_drop on the slot
+   underneath the cursor. */
+
+.drag-ghost {
+    background-color: rgba(20, 24, 32, 0.92);
+    color: rgb(240, 244, 252);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    pointer-events: none;
+    z-index: 9999;
 }
 
 /* ── Zoom controls ─────────────────────────────────────────────────────────
@@ -519,6 +749,99 @@ pub const COMPONENT_STYLES: &str = r#"
     background: rgba(200, 60, 60, 0.08);
 }
 
+/* Eject button — header-mounted control that removes the slot's module and
+   returns it to the picker state. Visually distinct from the hide button:
+   uses the eject glyph (⏏) and a faint amber tint on hover so it reads as a
+   destructive action without screaming for attention. */
+.eject-btn {
+    height: 20px;
+    min-height: 20px;
+    padding: 0 6px;
+    gap: 4px;
+    background: rgba(60, 30, 30, 0.45);
+    border: 1px solid #5a3030;
+    border-radius: 3px;
+    alignment: center;
+}
+.eject-btn:hover {
+    background: rgba(180, 60, 60, 0.55);
+    border-color: #c46060;
+}
+.eject-btn-glyph {
+    font-size: 11px;
+    font-weight: 800;
+    color: #d89090;
+    text-align: center;
+    height: 14px;
+}
+.eject-btn-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #d89090;
+    text-align: center;
+    height: 14px;
+}
+.eject-btn:hover .eject-btn-glyph,
+.eject-btn:hover .eject-btn-label {
+    color: #ffe0e0;
+}
+
+/* Empty slot theme — neutral steel border, dashed feel via a subtle muted
+   gradient. Distinct from real-module themes so users can scan the rack and
+   immediately see which slots are unoccupied. */
+.empty-theme {
+    border: 3px dashed #6e7480 !important;
+    background: linear-gradient(165deg, #1e2128 0%, #181a20 45%, #14161b) !important;
+}
+.empty-theme .module-name {
+    color: #9aa0ae;
+    font-style: italic;
+}
+.empty-theme .module-type {
+    color: #6e7480;
+}
+
+/* Empty rack slot — slim dashed-outline tab same width as a collapsed
+   module tab. Single + glyph centered, with a small SLOT N label below.
+   Clicking focuses the slot, which makes the next sidebar click target
+   it specifically. */
+.slot-empty {
+    border-style: dashed !important;
+    background: linear-gradient(170deg, #20232a 0%, #181a20 100%) !important;
+}
+.slot-empty:hover {
+    border-color: #c8ccd4 !important;
+    background: linear-gradient(170deg, #2a2e36 0%, #1e2026 100%) !important;
+}
+.slot-empty-focused {
+    border-color: #ffd83a !important;
+    background: linear-gradient(170deg, #2c2e2a 0%, #1f211c 100%) !important;
+}
+.empty-slot-glyph {
+    font-size: 24px;
+    font-weight: 300;
+    color: #8a909a;
+    text-align: center;
+    width: 1s;
+    height: 28px;
+}
+.slot-empty:hover .empty-slot-glyph {
+    color: #ffe26a;
+}
+.slot-empty-focused .empty-slot-glyph {
+    color: #ffd83a;
+}
+.empty-slot-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #6e7480;
+    text-align: center;
+    width: 1s;
+    height: 12px;
+}
+
 /* Collapsed tab layout — 56px wide strip containing the 3-char module tag
    and a full-height expand button. The tab keeps the theme border color so
    the chain remains visually readable even with several modules collapsed. */
@@ -708,62 +1031,10 @@ scrollbar .thumb:hover {
     animation: glow-pulse 2s ease-in-out infinite;
 }
 
-/* ── Drag-to-reorder handle ──────────────────────────────────────────────── */
-
-.drag-handle {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 3px;
-    padding: 2px 6px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    transition: background 0.12s ease, border-color 0.12s ease;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.drag-handle:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-/* Applied when this slot is the selected source */
-.drag-handle-active {
-    background: rgba(64, 160, 255, 0.35) !important;
-    border-color: rgba(64, 160, 255, 0.95) !important;
-}
-
-/* "● SELECTED" badge shown inside the drag handle when active */
-.drag-selected-indicator {
-    font-size: 9px;
-    font-weight: 700;
-    color: #ffdc32;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    margin-left: auto;
-}
-
-.drag-handle-icon {
-    font-size: 15px;
-    font-weight: 900;
-    color: #cccccc;
-    line-height: 1;
-}
-
-.drag-handle-label {
-    font-size: 10px;
-    font-weight: 700;
-    color: #bbbbbb;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-/* Module slot highlighted as the selected reorder source.
-   Note: box-shadow has limited support in vizia; use border-color +
-   background instead. Border and name color are also set reactively
-   in Rust (see create_dynamic_module_slot) for reliable rendering. */
-.drag-source {
-    background-color: rgba(64, 160, 255, 0.10) !important;
-}
+/* Drag-handle styles removed: vizia's on_drag/on_drop API binds drag to
+   the slot body itself (per VMR convention), no separate `≡` affordance.
+   See `.slot-drag-source` / `.slot-eligible-target` above for the active
+   drag visuals. */
 
 /* ── DynEQ flip-view styles ──────────────────────────────────────────────── */
 
@@ -941,7 +1212,6 @@ scrollbar .thumb:hover {
 .zoom-75 .dyneq-band-title   { font-size: 10px; }
 .zoom-75 .chassis-brand      { font-size: 13px; }
 .zoom-75 .chassis-title      { font-size: 10px; }
-.zoom-75 .signal-flow-hint   { font-size: 9px;  }
 
 .zoom-125 .module-name       { font-size: 18px; }
 .zoom-125 .module-type       { font-size: 15px; }
@@ -951,7 +1221,6 @@ scrollbar .thumb:hover {
 .zoom-125 .dyneq-band-title  { font-size: 15px; }
 .zoom-125 .chassis-brand     { font-size: 22px; }
 .zoom-125 .chassis-title     { font-size: 16px; }
-.zoom-125 .signal-flow-hint  { font-size: 13px; }
 
 .zoom-150 .module-name       { font-size: 22px; }
 .zoom-150 .module-type       { font-size: 18px; }
@@ -961,7 +1230,6 @@ scrollbar .thumb:hover {
 .zoom-150 .dyneq-band-title  { font-size: 18px; }
 .zoom-150 .chassis-brand     { font-size: 26px; }
 .zoom-150 .chassis-title     { font-size: 19px; }
-.zoom-150 .signal-flow-hint  { font-size: 15px; }
 
 .zoom-200 .module-name       { font-size: 28px; }
 .zoom-200 .module-type       { font-size: 23px; }
@@ -971,6 +1239,5 @@ scrollbar .thumb:hover {
 .zoom-200 .dyneq-band-title  { font-size: 23px; }
 .zoom-200 .chassis-brand     { font-size: 34px; }
 .zoom-200 .chassis-title     { font-size: 25px; }
-.zoom-200 .signal-flow-hint  { font-size: 19px; }
 
 "#;

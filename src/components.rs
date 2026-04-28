@@ -40,7 +40,8 @@ pub fn module_section(cx: &mut Context, title: &str, builder: impl FnOnce(&mut C
     .gap(Pixels(4.0));
 }
 
-// Theme configuration for modules
+// Theme configuration for modules. `Empty` is the unoccupied-slot variant —
+// rendered as a muted dashed placeholder with the library picker inside.
 #[derive(Clone, Copy)]
 pub enum ModuleTheme {
     Api5500,
@@ -50,6 +51,7 @@ pub enum ModuleTheme {
     Transformer,
     Punch,
     Haas,
+    Empty,
 }
 
 impl ModuleTheme {
@@ -62,6 +64,7 @@ impl ModuleTheme {
             Self::Transformer => "transformer-theme",
             Self::Punch => "punch-theme",
             Self::Haas => "haas-theme",
+            Self::Empty => "empty-theme",
         }
     }
 
@@ -74,6 +77,7 @@ impl ModuleTheme {
             Self::Transformer => Color::rgb(204, 102, 51), // #cc6633
             Self::Punch => Color::rgb(255, 51, 68),        // #ff3344 (red/orange per spec)
             Self::Haas => Color::rgb(140, 160, 210),       // #8ca0d2 (muted blue-lavender)
+            Self::Empty => Color::rgb(110, 116, 128),      // #6e7480 (neutral steel)
         }
     }
 }
