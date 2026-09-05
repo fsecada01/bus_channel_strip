@@ -161,16 +161,8 @@ impl FetCompressor {
             sc_hp_l: DirectForm1::<f32>::new(flat_hp),
             sc_hp_r: DirectForm1::<f32>::new(flat_hp),
             cached_sc_hp_hz: f32::NAN,
-            sat_os_l: {
-                let mut os = Oversampler::new(FET_ALL_BUTTONS_OS_FACTOR, 1);
-                os.set_factor(FET_ALL_BUTTONS_OS_FACTOR);
-                os
-            },
-            sat_os_r: {
-                let mut os = Oversampler::new(FET_ALL_BUTTONS_OS_FACTOR, 1);
-                os.set_factor(FET_ALL_BUTTONS_OS_FACTOR);
-                os
-            },
+            sat_os_l: Oversampler::new_at_factor(FET_ALL_BUTTONS_OS_FACTOR, 1),
+            sat_os_r: Oversampler::new_at_factor(FET_ALL_BUTTONS_OS_FACTOR, 1),
         };
         s.recompute_coefficients(0.2, 250.0, false);
         s

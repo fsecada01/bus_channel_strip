@@ -159,11 +159,7 @@ impl TransformerModule {
         // Oversamplers are called once per sample (inline use), so
         // `max_block_size = 1` is sufficient — each upsample/downsample pair
         // writes into buffer[0..TRANSFORMER_OS_FACTOR].
-        let make_os = || {
-            let mut os = Oversampler::new(TRANSFORMER_OS_FACTOR, 1);
-            os.set_factor(TRANSFORMER_OS_FACTOR);
-            os
-        };
+        let make_os = || Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
 
         Self {
             sample_rate,
@@ -638,8 +634,7 @@ mod tests {
         // per-stage method. No Buffer needed — we just need to verify the
         // oversampled saturation path is numerically stable.
         let mut scratch = [0.0_f32; TRANSFORMER_OS_FACTOR];
-        let mut os = Oversampler::new(TRANSFORMER_OS_FACTOR, 1);
-        os.set_factor(TRANSFORMER_OS_FACTOR);
+        let mut os = Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
         let mut stage = TransformerStage::new();
         stage.drive_gain = 1.8;
         stage.saturation_amount = 0.6;

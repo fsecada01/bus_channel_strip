@@ -106,6 +106,11 @@ pub struct SheenModule {
     // inline (one sample in → OS_FACTOR samples out) like Pultec's tube
     // stage and Transformer's saturation core.
     warmth_os: [Oversampler; 2],
+    /// Tracks whether the WARMTH stage actually ran on the previous buffer,
+    /// so `process()` can flush `warmth_os`'s FIR delay lines exactly on the
+    /// active→skipped transition rather than leaving them holding stale
+    /// pre-gap content for the stage's eventual re-entry (see #27 review).
+    warmth_was_active: bool,
 
     // Cached parameter values. Compared against incoming params each buffer
     // so coefficients only regenerate when a slider actually moves —
@@ -178,11 +183,7 @@ impl SheenModule {
         // Oversamplers are used inline (one sample in → OS_FACTOR samples
         // out), so `max_block_size = 1` keeps their scratch buffers minimal
         // — same convention as Pultec's tube stage and Transformer's core.
-        let make_warmth_os = || {
-            let mut os = Oversampler::new(OS_FACTOR, 1);
-            os.set_factor(OS_FACTOR);
-            os
-        };
+        let make_warmth_os = || Oversampler::new_at_factor(OS_FACTOR, 1);
 
         Self {
             sample_rate,
@@ -192,6 +193,7 @@ impl SheenModule {
             width_hpf: DirectForm1::<f32>::new(hpf_coeff),
             width_shelf: DirectForm1::<f32>::new(shelf_coeff),
             warmth_os: [make_warmth_os(), make_warmth_os()],
+            warmth_was_active: false,
             body_db: 1.0,
             presence_db: 0.0,
             air_db: 1.8,
@@ -268,6 +270,25 @@ impl SheenModule {
 
         self.regen_coeffs_if_dirty();
 
+        // Computed once per buffer (params are buffer-granular, like every
+        // other cached value here) so the per-sample loop below doesn't
+        // re-evaluate it, and so the active→skipped transition can be
+        // detected exactly once rather than per-sample.
+        let warmth_active = !self.warmth_bypass && self.warmth_effect > 1.0e-6;
+        if !warmth_active && self.warmth_was_active {
+            // WARMTH just stopped running. Flush the FIR delay lines now so
+            // that when the stage re-activates, it resumes from silence
+            // instead of convolving fresh input against several-sample-old
+            // pre-gap content — the latter reads as an audible click on
+            // re-entry with this cascade's ~46-tap history depth.
+            for os in &mut self.warmth_os {
+                os.reset();
+            }
+        }
+        self.warmth_was_active = warmth_active;
+
+        let mut warmth_scratch = [0.0_f32; OS_FACTOR];
+
         for mut frame in buffer.iter_samples() {
             let mut iter = frame.iter_mut();
             let (l_ref, r_ref) = match (iter.next(), iter.next()) {
@@ -300,9 +321,9 @@ impl SheenModule {
             // ── WARMTH ─ Inflator-style polynomial @ 4× oversample ──────
             // Skip the whole stage when effect is at-or-below noise floor;
             // saves the polynomial and the oversampler hop on the dry path.
-            if !self.warmth_bypass && self.warmth_effect > 1.0e-6 {
-                l = self.process_warmth(l, 0);
-                r = self.process_warmth(r, 1);
+            if warmth_active {
+                l = self.process_warmth(l, 0, &mut warmth_scratch);
+                r = self.process_warmth(r, 1, &mut warmth_scratch);
             }
 
             // ── WIDTH ─ M/S side-only HPF + shelf ───────────────────────
@@ -393,11 +414,10 @@ impl SheenModule {
     /// Transformer's saturation core, replacing the legacy 2×
     /// linear-interpolation-up / 1-pole-IIR-down scheme.
     #[inline]
-    fn process_warmth(&mut self, x: f32, ch: usize) -> f32 {
+    fn process_warmth(&mut self, x: f32, ch: usize, scratch: &mut [f32; OS_FACTOR]) -> f32 {
         let mix = self.warmth_effect;
         let dry = 1.0 - mix;
 
-        let mut scratch = [0.0_f32; OS_FACTOR];
         {
             let up = self.warmth_os[ch].upsample(x, 0);
             for i in 0..OS_FACTOR {
@@ -602,6 +622,76 @@ mod tests {
             assert!(r.is_finite(), "R non-finite at {i}: {r}");
             assert!(l.abs() < 4.0, "L implausibly large at {i}: {l}");
             assert!(r.abs() < 4.0, "R implausibly large at {i}: {r}");
+        }
+    }
+
+    /// Regression test for the PR #27 review finding: skipping WARMTH
+    /// (bypass or near-zero effect) must flush `warmth_os`'s FIR delay
+    /// lines, not just stop pushing new samples into them. Fill the stage
+    /// with a hot signal, bypass it for one buffer (the active→skipped
+    /// transition that must trigger the flush), then re-activate on pure
+    /// silence: with `dry = 1.0 - mix = 0.0` (full-wet), a correctly-reset
+    /// oversampler convolving zero input against a zeroed delay line must
+    /// produce bit-exact silence. Stale pre-bypass delay-line content
+    /// would instead leak through as nonzero output on re-activation.
+    #[test]
+    fn warmth_bypass_reactivation_flushes_stale_oversampler_state() {
+        let mut sheen = SheenModule::new(SR);
+        let n = 256;
+
+        // Phase 1: WARMTH active, hot near-Nyquist signal — fills the FIR
+        // delay lines with substantial energy.
+        sheen.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, 0.0, true,
+        );
+        let mut hot_l: Vec<f32> = (0..n)
+            .map(|i| (2.0 * core::f32::consts::PI * 0.45 * i as f32).sin())
+            .collect();
+        let mut hot_r = hot_l.clone();
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |slices| {
+                slices.clear();
+                slices.push(&mut hot_l);
+                slices.push(&mut hot_r);
+            });
+        }
+        sheen.process(&mut buffer);
+
+        // Phase 2: bypass WARMTH for one buffer — this is the
+        // active→skipped transition that must trigger the flush.
+        sheen.update_parameters(false, 0.0, true, 0.0, true, 0.0, true, 1.0, true, 0.0, true);
+        let mut silent_l = vec![0.0_f32; n];
+        let mut silent_r = vec![0.0_f32; n];
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |slices| {
+                slices.clear();
+                slices.push(&mut silent_l);
+                slices.push(&mut silent_r);
+            });
+        }
+        sheen.process(&mut buffer);
+
+        // Phase 3: re-activate WARMTH on pure silence.
+        sheen.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, 0.0, true,
+        );
+        let mut check_l = vec![0.0_f32; n];
+        let mut check_r = vec![0.0_f32; n];
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |slices| {
+                slices.clear();
+                slices.push(&mut check_l);
+                slices.push(&mut check_r);
+            });
+        }
+        sheen.process(&mut buffer);
+
+        for (i, (&l, &r)) in check_l.iter().zip(check_r.iter()).enumerate() {
+            assert_eq!(l, 0.0, "L leaked stale oversampler energy at {i}: {l}");
+            assert_eq!(r, 0.0, "R leaked stale oversampler energy at {i}: {r}");
         }
     }
 

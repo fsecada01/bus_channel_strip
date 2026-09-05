@@ -190,6 +190,17 @@ impl Oversampler {
         }
     }
 
+    /// Construct an `Oversampler` already set to `factor`. Equivalent to
+    /// `Oversampler::new(factor, max_block_size)` followed by
+    /// `set_factor(factor)`, but removes the two-step footgun: `new()` alone
+    /// leaves `factor` at 1×/passthrough, so a call site that forgets the
+    /// follow-up `set_factor` call silently gets no oversampling at all.
+    pub fn new_at_factor(factor: usize, max_block_size: usize) -> Self {
+        let mut os = Self::new(factor, max_block_size);
+        os.set_factor(factor);
+        os
+    }
+
     pub fn set_factor(&mut self, factor: usize) {
         let new_num_stages = match factor {
             1 => 0,
