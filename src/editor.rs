@@ -1,7 +1,7 @@
 // src/editor.rs
 // Vizia GUI implementation for Bus Channel Strip
 
-use nih_plug::prelude::*;
+use nice_plug::prelude::*;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -139,8 +139,14 @@ pub struct Data {
     /// Shared with the audio thread — read after analysis completes.
     pub analysis_result: Arc<spectral::AnalysisResult>,
     /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
-    /// Applied via toggle_class to the chassis root; CSS scales slot width + padding.
+    /// Applied via toggle_class to the chassis root; CSS scales slot width + padding
+    /// live, within the current session. See `AppEvent::SetZoom` for why the *real*
+    /// host window only picks up the new size on the next editor open.
     pub zoom_level: u8,
+    /// The persisted GUI size/scale state (issue #20). `SetZoom` writes the chosen
+    /// zoom's scale factor here so it survives a session save/reload and sizes the
+    /// real host window correctly the next time the editor is opened.
+    pub editor_state: Arc<ViziaState>,
     /// When `Some(slot)`, the rack is in focus mode: that slot renders full
     /// and every other slot collapses to its narrow tab regardless of its
     /// per-module hide flag. Set only via keyboard `1..7`; click-to-focus
@@ -258,16 +264,28 @@ impl Model for Data {
             }
 
             AppEvent::SetZoom(level) => {
-                // Clamp to supported discrete levels. Unknown values fall back to 100.
-                // NOTE: vizia-plug does not support runtime host-window resize
-                // (cx.set_user_scale_factor / WindowEvent::SetSize aren't wired
-                // into baseview), so zoom only rescales content within the
-                // fixed window — slot widths grow, fonts grow via CSS classes,
-                // ScrollView reveals off-screen slots.
-                self.zoom_level = match *level {
-                    75 | 100 | 125 | 150 | 200 => *level,
-                    _ => 100,
-                };
+                // NOTE (issue #20): `vizia_baseview` does not implement
+                // `WindowEvent::SetSize`/live resize at all (verified against
+                // both the pinned rev and current upstream `vizia` HEAD — the
+                // handling is stubbed out with `// TODO` comments), so there
+                // is no way to resize the real host window within a single
+                // open editor session, no matter which plugin framework sits
+                // underneath (this is a `vizia`-level gap, unrelated to the
+                // nih_plug → nice-plug migration). Zoom therefore still
+                // rescales content live via CSS classes — slot widths grow,
+                // fonts grow, ScrollView reveals off-screen slots — exactly
+                // as before.
+                //
+                // What *is* new: the chosen zoom's scale factor is written
+                // into `editor_state` (a `#[persist]` field), so it survives
+                // a session save/reload and the real host window opens at
+                // the correct size (`window_sizing::window_size_for_zoom`)
+                // the next time the editor is spawned, instead of always
+                // resetting to the fixed 1300x860 default.
+                let clamped = crate::window_sizing::clamp_zoom_level(*level);
+                self.zoom_level = clamped;
+                self.editor_state
+                    .set_user_scale_factor(crate::window_sizing::scale_factor_for_zoom(clamped));
             }
 
             #[cfg(feature = "dynamic_eq")]
@@ -991,20 +1009,33 @@ fn module_type_subtitle(mt: ModuleType) -> &'static str {
 ///   Total                      ≈ 1296 px → rounded up to 1300
 ///
 /// At higher zoom levels the slot width grows (BASE × zoom/100) and the
-/// chassis padding grows linearly as well; the window stays at 1300 px and
-/// users scroll horizontally to reveal off-screen slots. Mini-map height
-/// (28 px) and chain-preset row height bumped HEIGHT to 860 to keep the
-/// rack body roughly the same vertical footprint as before the redesign.
-pub const DEFAULT_WINDOW_WIDTH: u32 = 1300;
-pub const DEFAULT_WINDOW_HEIGHT: u32 = 860;
+/// chassis padding grows linearly as well; within a session the window
+/// stays fixed and users scroll horizontally to reveal off-screen slots
+/// (see `AppEvent::SetZoom` for why real resize only lands on the next
+/// editor open). Mini-map height (28 px) and chain-preset row height
+/// bumped HEIGHT to 860 to keep the rack body roughly the same vertical
+/// footprint as before the redesign.
+///
+/// These match `crate::window_sizing::BASE_WINDOW_{WIDTH,HEIGHT}` — the
+/// zoom-level → real-window-size table anchors on this same base size.
 
 pub(crate) fn default_state() -> Arc<ViziaState> {
-    // new_with_default_scale_factor persists the scale across sessions and
-    // multiplies window size by it. We keep the factor at 1.0 because the
-    // chassis content zoom is handled via toggle_class + CSS per zoom level,
-    // which keeps the window at a fixed size and lets the ScrollView reveal
-    // content that overflows. Visual zoom is a pure CSS concern.
-    ViziaState::new_with_default_scale_factor(|| (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT), 1.0)
+    // `new_with_default_scale_factor`'s scale factor is a `#[persist]`ed
+    // field (see `BusChannelStripParams::editor_state`, issue #20): it's
+    // restored from the saved session before the editor is first spawned,
+    // so the real host window opens at the last-chosen zoom's size
+    // (`window_sizing::window_size_for_zoom`) instead of always resetting
+    // to the 1300x860 default. Within a single open session, zoom is still
+    // a live CSS-only rescale — see `AppEvent::SetZoom` for why.
+    ViziaState::new_with_default_scale_factor(
+        || {
+            (
+                crate::window_sizing::BASE_WINDOW_WIDTH,
+                crate::window_sizing::BASE_WINDOW_HEIGHT,
+            )
+        },
+        1.0,
+    )
 }
 
 pub(crate) fn create(
@@ -1015,9 +1046,17 @@ pub(crate) fn create(
     analysis_result: Arc<spectral::AnalysisResult>,
     gr_data: Arc<spectral::GainReductionData>,
 ) -> Option<Box<dyn Editor>> {
+    let editor_state_for_data = editor_state.clone();
     create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, _| {
         cx.add_stylesheet(COMPONENT_STYLES)
             .expect("Failed to add stylesheet");
+
+        // Restore the zoom buttons' selected state from the persisted scale
+        // factor (issue #20) so it matches the real window size this editor
+        // was just spawned at, instead of always starting at 100%.
+        let initial_zoom = crate::window_sizing::zoom_level_for_scale_factor(
+            editor_state_for_data.user_scale_factor(),
+        );
 
         Data {
             params: params.clone(),
@@ -1036,7 +1075,8 @@ pub(crate) fn create(
             dyneq_expand_gen: 0,
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
-            zoom_level: 100,
+            zoom_level: initial_zoom,
+            editor_state: editor_state_for_data.clone(),
             focused_slot: None,
         }
         .build(cx);
