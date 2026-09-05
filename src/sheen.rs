@@ -9,13 +9,14 @@
 //!
 //! ```text
 //! [in] -> BODY (low shelf) -> PRESENCE (peak) -> AIR (high shelf)
-//!      -> WARMTH (Inflator polynomial @ 2x oversample)
+//!      -> WARMTH (Inflator polynomial @ 4x oversample)
 //!      -> WIDTH (M/S side-only HPF + high shelf)
 //!      -> [out]
 //! ```
 //!
 //! Stage rationale and citations live in `docs/adr/0006-sheen-pinned-master-end-polish.md`.
 
+use crate::oversampler::Oversampler;
 use crate::shaping::{biquad_coeffs, Filter, FilterType};
 use biquad::{Biquad, DirectForm1, Type};
 use nih_plug::buffer::Buffer;
@@ -74,11 +75,14 @@ const INFLATOR_X2: f32 = -0.0625;
 const INFLATOR_X3: f32 = -0.375;
 const INFLATOR_X4: f32 = -0.0625;
 
-/// 2× oversampling for the warmth shaper. The polynomial generates 4th-order
-/// products (cubic+quartic) so 2× pushes the worst-case alias above 22 kHz at
-/// 44.1 kHz host rate. Cheap enough to justify; if measurable aliasing turns
-/// up in the tuning pass we can bump to 4×.
-const OS_FACTOR: usize = 2;
+/// 4× oversampling for the warmth shaper, routed through the same
+/// Kaiser-windowed halfband FIR cascade (`crate::oversampler::Oversampler`)
+/// used by ButterComp2/Pultec/Transformer — the v2.0 DSP-track floor for
+/// every nonlinear module (see `docs/V2_ROADMAP.md` §3.1, tracked in #14).
+/// The polynomial generates 4th-order products (cubic+quartic); 4× keeps
+/// their alias well clear of the audible band with real stopband rejection
+/// instead of the legacy 2×/linear-interp scheme's crude suppression.
+const OS_FACTOR: usize = 4;
 
 // ============================================================================
 // SheenModule
@@ -98,11 +102,10 @@ pub struct SheenModule {
     width_hpf: DirectForm1<f32>,
     width_shelf: DirectForm1<f32>,
 
-    // WARMTH oversampler state — one previous-input and one previous-output
-    // sample per channel. The previous-input is used by linear interpolation
-    // upsampling; the previous-output by a 1-pole IIR for downsampling.
-    warmth_prev_in: [f32; 2],
-    warmth_prev_out: [f32; 2],
+    // WARMTH oversamplers — one halfband-FIR Oversampler per channel, run
+    // inline (one sample in → OS_FACTOR samples out) like Pultec's tube
+    // stage and Transformer's saturation core.
+    warmth_os: [Oversampler; 2],
 
     // Cached parameter values. Compared against incoming params each buffer
     // so coefficients only regenerate when a slider actually moves —
@@ -172,6 +175,15 @@ impl SheenModule {
         )
         .expect("Sheen width shelf coefficient build failed at construction");
 
+        // Oversamplers are used inline (one sample in → OS_FACTOR samples
+        // out), so `max_block_size = 1` keeps their scratch buffers minimal
+        // — same convention as Pultec's tube stage and Transformer's core.
+        let make_warmth_os = || {
+            let mut os = Oversampler::new(OS_FACTOR, 1);
+            os.set_factor(OS_FACTOR);
+            os
+        };
+
         Self {
             sample_rate,
             body,
@@ -179,8 +191,7 @@ impl SheenModule {
             air,
             width_hpf: DirectForm1::<f32>::new(hpf_coeff),
             width_shelf: DirectForm1::<f32>::new(shelf_coeff),
-            warmth_prev_in: [0.0; 2],
-            warmth_prev_out: [0.0; 2],
+            warmth_os: [make_warmth_os(), make_warmth_os()],
             body_db: 1.0,
             presence_db: 0.0,
             air_db: 1.8,
@@ -286,7 +297,7 @@ impl SheenModule {
                 r = self.air.run_ch(r, 1);
             }
 
-            // ── WARMTH ─ Inflator-style polynomial @ 2× oversample ──────
+            // ── WARMTH ─ Inflator-style polynomial @ 4× oversample ──────
             // Skip the whole stage when effect is at-or-below noise floor;
             // saves the polynomial and the oversampler hop on the dry path.
             if !self.warmth_bypass && self.warmth_effect > 1.0e-6 {
@@ -311,16 +322,17 @@ impl SheenModule {
         }
     }
 
-    /// Zero out the warmth oversampler state. Biquad state is left to
-    /// settle naturally with silence input — DirectForm1 has no public
-    /// reset and rebuilding the filters mid-process would require
-    /// re-running `biquad_coeffs` (sin/cos), which we'd rather avoid.
-    /// In practice the host calls `reset()` on transport start where the
-    /// buffer leading edge is silence anyway, so any residual filter
-    /// energy decays within ~100 samples for our chosen Q values.
+    /// Reset the warmth oversamplers' halfband-FIR delay lines. Biquad
+    /// state is left to settle naturally with silence input — DirectForm1
+    /// has no public reset and rebuilding the filters mid-process would
+    /// require re-running `biquad_coeffs` (sin/cos), which we'd rather
+    /// avoid. In practice the host calls `reset()` on transport start
+    /// where the buffer leading edge is silence anyway, so any residual
+    /// filter energy decays within ~100 samples for our chosen Q values.
     pub fn reset(&mut self) {
-        self.warmth_prev_in = [0.0; 2];
-        self.warmth_prev_out = [0.0; 2];
+        for os in &mut self.warmth_os {
+            os.reset();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -374,36 +386,25 @@ impl SheenModule {
         }
     }
 
-    /// 2× oversampled Inflator pass for one channel. Linear interpolation
-    /// up, polynomial at 2× rate, average + 1-pole IIR down. The IIR pole
-    /// at 0.5 matches the punch.rs convention for cheap halfband-ish
-    /// downsampling — light enough not to pull HF, strong enough to keep
-    /// the alias below the noise floor at typical playback levels.
+    /// 4× oversampled Inflator pass for one channel. Upsamples through the
+    /// shared Kaiser-windowed halfband FIR cascade, applies the Inflator
+    /// transfer function (with per-sample wet/dry mix) at the 4× rate, then
+    /// downsamples back — same pattern as Pultec's tube stage and
+    /// Transformer's saturation core, replacing the legacy 2×
+    /// linear-interpolation-up / 1-pole-IIR-down scheme.
     #[inline]
     fn process_warmth(&mut self, x: f32, ch: usize) -> f32 {
-        let prev_in = self.warmth_prev_in[ch];
-        // First inserted (interpolated) sample of the pair.
-        let interp = (prev_in + x) * 0.5;
-        self.warmth_prev_in[ch] = x;
-
-        // Apply the Inflator transfer function at the 2× rate.
-        let shaped_a = inflator(interp);
-        let shaped_b = inflator(x);
-
-        // Wet/dry mix is per-sample so the mix knob is exactly equivalent
-        // to operator-applied parallel processing.
         let mix = self.warmth_effect;
         let dry = 1.0 - mix;
-        let out_a = dry * interp + mix * shaped_a;
-        let out_b = dry * x + mix * shaped_b;
 
-        // Downsample: average the pair, then a 1-pole IIR for extra
-        // alias suppression above Nyquist.
-        let avg = (out_a + out_b) * 0.5;
-        let prev_out = self.warmth_prev_out[ch];
-        let smoothed = prev_out + (avg - prev_out) * 0.5;
-        self.warmth_prev_out[ch] = smoothed;
-        smoothed
+        let mut scratch = [0.0_f32; OS_FACTOR];
+        {
+            let up = self.warmth_os[ch].upsample(x, 0);
+            for i in 0..OS_FACTOR {
+                scratch[i] = dry * up[i] + mix * inflator(up[i]);
+            }
+        }
+        self.warmth_os[ch].downsample(&scratch[..OS_FACTOR], 0)
     }
 }
 
@@ -424,10 +425,12 @@ fn inflator(x: f32) -> f32 {
     INFLATOR_X1 * x + INFLATOR_X2 * x2 + INFLATOR_X3 * x3 + INFLATOR_X4 * x4
 }
 
-// Compile-time assertion that the oversample factor stays the value the
-// algorithm above assumes. If we bump to 4× this constant guards the
-// math elsewhere in the file.
-const _: () = assert!(OS_FACTOR == 2, "WARMTH oversampler is hard-coded for 2×");
+// Compile-time assertion that the oversample factor stays a value the
+// Oversampler cascade (crate::oversampler) actually supports (1/2/4/8/16).
+const _: () = assert!(
+    OS_FACTOR == 4,
+    "WARMTH oversampler is the v2.0 4x floor (#14)"
+);
 
 // ============================================================================
 // Tests
@@ -553,6 +556,52 @@ mod tests {
         for i in 0..n {
             assert_eq!(data_l[i], in_l[i], "L drifted at {i} all-stages-bypassed");
             assert_eq!(data_r[i], in_r[i], "R drifted at {i} all-stages-bypassed");
+        }
+    }
+
+    /// v2.0 DSP track (#14): WARMTH must run at the 4× internal-oversampling
+    /// floor like every other nonlinear module (ButterComp2/Pultec/Transformer
+    /// already do), not the legacy 2× rate.
+    #[test]
+    fn warmth_oversample_factor_is_four() {
+        assert_eq!(OS_FACTOR, 4, "WARMTH must run at the v2.0 4x floor (#14)");
+    }
+
+    /// Hit the WARMTH oversampler with a hot, near-Nyquist, full-effect
+    /// signal and verify the output stays finite and bounded — guards
+    /// against FIR state corruption or overflow from the 4× halfband
+    /// cascade, mirroring the equivalent tests in pultec.rs/transformer.rs.
+    #[test]
+    fn warmth_saturation_oversampled_bounded() {
+        let mut sheen = SheenModule::new(SR);
+        // Flat EQ stages, WARMTH pushed to full effect.
+        sheen.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, 0.0, true,
+        );
+
+        let n = 2048;
+        let mut data_l: Vec<f32> = (0..n)
+            .map(|i| (2.0 * core::f32::consts::PI * 0.45 * i as f32).sin())
+            .collect();
+        let mut data_r: Vec<f32> = (0..n)
+            .map(|i| (2.0 * core::f32::consts::PI * 0.47 * i as f32).sin())
+            .collect();
+
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |slices| {
+                slices.clear();
+                slices.push(&mut data_l);
+                slices.push(&mut data_r);
+            });
+        }
+        sheen.process(&mut buffer);
+
+        for (i, (&l, &r)) in data_l.iter().zip(data_r.iter()).enumerate() {
+            assert!(l.is_finite(), "L non-finite at {i}: {l}");
+            assert!(r.is_finite(), "R non-finite at {i}: {r}");
+            assert!(l.abs() < 4.0, "L implausibly large at {i}: {l}");
+            assert!(r.abs() < 4.0, "R implausibly large at {i}: {r}");
         }
     }
 

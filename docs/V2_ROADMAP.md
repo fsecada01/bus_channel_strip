@@ -377,7 +377,7 @@ v2.0 is "done" when:
 
 These need a decision before any code lands:
 
-1. **4× oversampling floor or "CPU saver" toggle?** (Recommendation: 4× floor.)
+1. ~~**4× oversampling floor or "CPU saver" toggle?**~~ **Decided 2026-09-05: 4× floor, no toggle.** (Tracked in [#14](https://github.com/fsecada01/bus_channel_strip/issues/14).)
 2. **TPT migration or fallback?** (Recommendation: hard migrate.)
 3. **Preisach hysteresis depth — single-cell or multi-cell?** (Recommendation: single-cell for v2.0.)
 4. **TMT detuning — exposed knob or hard-coded?** (Recommendation: hard-coded at 0.3%.)
