@@ -1,4 +1,5 @@
-use biquad::{Biquad, Coefficients, DirectForm1, Errors, Type};
+use crate::svf::{SvfCoefficients, SvfType, TptSvf};
+use biquad::{Coefficients, Errors, Type};
 
 /// Workaround for biquad 0.5.0: its `Coefficients::from_params` has a
 /// frequency-normalization bug (computes `f0/(2*fs)` instead of `f0/(fs/2)`),
@@ -7,6 +8,11 @@ use biquad::{Biquad, Coefficients, DirectForm1, Errors, Type};
 /// Use this helper instead — it calls `from_normalized_params` with the
 /// correct Nyquist=1 convention and clamps the normalized value just below
 /// Nyquist to avoid the `OutsideNyquist` error at high sample rates.
+///
+/// Since #15 the EQ modules run on `crate::svf::TptSvf`; this helper remains
+/// for the utility biquads outside the EQ path (ButterComp2 sidechain HPF,
+/// Transformer shelves, Punch wet HPF) and as the reference the SVF null
+/// tests compare against.
 pub fn biquad_coeffs(
     filter_type: Type<f32>,
     sample_rate: f32,
@@ -24,35 +30,37 @@ pub enum FilterType {
     HighShelf,
 }
 
-/// A stereo biquad filter. Each channel carries its own state (z1, z2) so
-/// feeding interleaved L/R samples through one logical filter does not smear
-/// the transfer function — a single shared biquad fed LRLRLR corrupts its
-/// delay line and measurably reduces perceived gain on shelf/peaking curves.
+impl FilterType {
+    fn to_svf(&self, gain_db: f32) -> SvfType {
+        match self {
+            FilterType::Bell => SvfType::Bell(gain_db),
+            FilterType::LowShelf => SvfType::LowShelf(gain_db),
+            FilterType::HighShelf => SvfType::HighShelf(gain_db),
+        }
+    }
+}
+
+/// A stereo EQ filter on the TPT state-variable core (#15). Each channel
+/// carries its own integrator state so feeding interleaved L/R samples
+/// through one logical filter does not smear the transfer function — a
+/// single shared filter fed LRLRLR corrupts its state and measurably reduces
+/// perceived gain on shelf/peaking curves.
 pub struct Filter {
-    filter: [DirectForm1<f32>; 2],
+    filter: [TptSvf; 2],
 }
 
 impl Filter {
     /// Create a new filter with the given parameters.
     pub fn new(sample_rate: f32, filter_type: FilterType, freq: f32, q: f32, gain: f32) -> Self {
-        let filter_type = match filter_type {
-            FilterType::Bell => Type::PeakingEQ(gain),
-            FilterType::LowShelf => Type::LowShelf(gain),
-            FilterType::HighShelf => Type::HighShelf(gain),
-        };
-
-        let coeff = biquad_coeffs(filter_type, sample_rate, freq, q)
-            .expect("Failed to create filter coefficients");
-
+        let coeffs = SvfCoefficients::new(filter_type.to_svf(gain), sample_rate, freq, q);
         Self {
-            filter: [
-                DirectForm1::<f32>::new(coeff),
-                DirectForm1::<f32>::new(coeff),
-            ],
+            filter: [TptSvf::new(coeffs), TptSvf::new(coeffs)],
         }
     }
 
-    /// Update filter parameters without recreating the filter structure
+    /// Update filter parameters without recreating the filter structure.
+    /// State is preserved across the update — the SVF topology guarantees
+    /// the new response takes effect without a transient.
     pub fn update_parameters(
         &mut self,
         sample_rate: f32,
@@ -61,25 +69,24 @@ impl Filter {
         q: f32,
         gain: f32,
     ) {
-        let filter_type = match filter_type {
-            FilterType::Bell => Type::PeakingEQ(gain),
-            FilterType::LowShelf => Type::LowShelf(gain),
-            FilterType::HighShelf => Type::HighShelf(gain),
-        };
-
-        let coeff = biquad_coeffs(filter_type, sample_rate, freq, q)
-            .expect("Failed to create filter coefficients");
-
-        // Update coefficients without clearing filter memory
-        self.filter[0].update_coefficients(coeff);
-        self.filter[1].update_coefficients(coeff);
+        let coeffs = SvfCoefficients::new(filter_type.to_svf(gain), sample_rate, freq, q);
+        self.filter[0].update_coefficients(coeffs);
+        self.filter[1].update_coefficients(coeffs);
     }
 
     /// Process a single sample through a specific channel's state. Callers
     /// iterating stereo audio MUST use the correct `ch` per sample (0 = L,
     /// 1 = R) or the cross-channel smear returns.
+    #[inline]
     pub fn run_ch(&mut self, sample: f32, ch: usize) -> f32 {
         self.filter[ch.min(1)].run(sample)
+    }
+
+    /// Zero both channels' filter state.
+    #[allow(dead_code)]
+    pub fn reset(&mut self) {
+        self.filter[0].reset();
+        self.filter[1].reset();
     }
 }
 

@@ -105,7 +105,8 @@ The first seven modules occupy reorderable slots driven by the `module_order_*` 
 - `src/editor.rs` - vizia GUI: chassis header + brass plate, library sidebar, scrollable rack with native drag-drop + live drop preview + floating ghost, DynEQ back view, Sheen back view (mutually exclusive)
 - `src/components.rs` - Reusable vizia UI components
 - `src/styles.rs` - CSS-like styling for vizia GUI (includes brass plate + Sheen back view themes)
-- `src/shaping.rs` - Common DSP shaping functions and `biquad_coeffs` helper that works around the biquad 0.5.0 frequency-normalization bug
+- `src/svf.rs` - TPT / zero-delay-feedback state-variable filter core (`SvfCoefficients`, `TptSvf`) — the v2.0 filter topology behind every EQ stage (API5500, Pultec, DynamicEQ, Sheen). Null-tested against the biquad reference.
+- `src/shaping.rs` - Common DSP shaping functions, the stereo `Filter` wrapper over `TptSvf`, and the `biquad_coeffs` helper (still used by ButterComp2/Transformer/Punch utility filters; works around the biquad 0.5.0 frequency-normalization bug)
 - `src/spectral.rs` - FFT analysis utilities
 
 **Build System:**

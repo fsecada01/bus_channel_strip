@@ -9,6 +9,7 @@ mod oversampler;
 mod plugin_integration_tests;
 mod shaping;
 mod spectral;
+mod svf;
 
 #[cfg(feature = "api5500")]
 mod api5500;
@@ -140,6 +141,11 @@ struct BusChannelStrip {
     /// Pultec-style EQ module
     #[cfg(feature = "pultec")]
     pultec: PultecEQ,
+    /// Latency (samples) most recently reported to the host for the Pultec
+    /// linear-phase mode. `set_latency_samples` is only called when this
+    /// changes, since a report can trigger a host-side graph rebuild.
+    #[cfg(feature = "pultec")]
+    pultec_reported_latency: u32,
     /// Dynamic EQ module
     #[cfg(feature = "dynamic_eq")]
     dynamic_eq: DynamicEQ,
@@ -363,6 +369,10 @@ pub struct BusChannelStripParams {
     pub pultec_hf_cut_gain: FloatParam,
     #[id = "pultec_tube_drive"]
     pub pultec_tube_drive: FloatParam,
+    /// Linear-phase Pultec (v2.0, #15). Off by default so v1.0 sessions keep
+    /// their zero-latency minimum-phase behaviour on load.
+    #[id = "pultec_linear_phase"]
+    pub pultec_linear_phase: BoolParam,
 
     #[cfg(feature = "dynamic_eq")]
     // Dynamic EQ Parameters
@@ -696,6 +706,8 @@ impl Default for BusChannelStrip {
             optical_compressor: OpticalCompressor::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "pultec")]
             pultec: PultecEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "pultec")]
+            pultec_reported_latency: 0,
             #[cfg(feature = "dynamic_eq")]
             dynamic_eq: DynamicEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "transformer")]
@@ -1211,6 +1223,8 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
+
+            pultec_linear_phase: BoolParam::new("Linear Phase", false),
 
             #[cfg(feature = "dynamic_eq")]
             // Dynamic EQ Parameters
@@ -1911,6 +1925,42 @@ impl BusChannelStrip {
         );
         if !self.params.pultec_bypass.value() {
             self.pultec.process(buffer);
+        } else {
+            // In linear-phase mode bypass is a pure 512-sample delay so the
+            // module's reported latency stays honest; in minimum-phase mode
+            // this is a no-op.
+            self.pultec.process_bypassed(buffer);
+        }
+    }
+
+    /// Snapshot of the seven slot params, in slot order.
+    fn module_order(&self) -> [ModuleType; 7] {
+        [
+            self.params.module_order_1.value(),
+            self.params.module_order_2.value(),
+            self.params.module_order_3.value(),
+            self.params.module_order_4.value(),
+            self.params.module_order_5.value(),
+            self.params.module_order_6.value(),
+            self.params.module_order_7.value(),
+        ]
+    }
+
+    /// Sync the Pultec linear-phase mode with its param and report latency
+    /// to the host when it changes.
+    ///
+    /// Latency is only owed when the mode is on AND Pultec is actually in the
+    /// module order — a Pultec that sits in the library sidebar never runs,
+    /// so reporting 512 samples for it would misalign the track.
+    #[cfg(feature = "pultec")]
+    fn sync_pultec_latency(&mut self, order: &[ModuleType], set_latency: &mut dyn FnMut(u32)) {
+        let in_chain = order.contains(&ModuleType::PultecEQ);
+        let want_linear = self.params.pultec_linear_phase.value() && in_chain;
+        self.pultec.set_linear_phase(want_linear);
+        let latency = self.pultec.latency_samples();
+        if latency != self.pultec_reported_latency {
+            self.pultec_reported_latency = latency;
+            set_latency(latency);
         }
     }
 
@@ -2342,6 +2392,13 @@ impl Plugin for BusChannelStrip {
         #[cfg(feature = "pultec")]
         {
             self.pultec = PultecEQ::new(sr);
+            // Report linear-phase latency up front so the host's PDC is
+            // right from the first block rather than one block late.
+            let order = self.module_order();
+            self.pultec_reported_latency = u32::MAX; // force a report
+            self.sync_pultec_latency(&order, &mut |latency| {
+                _context.set_latency_samples(latency);
+            });
         }
         #[cfg(feature = "dynamic_eq")]
         {
@@ -2454,8 +2511,26 @@ impl Plugin for BusChannelStrip {
         aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // Global bypass — pass audio through untouched.
+        // Each of the seven module_order_N params selects which module lands
+        // in slot N. Read once up front: dispatch needs it, and so does the
+        // Pultec latency report (only owed when Pultec is in the chain).
+        let order = self.module_order();
+
+        // Pultec linear-phase mode owes the host a fixed 512-sample delay.
+        // Keep the report in sync with the param / module order every block
+        // (a no-op unless something changed), and keep the delay in place
+        // through both module and global bypass so toggling never shifts
+        // the track against its neighbours.
+        #[cfg(feature = "pultec")]
+        self.sync_pultec_latency(&order, &mut |latency| {
+            _context.set_latency_samples(latency);
+        });
+
+        // Global bypass — pass audio through untouched (bar the latency the
+        // host has already been told about).
         if self.params.global_bypass.value() {
+            #[cfg(feature = "pultec")]
+            self.pultec.process_bypassed(buffer);
             return ProcessStatus::Normal;
         }
 
@@ -2468,19 +2543,9 @@ impl Plugin for BusChannelStrip {
         };
 
         // Dispatch modules in user-chosen order.
-        // Each of the seven module_order_N params selects which module lands
-        // in slot N. Duplicates are deduplicated: if the user puts API5500
+        // Duplicates are deduplicated: if the user puts API5500
         // in two slots, the module only runs once. Any slot whose feature
         // is disabled at build time becomes a no-op inside dispatch_module.
-        let order = [
-            self.params.module_order_1.value(),
-            self.params.module_order_2.value(),
-            self.params.module_order_3.value(),
-            self.params.module_order_4.value(),
-            self.params.module_order_5.value(),
-            self.params.module_order_6.value(),
-            self.params.module_order_7.value(),
-        ];
         // Sized to 8: indices 0..6 are real modules, index 7 is Empty.
         // Empties are skipped before the dedup check so the slot can be
         // unoccupied in any number of positions without losing pass-through.

@@ -16,6 +16,7 @@
 mod plugin_integration_tests {
     use crate::BusChannelStrip;
     use nih_plug::buffer::Buffer;
+    use nih_plug::prelude::Params;
 
     fn make_sine_buffer(freq_hz: f32, sr: f32, n: usize) -> (Vec<f32>, Vec<f32>) {
         let omega = 2.0 * core::f32::consts::PI * freq_hz / sr;
@@ -150,6 +151,221 @@ mod plugin_integration_tests {
             gain_db > 8.0,
             "Pultec LCR resonant bump must produce ≥ +8 dB at the 100 Hz corner, got {gain_db:.2} dB"
         );
+    }
+
+    // ─── #15: session compatibility ───────────────────────────────────────────
+
+    /// The linear-phase toggle is a new, additive param. It must default OFF
+    /// so a v1.0 session (which has no value for it) loads at zero latency
+    /// with the minimum-phase response it was mixed with.
+    #[cfg(feature = "pultec")]
+    #[test]
+    fn test_pultec_linear_phase_param_defaults_off() {
+        let plugin = BusChannelStrip::default();
+        assert!(
+            !plugin.params.pultec_linear_phase.value(),
+            "pultec_linear_phase must default to false"
+        );
+        let ids: Vec<String> = plugin
+            .params
+            .param_map()
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        assert!(ids.iter().any(|id| id == "pultec_linear_phase"));
+    }
+
+    /// Every parameter ID that shipped in v1.0.0 must still exist, unchanged.
+    /// Hosts restore sessions by ID: a missing or renamed ID silently resets
+    /// that control to default when a v1.0 project is opened under v2.0 —
+    /// the "load failure" the #15 checklist rules out. Adding IDs is fine;
+    /// removing or renaming one is a breaking change and must fail here.
+    #[cfg(all(
+        feature = "api5500",
+        feature = "buttercomp2",
+        feature = "pultec",
+        feature = "transformer",
+        feature = "punch",
+        feature = "haas",
+        feature = "dynamic_eq",
+        feature = "sheen"
+    ))]
+    #[test]
+    fn test_v1_0_param_ids_are_all_still_present() {
+        const V1_0_PARAM_IDS: &[&str] = &[
+            "global_bypass",
+            "global_auto_gain",
+            "gain",
+            "eq_bypass",
+            "lf_freq",
+            "lf_gain",
+            "lmf_freq",
+            "lmf_gain",
+            "lmf_q",
+            "mf_freq",
+            "mf_gain",
+            "mf_q",
+            "hmf_freq",
+            "hmf_gain",
+            "hmf_q",
+            "hf_freq",
+            "hf_gain",
+            "comp_bypass",
+            "comp_compress",
+            "comp_output",
+            "comp_dry_wet",
+            "comp_model",
+            "comp_sc_hp",
+            "comp_vca_thresh",
+            "comp_vca_ratio",
+            "comp_vca_atk",
+            "comp_vca_rel",
+            "comp_opt_thresh",
+            "comp_opt_speed",
+            "comp_opt_char",
+            "comp_fet_input",
+            "comp_fet_output",
+            "comp_fet_atk",
+            "comp_fet_rel",
+            "comp_fet_ratio",
+            "comp_fet_auto",
+            "pultec_bypass",
+            "pultec_lf_boost_freq",
+            "pultec_lf_boost_gain",
+            "pultec_lf_bw",
+            "pultec_lf_cut_freq",
+            "pultec_lf_cut_gain",
+            "pultec_lf_cut_bw",
+            "pultec_hf_boost_freq",
+            "pultec_hf_boost_gain",
+            "pultec_hf_boost_bandwidth",
+            "pultec_hf_cut_freq",
+            "pultec_hf_cut_gain",
+            "pultec_tube_drive",
+            "dyneq_bypass",
+            "dyneq_band1_freq",
+            "dyneq_band1_threshold",
+            "dyneq_band1_ratio",
+            "dyneq_band1_attack",
+            "dyneq_band1_release",
+            "dyneq_band1_gain",
+            "dyneq_band1_q",
+            "dyneq_band1_enabled",
+            "dyneq_band1_detector_freq",
+            "dyneq_band1_mode",
+            "dyneq_band1_solo",
+            "dyneq_band2_freq",
+            "dyneq_band2_threshold",
+            "dyneq_band2_ratio",
+            "dyneq_band2_attack",
+            "dyneq_band2_release",
+            "dyneq_band2_gain",
+            "dyneq_band2_q",
+            "dyneq_band2_enabled",
+            "dyneq_band2_detector_freq",
+            "dyneq_band2_mode",
+            "dyneq_band2_solo",
+            "dyneq_band3_freq",
+            "dyneq_band3_threshold",
+            "dyneq_band3_ratio",
+            "dyneq_band3_attack",
+            "dyneq_band3_release",
+            "dyneq_band3_gain",
+            "dyneq_band3_q",
+            "dyneq_band3_enabled",
+            "dyneq_band3_detector_freq",
+            "dyneq_band3_mode",
+            "dyneq_band3_solo",
+            "dyneq_band4_freq",
+            "dyneq_band4_threshold",
+            "dyneq_band4_ratio",
+            "dyneq_band4_attack",
+            "dyneq_band4_release",
+            "dyneq_band4_gain",
+            "dyneq_band4_q",
+            "dyneq_band4_enabled",
+            "dyneq_band4_detector_freq",
+            "dyneq_band4_mode",
+            "dyneq_band4_solo",
+            "transformer_bypass",
+            "transformer_model",
+            "transformer_input_drive",
+            "transformer_input_saturation",
+            "transformer_output_drive",
+            "transformer_output_saturation",
+            "transformer_low_response",
+            "transformer_high_response",
+            "transformer_compression",
+            "punch_bypass",
+            "punch_threshold",
+            "punch_clip_mode",
+            "punch_softness",
+            "punch_oversampling",
+            "punch_attack",
+            "punch_sustain",
+            "punch_attack_time",
+            "punch_release_time",
+            "punch_sensitivity",
+            "punch_input_gain",
+            "punch_output_gain",
+            "punch_mix",
+            "punch_wet_hpf",
+            "haas_bypass",
+            "haas_mid_gain",
+            "haas_side_gain",
+            "haas_comb_depth",
+            "haas_comb_time",
+            "haas_comb_mode",
+            "haas_mix",
+            "sheen_bypass",
+            "sheen_body_db",
+            "sheen_body_bypass",
+            "sheen_presence_db",
+            "sheen_presence_bypass",
+            "sheen_air_db",
+            "sheen_air_bypass",
+            "sheen_warmth",
+            "sheen_warmth_bypass",
+            "sheen_width",
+            "sheen_width_bypass",
+            "module_order_1",
+            "module_order_2",
+            "module_order_3",
+            "module_order_4",
+            "module_order_5",
+            "module_order_6",
+            "module_order_7",
+            "hide_api5500",
+            "hide_buttercomp2",
+            "hide_pultec",
+            "hide_dynamic_eq",
+            "hide_transformer",
+            "hide_punch",
+            "hide_haas",
+        ];
+
+        let plugin = BusChannelStrip::default();
+        let ids: Vec<String> = plugin
+            .params
+            .param_map()
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+
+        let missing: Vec<&&str> = V1_0_PARAM_IDS
+            .iter()
+            .filter(|want| !ids.iter().any(|have| have == *want))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "v1.0 parameter IDs missing (breaks session load): {missing:?}"
+        );
+
+        // IDs must also be unique — a duplicate makes host restore ambiguous.
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "duplicate parameter IDs present");
     }
 
     /// HF boost +10 dB / 8 kHz through the plugin's own instance.
