@@ -18,7 +18,7 @@
 
 use crate::shaping::{biquad_coeffs, Filter, FilterType};
 use biquad::{Biquad, DirectForm1, Type};
-use nih_plug::buffer::Buffer;
+use nice_plug::buffer::Buffer;
 
 // ============================================================================
 // Stage constants — fixed frequencies / Qs from the spec

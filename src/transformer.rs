@@ -1,8 +1,8 @@
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
 use biquad::{Biquad, DirectForm1, Type};
-use nih_plug::buffer::Buffer;
-use nih_plug::prelude::Enum;
+use nice_plug::buffer::Buffer;
+use nice_plug::prelude::Enum;
 
 /// Oversampling factor for the transformer saturation stage. 4× = 2 halfband
 /// stages (23 taps each, ~16 sample delay at native rate). 4× is the sweet

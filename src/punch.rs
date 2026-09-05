@@ -18,8 +18,8 @@
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
 use biquad::{Biquad, DirectForm1, Type};
-use nih_plug::buffer::Buffer;
-use nih_plug::prelude::Enum;
+use nice_plug::buffer::Buffer;
+use nice_plug::prelude::Enum;
 
 /// Minimum wet-path HPF cutoff. Below this the filter is effectively bypassed
 /// (DC-blocking only). Simon-Phillips-style parallel drum submix typically

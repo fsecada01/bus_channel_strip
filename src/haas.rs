@@ -18,8 +18,8 @@
 //! No EQ, no saturation, no bass enhancement. Those belong to API5500,
 //! Pultec, and Transformer respectively. Haas is a clean spatial tool.
 
-use nih_plug::buffer::Buffer;
-use nih_plug::prelude::Enum;
+use nice_plug::buffer::Buffer;
+use nice_plug::prelude::Enum;
 
 // ============================================================================
 // Constants
@@ -410,7 +410,7 @@ mod tests {
         }
 
         fn process_through(&mut self, haas: &mut HaasModule) {
-            // Build a real nih_plug Buffer that points at our two vecs.
+            // Build a real nice_plug Buffer that points at our two vecs.
             let mut buffer = Buffer::default();
             // SAFETY: set_slices is the supported way to construct a Buffer
             // pointing at external owned storage. We pass lifetimes bound

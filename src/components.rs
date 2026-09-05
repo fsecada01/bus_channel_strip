@@ -1,7 +1,7 @@
 // src/components.rs
 // Reusable UI components for the Bus Channel Strip editor
 
-use nih_plug::prelude::*;
+use nice_plug::prelude::*;
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
 use vizia_plug::widgets::*;

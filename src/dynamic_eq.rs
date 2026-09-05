@@ -13,8 +13,8 @@
 //   - Solo mode routes only the soloed band(s) through a RBJ bandpass filter
 //     so the user can isolate exactly the frequency range being processed.
 
-use nih_plug::buffer::Buffer;
-use nih_plug::prelude::Enum;
+use nice_plug::buffer::Buffer;
+use nice_plug::prelude::Enum;
 
 // Denormal flush threshold. IIR filters and envelope followers asymptote to
 // zero through the subnormal range (|x| < ~1.18e-38 on f32), which on x86
@@ -1147,7 +1147,7 @@ mod tests {
         // band 2's detected level should be independent of whether band 1 is
         // heavily cutting or not. Verifies the invariant.
         let sr = 44100.0_f32;
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
 
         let make_sine = |n: usize| {
             let l: Vec<f32> = (0..n)
@@ -1264,7 +1264,7 @@ mod tests {
         // same coefficient trajectory over time. We verify this by running two
         // buffers side by side and comparing band GR + per-sample ratios.
         let sr = 44100.0_f32;
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
 
         let n = 1024_usize;
         // L channel gets a 1 kHz sine at -6 dBFS; R channel is silent.
@@ -1396,7 +1396,7 @@ mod tests {
         // corrupt each other's state. With eq_filter_l / eq_filter_r split,
         // the channels are effectively two independent filter chains.
         let sr = 44100.0_f32;
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
 
         let n = 256_usize;
         // L: 500 Hz sine at 0.25 amplitude. R: 2 kHz sine at 0.25 amplitude.

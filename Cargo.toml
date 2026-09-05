@@ -14,12 +14,18 @@ members = ["xtask", "advisor"]
 crate-type = ["cdylib"]
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+# nih_plug's own README (maintenance mode) points to nice-plug as its
+# community-endorsed successor, co-authored by nih_plug's original author.
+# Pinned to the 0.1.x line: nice-plug-core jumped to a redesigned Editor
+# trait (host-driven ResizeHint/EditorHandle::set_size) at 0.2.0/0.3.0, but
+# vizia_plug's current implementation still targets nice-plug-core ^0.1.5 —
+# using nice-plug 0.2+ here would fail to compile against vizia_plug.
+nice-plug = "0.1.10"
 augmented-dsp-filters = "2.5.0"
 biquad = "0.5.0"
 fundsp = "0.23.0"
 idsp = "0.21.0"
-# vizia-plug for GUI integration with nih-plug
+# vizia-plug for GUI integration with nice-plug
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
 # Use skia-safe with features that have pre-built binaries for Windows
 # Note: x11 is Linux-only, removed for cross-platform compatibility

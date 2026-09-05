@@ -1,7 +1,7 @@
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
 use biquad::{Biquad, DirectForm1, Type};
-use nih_plug::buffer::Buffer;
+use nice_plug::buffer::Buffer;
 
 /// Oversampling factor for the tube saturation stage. 4× (2 halfband stages)
 /// brings the 2nd/3rd-order harmonic energy of a pushed signal below
@@ -362,11 +362,11 @@ mod tests {
     }
 
     /// Measure the actual steady-state gain PultecEQ applies through
-    /// `process()`, using a real nih_plug `Buffer`. This is the end-to-end
+    /// `process()`, using a real nice_plug `Buffer`. This is the end-to-end
     /// check the user-facing issue needs: "when I crank LF BOOST, do I
     /// actually get ~+15 dB of boost below the shelf corner?"
     fn measure_gain_db(eq: &mut PultecEQ, freq_hz: f32, sr: f32) -> f32 {
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
         let n = 8192_usize;
         let omega = 2.0 * core::f32::consts::PI * freq_hz / sr;
         let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
