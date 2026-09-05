@@ -51,6 +51,11 @@ const MIN_FREQ_HZ: f32 = 1.0;
 /// parameter mapping.
 const MIN_Q: f32 = 0.025;
 
+/// RBJ cookbook's sqrt-of-linear-gain convention: `A = 10^(dB/RBJ_GAIN_DIVISOR)`,
+/// so `A*A` (used directly in the shelf/bell mix terms) equals the linear gain
+/// `10^(dB/20)`.
+const RBJ_GAIN_DIVISOR: f32 = 40.0;
+
 #[inline(always)]
 pub(crate) fn flush_denormal(x: f32) -> f32 {
     if x.abs() < DENORMAL_FLUSH {
@@ -119,10 +124,12 @@ impl SvfCoefficients {
     pub fn new(filter_type: SvfType, sample_rate: f32, freq_hz: f32, q: f32) -> Self {
         // `.max().min()` rather than `.clamp()` so a zero/negative sample
         // rate can never make min > max and panic on the audio thread.
+        // Floored first so `freq_hz`'s clamp range and `g`'s prewarp below
+        // are derived from the same effective sample rate.
+        let sample_rate = sample_rate.max(2.0 * MIN_FREQ_HZ);
         let max_hz = (sample_rate * MAX_FREQ_RATIO).max(MIN_FREQ_HZ);
         let freq_hz = freq_hz.max(MIN_FREQ_HZ).min(max_hz);
         let q = q.max(MIN_Q);
-        let sample_rate = sample_rate.max(2.0 * MIN_FREQ_HZ);
 
         // Prewarped integrator gain. tan() of the normalised corner maps the
         // analog prototype's corner exactly onto the digital one (this is
@@ -143,17 +150,17 @@ impl SvfCoefficients {
             SvfType::HighPass => (1.0, -k, -1.0),
             SvfType::Notch => (1.0, -k, 0.0),
             SvfType::Bell(db) => {
-                let a = 10.0_f32.powf(db / 40.0);
+                let a = 10.0_f32.powf(db / RBJ_GAIN_DIVISOR);
                 k /= a;
                 (1.0, k * (a * a - 1.0), 0.0)
             }
             SvfType::LowShelf(db) => {
-                let a = 10.0_f32.powf(db / 40.0);
+                let a = 10.0_f32.powf(db / RBJ_GAIN_DIVISOR);
                 g /= a.sqrt();
                 (1.0, k * (a - 1.0), a * a - 1.0)
             }
             SvfType::HighShelf(db) => {
-                let a = 10.0_f32.powf(db / 40.0);
+                let a = 10.0_f32.powf(db / RBJ_GAIN_DIVISOR);
                 g *= a.sqrt();
                 (a * a, k * (1.0 - a) * a, 1.0 - a * a)
             }
@@ -266,7 +273,13 @@ impl TptSvf {
         // new response without a transient.
         self.ic1eq = flush_denormal(2.0 * v1 - self.ic1eq);
         self.ic2eq = flush_denormal(2.0 * v2 - self.ic2eq);
-        c.m0 * v0 + c.m1 * v1 + c.m2 * v2
+        // Flushing only the state isn't enough: for filter types with a
+        // nonzero direct-path term (m0, e.g. HighPass/Notch/shelves), a
+        // subnormal `v0` arriving from an upstream stage's own decay tail
+        // reaches the output un-flushed even once this filter's own state
+        // has settled to exactly zero, re-triggering the FTZ-less x86
+        // subnormal stall one stage downstream.
+        flush_denormal(c.m0 * v0 + c.m1 * v1 + c.m2 * v2)
     }
 
     /// Zero the integrator state.

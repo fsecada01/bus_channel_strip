@@ -162,10 +162,23 @@ impl LinearPhaseEngine {
     /// 3. Take the centre `LINEAR_PHASE_TAPS` samples, Hann-window them.
     /// 4. Forward FFT (zero-padded to `LP_FFT`) → kernel spectrum.
     fn design_kernel(&mut self, stages: &[SvfCoefficients; EQ_STAGES]) {
+        // A flat stage contributes exactly unity magnitude at every bin, so
+        // evaluating `response_from_tan` (a complex division) for it is pure
+        // waste. LF cut/HF boost/HF cut, and often LF boost too, sit at their
+        // flat default for most of a session, so this is a real cost cut on
+        // a function this throttled but still audio-thread-adjacent. A fixed
+        // stack array (not a `Vec`) keeps this allocation-free.
+        let flat = SvfCoefficients::flat();
+        let mut is_active = [false; EQ_STAGES];
+        for (active, stage) in is_active.iter_mut().zip(stages) {
+            *active = *stage != flat;
+        }
         for (bin, t) in self.design_spec.iter_mut().zip(&self.design_tan) {
             let mut mag = 1.0_f32;
-            for stage in stages {
-                mag *= stage.response_from_tan(*t).norm();
+            for (stage, &active) in stages.iter().zip(&is_active) {
+                if active {
+                    mag *= stage.response_from_tan(*t).norm();
+                }
             }
             *bin = Complex::new(mag, 0.0);
         }
@@ -856,6 +869,9 @@ mod tests {
         let mut l = input.to_vec();
         let mut r = input.to_vec();
         let mut buf = Buffer::default();
+        // SAFETY: `l` and `r` are each length `n` and live for the duration
+        // of this function, so the slices `set_slices` hands to `ss` are
+        // valid and correctly sized for the whole call.
         unsafe {
             buf.set_slices(n, |ss| {
                 ss.clear();

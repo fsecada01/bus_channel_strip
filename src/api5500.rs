@@ -202,6 +202,9 @@ mod tests {
         let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
         let mut r = l.clone();
         let mut buf = Buffer::default();
+        // SAFETY: `l` and `r` are each length `n` and live for the duration
+        // of this function, so the slices `set_slices` hands to `ss` are
+        // valid and correctly sized for the whole call.
         unsafe {
             buf.set_slices(n, |ss| {
                 ss.clear();

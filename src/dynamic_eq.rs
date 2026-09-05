@@ -105,7 +105,12 @@ impl BandFilter {
 
     #[inline]
     fn design(filter_type: SvfType, freq_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
-        let freq_hz = freq_hz.clamp(BAND_MIN_FREQ_HZ, sample_rate * BAND_MAX_FREQ_RATIO);
+        // `.max().min()` rather than `.clamp()` — a degenerate sample rate
+        // could otherwise make the upper bound fall below BAND_MIN_FREQ_HZ
+        // and panic on the audio thread (same reasoning as svf.rs's own
+        // coefficient clamp).
+        let max_hz = (sample_rate * BAND_MAX_FREQ_RATIO).max(BAND_MIN_FREQ_HZ);
+        let freq_hz = freq_hz.max(BAND_MIN_FREQ_HZ).min(max_hz);
         SvfCoefficients::new(filter_type, sample_rate, freq_hz, q.max(BAND_MIN_Q))
     }
 
