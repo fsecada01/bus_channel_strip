@@ -74,7 +74,7 @@ Every factory value traces back to a citation. v1.0 development included three p
 2. **Polish-plugin teardowns** — Slate Revival, Kush AR-1, Sonnox Inflator, Maag EQ4, Soundtoys Decapitator Tone, Acustica Pensado, Waves Vitamin, Greg Wells ToneCentric, iZotope Ozone Vintage Tape, PSP Vintage Warmer 2, Brainworx bx_console N/E/G. Stage configurations, default knob positions, and consensus polish recipes.
 3. **Tape and transformer harmonic profiles** — Studer A800 / Ampex ATR-102 / MCI JH series with 456 / GP9 tape; Jensen JT-11-DM, Lundahl LL1538/LL1517, Carnhill VTB1148, UTC A-20, Sowter 9120. Measured harmonic spectra at -18 / -12 / -6 dBFS reference levels.
 
-The full synthesis lives in `docs/SHEEN_MODULE_SPEC.md` in the repository, with per-stage citations.
+The full synthesis lives in `docs/adr/0006-sheen-pinned-master-end-polish.md` in the repository, with per-stage citations.
 
 ## UX
 

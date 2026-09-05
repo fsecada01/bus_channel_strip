@@ -54,7 +54,7 @@ The first seven modules occupy reorderable slots driven by the `module_order_*` 
   - **Dynamic EQ**: steel blue, green accents
   - **Console/Tape**: charcoal or oxide red tones
 - Keep GUI interactions performant and audio-thread safe
-- See `GUI_DESIGN.md` for complete design specifications
+- See [ADR-0009](docs/adr/0009-gui-framework-and-color-coding.md) for the GUI framework decision and full color-coding table, and [ADR-0007](docs/adr/0007-multi-fx-rack-native-drag-drop.md) for the rack/drag-drop design
 
 **Key vizia Resources:**
 - vizia-plug GitHub: https://github.com/vizia/vizia-plug
@@ -116,14 +116,9 @@ The first seven modules occupy reorderable slots driven by the `module_order_*` 
 
 **Documentation:**
 - `docs/SYSTEM_PROMPT.md` - Extended AI session context (orchestration protocol, audio-thread rules, code standards)
-- `docs/SHEEN_MODULE_SPEC.md` - Sheen module DSP spec, factory-default rationale, citations from the three research reports
-- `docs/MULTI_FX_UI_DESIGN.md` - Rack UX design (consolidation pass + drag-drop redesign with hit-test semantics)
-- `docs/AGENTS.md` - Original project specification and agent roles
-- `docs/GUI_DESIGN.md` - Complete GUI specifications and design
-- `docs/PUNCH_MODULE_SPEC.md` - Punch module DSP specification and psychoacoustic research
-- `docs/VIZIA_AGENT_SPEC.md` - vizia GUI specialist agent specification
+- `docs/adr/` - Architecture Decision Records — the *why* behind DSP, UI, and integration decisions (Sheen: ADR-0006, Punch: ADR-0005, Haas: ADR-0004, the rack/drag-drop redesign: ADR-0007, ButterComp2 FFI: ADR-0008, GUI framework + color coding: ADR-0009, Mix Advisor: ADR-0010)
 - `docs/CLIPPING_INSIGHTS.md` - Professional loudness techniques research
-- `docs/buttercomp2_analysis.md` - ButterComp2 FFI analysis
+- `docs/README.md` - Overview of what lives in `docs/` vs. the published `site/`
 
 ## Recent Development Notes
 

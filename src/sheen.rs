@@ -14,7 +14,7 @@
 //!      -> [out]
 //! ```
 //!
-//! Stage rationale and citations live in `docs/SHEEN_MODULE_SPEC.md`.
+//! Stage rationale and citations live in `docs/adr/0006-sheen-pinned-master-end-polish.md`.
 
 use crate::shaping::{biquad_coeffs, Filter, FilterType};
 use biquad::{Biquad, DirectForm1, Type};

@@ -23,7 +23,7 @@ Always-on by default at research-grounded factory tuning:
 - **WARMTH** — Sonnox Inflator polynomial @ Curve=0, 2× oversampled, default 20% mix
 - **WIDTH** — M/S side-only HPF @ 150 Hz + shelf @ 500 Hz, default 50%
 
-Defaults are anchored in three parallel research reports — classic console-bus measurements (SSL G, Neve 33609, API 2500, Studer, Trident), polish-plugin teardowns (Slate Revival, Kush AR-1, Maag EQ4, Sonnox Inflator, Pensado, Vitamin, Ozone, PSP Vintage Warmer, bx_console), and tape + transformer harmonic profiles (Studer A800, Ampex ATR-102, Jensen, Lundahl, Carnhill). See [`docs/SHEEN_MODULE_SPEC.md`](https://github.com/fsecada01/bus_channel_strip/blob/main/docs/SHEEN_MODULE_SPEC.md) for citations and stage-by-stage rationale.
+Defaults are anchored in three parallel research reports — classic console-bus measurements (SSL G, Neve 33609, API 2500, Studer, Trident), polish-plugin teardowns (Slate Revival, Kush AR-1, Maag EQ4, Sonnox Inflator, Pensado, Vitamin, Ozone, PSP Vintage Warmer, bx_console), and tape + transformer harmonic profiles (Studer A800, Ampex ATR-102, Jensen, Lundahl, Carnhill). See [`docs/adr/0006-sheen-pinned-master-end-polish.md`](https://github.com/fsecada01/bus_channel_strip/blob/main/docs/adr/0006-sheen-pinned-master-end-polish.md) for citations and stage-by-stage rationale.
 
 Sheen is **excluded from `global_auto_gain`** — auto-comp on a polish stage defeats its purpose. See the [Sheen module page](/bus_channel_strip/modules/sheen/) for the full reference.
 

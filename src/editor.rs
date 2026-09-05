@@ -217,8 +217,8 @@ impl Model for Data {
             }
             AppEvent::RestoreSheenFactory => {
                 // Re-write every Sheen param to the factory default in one
-                // event-frame batch. Values mirror SHEEN_MODULE_SPEC.md §3
-                // and the lib.rs `Default for BusChannelStripParams` impl.
+                // event-frame batch. Values mirror ADR-0006 and the lib.rs
+                // `Default for BusChannelStripParams` impl.
                 let restore = |cx: &mut EventContext, ptr: ParamPtr, plain: f32| {
                     // SAFETY: ParamPtr is taken from `self.params` (Arc'd,
                     // outlives the editor). preview_normalized maps plain

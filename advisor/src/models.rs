@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// ── Studio Profile (mirrors studio-profiles-schema.md) ────────────────────────
+// ── Studio Profile (schema documented in docs/adr/0010-mix-advisor-reascript-architecture.md) ──
 
 /// Lightweight listing entry for GET /profiles
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -14,7 +14,7 @@ pub struct ProfileSummary {
     pub description: String,
 }
 
-/// Full profile as stored in studio-profiles.json
+/// Full profile as stored in docs/adr/resources/studio-profiles.json
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Profile {
     pub id: String,
@@ -28,7 +28,7 @@ pub struct Profile {
     pub extra: serde_json::Value,
 }
 
-/// Top-level structure of studio-profiles.json
+/// Top-level structure of docs/adr/resources/studio-profiles.json
 #[derive(Debug, Deserialize)]
 pub struct ProfilesFile {
     pub profiles: Vec<Profile>,

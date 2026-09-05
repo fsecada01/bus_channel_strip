@@ -243,5 +243,5 @@ Use ring buffers or lock-free queues if deferred work is needed.
 | GUI styles | `src/styles.rs` |
 | Build script | `build.rs` |
 | Bundle tooling | `xtask/` |
-| Design spec | `docs/GUI_DESIGN.md` |
-| Punch DSP spec | `docs/PUNCH_MODULE_SPEC.md` |
+| GUI framework/color-coding decision | `docs/adr/0009-gui-framework-and-color-coding.md` |
+| Punch DSP decision | `docs/adr/0005-punch-pre-clip-transient-shaping.md` |

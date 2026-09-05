@@ -154,7 +154,7 @@ struct BusChannelStrip {
     haas: HaasModule,
     /// Sheen — pinned master-end "polish coat". Always last in the chain
     /// (post-Punch, pre-master-gain). Not user-reorderable; not in
-    /// `module_order_*`. Default-on at factory tonality (see SHEEN_MODULE_SPEC.md).
+    /// `module_order_*`. Default-on at factory tonality (see ADR-0006).
     #[cfg(feature = "sheen")]
     sheen: SheenModule,
 
@@ -605,7 +605,7 @@ pub struct BusChannelStripParams {
     // ── Sheen Module Parameters ──────────────────────────────────────────
     // Pinned master-end "polish coat". Always default-ON; the brass plate in
     // the chassis header opens the back view that exposes these sliders.
-    // Factory values are research-grounded (see SHEEN_MODULE_SPEC.md §3).
+    // Factory values are research-grounded (see ADR-0006).
     #[cfg(feature = "sheen")]
     #[id = "sheen_bypass"]
     pub sheen_bypass: BoolParam,
@@ -1706,7 +1706,7 @@ impl Default for BusChannelStripParams {
 
             // ── Sheen factory defaults ─────────────────────────────────
             // Default ON (sheen_bypass = false). Per-stage values follow
-            // the polish-plugin consensus synthesis (see SHEEN_MODULE_SPEC.md).
+            // the polish-plugin consensus synthesis (see ADR-0006).
             #[cfg(feature = "sheen")]
             sheen_bypass: BoolParam::new("Sheen Bypass", false),
 
@@ -2499,7 +2499,7 @@ impl Plugin for BusChannelStrip {
 
         // 6.5) Sheen — pinned master-end polish coat. Always last in the
         // chain (post-Punch, pre-master-gain). Excluded from auto-gain
-        // intentionally per SHEEN_MODULE_SPEC.md §7: auto-comp on a polish
+        // intentionally per ADR-0006: auto-comp on a polish
         // stage defeats its purpose. Param state is forwarded once per
         // buffer; the module compares against its cache and only
         // regenerates filter coefficients when a slider actually moved.

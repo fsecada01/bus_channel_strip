@@ -61,7 +61,7 @@ A new pinned DSP stage at the end of the chain (post-Punch, pre-master-gain) tha
 | **WARMTH** | Sonnox Inflator polynomial @ Curve=0, 2× oversampled | 20% mix |
 | **WIDTH** | M/S side-only: HPF @ 150 Hz + shelf @ 500 Hz | +12.5% sides above 500 Hz, mono <150 Hz |
 
-Defaults are anchored in three parallel research reports — classic console-bus measurements (SSL G, Neve 33609, API 2500, Studer, Trident), polish-plugin teardowns (Slate Revival, Kush AR-1, Maag EQ4, Sonnox Inflator, Pensado, Vitamin, Ozone, PSP Vintage Warmer, bx_console), and tape + transformer harmonic profiles (Studer A800, Ampex ATR-102, Jensen, Lundahl, Carnhill). See `docs/SHEEN_MODULE_SPEC.md` for citations and stage-by-stage rationale. Excluded from `Auto Gain` — auto-comp on a polish stage defeats its purpose.
+Defaults are anchored in three parallel research reports — classic console-bus measurements (SSL G, Neve 33609, API 2500, Studer, Trident), polish-plugin teardowns (Slate Revival, Kush AR-1, Maag EQ4, Sonnox Inflator, Pensado, Vitamin, Ozone, PSP Vintage Warmer, bx_console), and tape + transformer harmonic profiles (Studer A800, Ampex ATR-102, Jensen, Lundahl, Carnhill). See [`docs/adr/0006-sheen-pinned-master-end-polish.md`](docs/adr/0006-sheen-pinned-master-end-polish.md) for citations and stage-by-stage rationale. Excluded from `Auto Gain` — auto-comp on a polish stage defeats its purpose.
 
 ### Multi-fx rack redesign
 
@@ -256,8 +256,8 @@ src/
 
 cpp/               # C++ Airwindows FFI wrappers
 xtask/             # Build tooling (bundle, install)
-docs/              # Documentation + GitHub Pages site (includes SHEEN_MODULE_SPEC.md
-                   #   and MULTI_FX_UI_DESIGN.md)
+docs/              # Internal docs: ADRs (docs/adr/), SYSTEM_PROMPT.md, TESTING.md, etc.
+site/              # Published Astro/Starlight docs site (GitHub Pages)
 ```
 
 ---
@@ -269,10 +269,7 @@ Full control reference, genre signal chain examples, and preset descriptions:
 **[fsecada01.github.io/bus_channel_strip](https://fsecada01.github.io/bus_channel_strip/)**
 
 Internal design documents in `docs/`:
-- `SHEEN_MODULE_SPEC.md` — Sheen DSP design with research citations and factory-default rationale
-- `MULTI_FX_UI_DESIGN.md` — Rack UX design: consolidation pass + drag-drop redesign with hit-test semantics
-- `GUI_DESIGN.md` — UI specifications and layout
-- `PUNCH_MODULE_SPEC.md` — Punch DSP design and psychoacoustic research
+- `docs/adr/` — Architecture Decision Records: Sheen design ([ADR-0006](docs/adr/0006-sheen-pinned-master-end-polish.md)), rack UX/drag-drop ([ADR-0007](docs/adr/0007-multi-fx-rack-native-drag-drop.md)), GUI framework/layout ([ADR-0009](docs/adr/0009-gui-framework-and-color-coding.md)), Punch design ([ADR-0005](docs/adr/0005-punch-pre-clip-transient-shaping.md)), and more
 - `CLIPPING_INSIGHTS.md` — Professional loudness techniques
 
 ---

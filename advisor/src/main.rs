@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
             if p.ends_with("advisor") {
                 p.pop();
             }
-            p.join("docs/specs/studio-profiles.json")
+            p.join("docs/adr/resources/studio-profiles.json")
         });
 
     info!("Loading profiles from {}", profiles_path.display());
