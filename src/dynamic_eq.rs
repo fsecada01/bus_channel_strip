@@ -17,16 +17,9 @@
 //   - Solo mode routes only the soloed band(s) through a RBJ bandpass filter
 //     so the user can isolate exactly the frequency range being processed.
 
-use crate::svf::{SvfCoefficients, SvfType, TptSvf};
+use crate::svf::{flush_denormal, SvfCoefficients, SvfType, TptSvf};
 use nih_plug::buffer::Buffer;
 use nih_plug::prelude::Enum;
-
-// Denormal flush threshold. IIR filters and envelope followers asymptote to
-// zero through the subnormal range (|x| < ~1.18e-38 on f32), which on x86
-// without FTZ costs ~100x the normal multiply latency. Flushing any state
-// below this threshold to zero eliminates the stall while introducing an
-// error well below any audible level.
-const DENORMAL_FLUSH: f32 = 1.0e-20;
 
 // RMS integration window for sidechain detection. 10 ms is a conventional
 // trade-off: long enough to smooth out transient spikes that would cause
@@ -82,15 +75,6 @@ fn compute_gain_change_db(over_db: f32, mode: DynamicMode, ratio: f32) -> f32 {
                 (-slope * u * u / (2.0 * KNEE_WIDTH_DB)).max(-96.0)
             }
         }
-    }
-}
-
-#[inline(always)]
-fn flush_denormal(x: f32) -> f32 {
-    if x.abs() < DENORMAL_FLUSH {
-        0.0
-    } else {
-        x
     }
 }
 
@@ -154,6 +138,33 @@ impl BandFilter {
     fn update_bandpass(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
         self.svf
             .update_coefficients(Self::design(SvfType::BandPass, freq_hz, q, sample_rate));
+    }
+
+    /// Update a stereo pair of peaking filters from one shared coefficient
+    /// computation. `l` and `r` always receive identical parameters — only
+    /// per-sample state diverges — so computing `SvfCoefficients::new` (a
+    /// `tan()`/`powf()` derivation) twice per update is pure waste. This is
+    /// the hot path: gain-reduction tracking recomputes on essentially every
+    /// sample pair during active compression.
+    fn update_peaking_pair(
+        l: &mut Self,
+        r: &mut Self,
+        freq_hz: f32,
+        q: f32,
+        gain_db: f32,
+        sample_rate: f32,
+    ) {
+        let coeffs = Self::design(SvfType::Bell(gain_db), freq_hz, q, sample_rate);
+        l.svf.update_coefficients(coeffs);
+        r.svf.update_coefficients(coeffs);
+    }
+
+    /// Update a stereo pair of constant-skirt-gain bandpass filters from one
+    /// shared coefficient computation. See [`Self::update_peaking_pair`].
+    fn update_bandpass_pair(l: &mut Self, r: &mut Self, freq_hz: f32, q: f32, sample_rate: f32) {
+        let coeffs = Self::design(SvfType::BandPass, freq_hz, q, sample_rate);
+        l.svf.update_coefficients(coeffs);
+        r.svf.update_coefficients(coeffs);
     }
 
     /// Processes one sample.
@@ -315,8 +326,13 @@ impl DynamicBand {
         // Update solo bandpass filters (L and R) for this band's center
         // frequency. Both channels receive identical coefficients — only state
         // diverges with input.
-        self.solo_filter_l.update_bandpass(frequency, q, sr);
-        self.solo_filter_r.update_bandpass(frequency, q, sr);
+        BandFilter::update_bandpass_pair(
+            &mut self.solo_filter_l,
+            &mut self.solo_filter_r,
+            frequency,
+            q,
+            sr,
+        );
     }
 
     /// Update the sidechain envelope from a detection input. This is called
@@ -375,13 +391,9 @@ impl DynamicBand {
         // with at most 0.05 dB of GR tracking error (inaudible).
         const GR_HYSTERESIS_DB: f32 = 0.05;
         if (gain_change_db - self.last_gain_change_db).abs() > GR_HYSTERESIS_DB {
-            self.eq_filter_l.update_peaking(
-                self.frequency,
-                self.q,
-                gain_change_db,
-                self.sample_rate,
-            );
-            self.eq_filter_r.update_peaking(
+            BandFilter::update_peaking_pair(
+                &mut self.eq_filter_l,
+                &mut self.eq_filter_r,
                 self.frequency,
                 self.q,
                 gain_change_db,

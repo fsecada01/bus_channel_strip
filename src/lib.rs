@@ -1949,14 +1949,22 @@ impl BusChannelStrip {
     /// Sync the Pultec linear-phase mode with its param and report latency
     /// to the host when it changes.
     ///
-    /// Latency is only owed when the mode is on AND Pultec is actually in the
-    /// module order — a Pultec that sits in the library sidebar never runs,
-    /// so reporting 512 samples for it would misalign the track.
+    /// Latency tracks the `pultec_linear_phase` param alone, not module-order
+    /// membership. An earlier version also required Pultec to be in the
+    /// active chain, on the reasoning that a Pultec sitting unused shouldn't
+    /// cost the track any latency — but that meant dragging Pultec out of
+    /// the rack mid-playback while linear-phase was engaged dropped the
+    /// reported latency to 0 on the same block the FIR's buffered 512
+    /// samples were discarded, producing an audible glitch. Tying latency to
+    /// the toggle alone means engaging Linear Phase costs 512 samples until
+    /// you turn it back off, regardless of chain reordering — simpler, and
+    /// `process()` keeps the FIR draining via `process_bypassed` whenever
+    /// Pultec isn't an active chain slot, so the delay this promises the
+    /// host is always actually applied to the signal.
     #[cfg(feature = "pultec")]
-    fn sync_pultec_latency(&mut self, order: &[ModuleType], set_latency: &mut dyn FnMut(u32)) {
-        let in_chain = order.contains(&ModuleType::PultecEQ);
-        let want_linear = self.params.pultec_linear_phase.value() && in_chain;
-        self.pultec.set_linear_phase(want_linear);
+    fn sync_pultec_latency(&mut self, set_latency: &mut dyn FnMut(u32)) {
+        self.pultec
+            .set_linear_phase(self.params.pultec_linear_phase.value());
         let latency = self.pultec.latency_samples();
         if latency != self.pultec_reported_latency {
             self.pultec_reported_latency = latency;
@@ -2394,9 +2402,8 @@ impl Plugin for BusChannelStrip {
             self.pultec = PultecEQ::new(sr);
             // Report linear-phase latency up front so the host's PDC is
             // right from the first block rather than one block late.
-            let order = self.module_order();
             self.pultec_reported_latency = u32::MAX; // force a report
-            self.sync_pultec_latency(&order, &mut |latency| {
+            self.sync_pultec_latency(&mut |latency| {
                 _context.set_latency_samples(latency);
             });
         }
@@ -2446,14 +2453,7 @@ impl Plugin for BusChannelStrip {
             self.sc_ring = vec![0.0_f32; spectral::FFT_SIZE];
             self.sc_ring_pos = 0;
             self.sample_rate = sr;
-            // Hann window: w[n] = 0.5 * (1 - cos(2π*n / (N-1)))
-            self.fft_window = (0..spectral::FFT_SIZE)
-                .map(|n| {
-                    0.5 * (1.0
-                        - (std::f32::consts::TAU * n as f32 / (spectral::FFT_SIZE - 1) as f32)
-                            .cos())
-                })
-                .collect();
+            self.fft_window = shaping::hann_window(spectral::FFT_SIZE);
             self.fft_magnitude_smooth = vec![0.0_f32; spectral::SPECTRUM_BINS];
         }
 
@@ -2463,6 +2463,10 @@ impl Plugin for BusChannelStrip {
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
+        #[cfg(feature = "api5500")]
+        {
+            self.eq_api5500.reset();
+        }
         #[cfg(feature = "buttercomp2")]
         {
             self.compressor.reset();
@@ -2512,17 +2516,16 @@ impl Plugin for BusChannelStrip {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         // Each of the seven module_order_N params selects which module lands
-        // in slot N. Read once up front: dispatch needs it, and so does the
-        // Pultec latency report (only owed when Pultec is in the chain).
+        // in slot N. Read once up front for dispatch.
         let order = self.module_order();
 
         // Pultec linear-phase mode owes the host a fixed 512-sample delay.
-        // Keep the report in sync with the param / module order every block
-        // (a no-op unless something changed), and keep the delay in place
-        // through both module and global bypass so toggling never shifts
-        // the track against its neighbours.
+        // Keep the report in sync with the param every block (a no-op unless
+        // it changed), and keep the delay in place through both module and
+        // global bypass so toggling never shifts the track against its
+        // neighbours.
         #[cfg(feature = "pultec")]
-        self.sync_pultec_latency(&order, &mut |latency| {
+        self.sync_pultec_latency(&mut |latency| {
             _context.set_latency_samples(latency);
         });
 
@@ -2560,6 +2563,18 @@ impl Plugin for BusChannelStrip {
             }
             seen[idx] = true;
             self.dispatch_module(mt, buffer, aux);
+        }
+
+        // If Pultec isn't an active chain slot this block but linear-phase
+        // mode is engaged, the plugin has still promised the host a
+        // 512-sample delay (see `sync_pultec_latency`) — keep applying it as
+        // a pure passthrough so the signal actually carries the latency
+        // being claimed, instead of silently dropping the FIR's buffered
+        // audio and leaving the track undelayed relative to what the host
+        // compensates for. A no-op when linear-phase mode is off.
+        #[cfg(feature = "pultec")]
+        if !seen[module_type_index(ModuleType::PultecEQ)] {
+            self.pultec.process_bypassed(buffer);
         }
 
         // 6.5) Sheen — pinned master-end polish coat. Always last in the

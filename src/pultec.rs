@@ -51,6 +51,16 @@ const _: () = assert!(LP_DESIGN_FFT >= 2 * LINEAR_PHASE_TAPS);
 const _: () = assert!(LINEAR_PHASE_TAPS % 2 == 1);
 const _: () = assert!(LINEAR_PHASE_LATENCY == 512);
 
+/// Minimum samples between kernel redesigns. Pultec params carry no
+/// smoother, so automation or a dragged knob can flag a coefficient change
+/// on essentially every host block; without a floor, `design_kernel`'s
+/// 4096-point IFFT + 5-stage evaluation + 1024-point FFT would re-run that
+/// often, which is well outside a sane audio-thread CPU budget. Gating
+/// redesigns to once per hop keeps the amortised cost the same order as
+/// running the convolution itself, at the price of a bounded (<= one hop)
+/// delay before a coefficient change is reflected in the kernel.
+const KERNEL_REDESIGN_MIN_INTERVAL: usize = LP_HOP;
+
 /// Overlap-save FFT convolver plus the zero-phase FIR designer that feeds it.
 /// Every buffer and FFT plan is allocated in `new()`; `design_kernel`,
 /// `process_frame` and `run_block` are allocation-free.
@@ -73,6 +83,9 @@ struct LinearPhaseEngine {
     /// transform of a product comes out normalised.
     kernel_spec: Vec<Complex<f32>>,
     kernel_dirty: bool,
+    /// Samples elapsed since the kernel was last redesigned. Gates
+    /// `design_kernel` calls to at most once per [`KERNEL_REDESIGN_MIN_INTERVAL`].
+    samples_since_redesign: usize,
 
     // Runtime overlap-save state.
     /// Last `LP_FFT` input samples per channel; the newest `LP_HOP` live at
@@ -109,12 +122,7 @@ impl LinearPhaseEngine {
                 }
             })
             .collect();
-        let window: Vec<f32> = (0..LINEAR_PHASE_TAPS)
-            .map(|m| {
-                0.5 * (1.0
-                    - (core::f32::consts::TAU * m as f32 / (LINEAR_PHASE_TAPS - 1) as f32).cos())
-            })
-            .collect();
+        let window = crate::shaping::hann_window(LINEAR_PHASE_TAPS);
 
         let mut engine = Self {
             design_tan,
@@ -125,6 +133,10 @@ impl LinearPhaseEngine {
             kernel_time: fft_fwd.make_input_vec(),
             kernel_spec: fft_fwd.make_output_vec(),
             kernel_dirty: true,
+            // "Ready" from construction so the first real coefficient update
+            // (typically before any audio has flowed) redesigns immediately
+            // rather than waiting out the throttle window.
+            samples_since_redesign: KERNEL_REDESIGN_MIN_INTERVAL,
             hist: [vec![0.0; LP_FFT], vec![0.0; LP_FFT]],
             out_block: [vec![0.0; LP_HOP], vec![0.0; LP_HOP]],
             fft_in: fft_fwd.make_input_vec(),
@@ -184,6 +196,7 @@ impl LinearPhaseEngine {
             *bin *= inv_n;
         }
         self.kernel_dirty = false;
+        self.samples_since_redesign = 0;
     }
 
     /// Dry input from `LINEAR_PHASE_LATENCY` frames ago (for bypass). Must be
@@ -204,6 +217,7 @@ impl LinearPhaseEngine {
         self.hist[0][write] = l;
         self.hist[1][write] = r;
         self.pos += 1;
+        self.samples_since_redesign = self.samples_since_redesign.saturating_add(1);
         if self.pos == LP_HOP {
             self.run_block();
             self.pos = 0;
@@ -248,6 +262,9 @@ impl LinearPhaseEngine {
             o.fill(0.0);
         }
         self.pos = 0;
+        // Ready for an immediate redesign rather than making the caller wait
+        // out the throttle window right after a reset.
+        self.samples_since_redesign = KERNEL_REDESIGN_MIN_INTERVAL;
     }
 }
 
@@ -515,7 +532,9 @@ impl PultecEQ {
     /// design. Runs once per change, never per sample.
     #[inline]
     fn redesign_kernel_if_dirty(&mut self) {
-        if self.linear.kernel_dirty {
+        if self.linear.kernel_dirty
+            && self.linear.samples_since_redesign >= KERNEL_REDESIGN_MIN_INTERVAL
+        {
             let stages = self.stage_coefficients();
             self.linear.design_kernel(&stages);
         }
@@ -594,6 +613,13 @@ impl PultecEQ {
     /// delayed by exactly that amount — and the convolver keeps running on
     /// the input so un-bypassing resumes with a warm history instead of a
     /// 512-sample fade-in.
+    ///
+    /// The caller also uses this when Pultec isn't an active chain slot at
+    /// all (not just module-bypassed) while linear-phase mode is engaged —
+    /// see `sync_pultec_latency` in `lib.rs`. Since latency is reported from
+    /// the toggle alone, not chain membership, this keeps the FIR draining
+    /// and the promised delay actually applied to the signal regardless of
+    /// why the module isn't running its full EQ chain this block.
     pub fn process_bypassed(&mut self, buffer: &mut Buffer) {
         if !self.linear_phase {
             return;
@@ -1081,5 +1107,59 @@ mod tests {
             assert!(y.is_finite(), "non-finite sample {y} at i={i}");
             assert!(y.abs() < 2.0, "implausibly large sample {y} at i={i}");
         }
+    }
+
+    /// A coefficient change must not trigger a kernel redesign again until
+    /// `KERNEL_REDESIGN_MIN_INTERVAL` samples have elapsed since the last one
+    /// — otherwise automation or a dragged knob could re-run the 4096-point
+    /// IFFT + 5-stage evaluation + 1024-point FFT on nearly every sample,
+    /// which is well outside the audio-thread CPU budget.
+    #[test]
+    fn test_pultec_kernel_redesign_is_throttled() {
+        let mut eq = PultecEQ::new(48_000.0);
+        eq.set_linear_phase(true);
+
+        // Engaging linear-phase mode leaves the engine "ready" (as if a full
+        // interval had already elapsed), so the first parameter change
+        // redesigns immediately rather than waiting out the throttle window.
+        eq.update_parameters(
+            60.0, 6.0, 0.5, 200.0, 0.0, 0.5, 12000.0, 0.0, 0.5, 10000.0, 0.0, 0.0,
+        );
+        eq.redesign_kernel_if_dirty();
+        assert!(
+            !eq.linear.kernel_dirty,
+            "first redesign after engaging linear-phase mode must not be throttled"
+        );
+        assert_eq!(eq.linear.samples_since_redesign, 0);
+
+        // A second change immediately after the first redesign must be
+        // throttled: the kernel stays flagged dirty (not yet redesigned).
+        eq.update_parameters(
+            60.0, 12.0, 0.5, 200.0, 0.0, 0.5, 12000.0, 0.0, 0.5, 10000.0, 0.0, 0.0,
+        );
+        assert!(eq.linear.kernel_dirty);
+        eq.redesign_kernel_if_dirty();
+        assert!(
+            eq.linear.kernel_dirty,
+            "redesign must be throttled immediately after the previous one"
+        );
+
+        // One sample short of the interval: still throttled.
+        for _ in 0..KERNEL_REDESIGN_MIN_INTERVAL - 1 {
+            eq.linear.process_frame(0.0, 0.0);
+        }
+        eq.redesign_kernel_if_dirty();
+        assert!(
+            eq.linear.kernel_dirty,
+            "redesign must stay throttled one sample short of the interval"
+        );
+
+        // The interval has now elapsed: the pending change is applied.
+        eq.linear.process_frame(0.0, 0.0);
+        eq.redesign_kernel_if_dirty();
+        assert!(
+            !eq.linear.kernel_dirty,
+            "redesign must proceed once the interval has elapsed"
+        );
     }
 }

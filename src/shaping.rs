@@ -23,6 +23,16 @@ pub fn biquad_coeffs(
     Coefficients::<f32>::from_normalized_params(filter_type, normalized, q)
 }
 
+/// Symmetric (periodic-off) Hann window of length `len`:
+/// `w[n] = 0.5 * (1 - cos(2*pi*n / (len-1)))`. Shared by every FFT-windowing
+/// call site (spectral analysis, the Pultec linear-phase FIR designer) so
+/// the formula lives in exactly one place.
+pub fn hann_window(len: usize) -> Vec<f32> {
+    (0..len)
+        .map(|n| 0.5 * (1.0 - (core::f32::consts::TAU * n as f32 / (len - 1) as f32).cos()))
+        .collect()
+}
+
 /// Enum for the type of filter to use.
 pub enum FilterType {
     Bell,
@@ -83,7 +93,6 @@ impl Filter {
     }
 
     /// Zero both channels' filter state.
-    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.filter[0].reset();
         self.filter[1].reset();

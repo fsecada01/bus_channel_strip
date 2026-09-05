@@ -33,7 +33,10 @@ use realfft::num_complex::Complex;
 /// Below this magnitude, state is flushed to exactly zero. IIR state that
 /// decays through the f32 subnormal range costs ~100× the normal multiply
 /// latency on x86 without FTZ; flushing at 1e-20 is ~-400 dBFS.
-const DENORMAL_FLUSH: f32 = 1.0e-20;
+///
+/// Shared with `dynamic_eq`'s envelope follower, which asymptotes to zero
+/// through the same subnormal range and hits the same stall.
+pub(crate) const DENORMAL_FLUSH: f32 = 1.0e-20;
 
 /// Highest corner frequency accepted, as a fraction of the sample rate.
 /// `tan(π·0.499)` is ~318 — well inside f32 range and still a sane filter.
@@ -49,7 +52,7 @@ const MIN_FREQ_HZ: f32 = 1.0;
 const MIN_Q: f32 = 0.025;
 
 #[inline(always)]
-fn flush_denormal(x: f32) -> f32 {
+pub(crate) fn flush_denormal(x: f32) -> f32 {
     if x.abs() < DENORMAL_FLUSH {
         0.0
     } else {

@@ -128,6 +128,18 @@ impl Api5500 {
             }
         }
     }
+
+    /// Zero every band's SVF integrator state. Call on transport reset — the
+    /// other four EQ modules already clear their filter state there, and
+    /// (unlike Sheen's deliberately-left-to-settle EQ, see its own `reset()`)
+    /// API5500 had no reset path at all before #15 added `Filter::reset()`.
+    pub fn reset(&mut self) {
+        self.lf.reset();
+        self.lmf.reset();
+        self.mf.reset();
+        self.hmf.reset();
+        self.hf.reset();
+    }
 }
 
 #[cfg(test)]
