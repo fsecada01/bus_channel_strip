@@ -65,11 +65,7 @@ impl PultecEQ {
 
         // Oversamplers are used inline (one sample in → one sample out), so
         // `max_block_size = 1` keeps their scratch buffers at 16 samples.
-        let make_os = || {
-            let mut os = Oversampler::new(PULTEC_TUBE_OS_FACTOR, 1);
-            os.set_factor(PULTEC_TUBE_OS_FACTOR);
-            os
-        };
+        let make_os = || Oversampler::new_at_factor(PULTEC_TUBE_OS_FACTOR, 1);
 
         Self {
             sample_rate,
@@ -469,8 +465,7 @@ mod tests {
         );
         // Run 2048 samples of a sine at ~0.3·Nyquist directly through the
         // oversampled saturation block.
-        let mut os = Oversampler::new(PULTEC_TUBE_OS_FACTOR, 1);
-        os.set_factor(PULTEC_TUBE_OS_FACTOR);
+        let mut os = Oversampler::new_at_factor(PULTEC_TUBE_OS_FACTOR, 1);
         let mut scratch = [0.0_f32; PULTEC_TUBE_OS_FACTOR];
         let drive_amount = eq.tube_drive * 0.3;
         let scale = 1.0 + drive_amount * 0.2;
