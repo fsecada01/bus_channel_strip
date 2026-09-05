@@ -29,15 +29,6 @@ pub enum DropPos {
     After,
 }
 
-// Manual `vizia::Data` impl — the local `pub struct Data` (our model)
-// shadows the prelude's `Data` trait, so the derive macro can't resolve it.
-// Spelling out the trait via its absolute path sidesteps the shadowing.
-impl vizia_plug::vizia::binding::Data for DropPos {
-    fn same(&self, other: &Self) -> bool {
-        self == other
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum AppEvent {
     /// Emitted from a slot's `on_drag` callback the moment vizia detects
@@ -108,41 +99,49 @@ pub enum AppEvent {
 // Editor Data Model
 // ============================================================================
 
-#[derive(Lens)]
 pub struct Data {
+    /// Not itself reactive — the `Arc` never changes identity, and its
+    /// contents are automatable `Param`s whose live values are tracked by
+    /// vizia-plug's own per-parameter `SyncSignal` registry (see
+    /// `ParamWidgetBase::modulated_signal`), not by this model. Any GUI
+    /// state *derived* from param values (module order, hide flags, model
+    /// variant) depends on `params_gen` below to know when to re-derive.
     pub params: Arc<BusChannelStripParams>,
+    /// Bumped whenever `RawParamEvent::ParametersChanged` arrives (host
+    /// automation or our own GUI-driven param writes). `Memo`s derived from
+    /// `params` values track this signal to know when to re-read them.
+    pub params_gen: Signal<u32>,
     /// `Some(slot)` while a drag-drop is in flight from that source slot.
     /// Set by `AppEvent::DragStarted`, cleared on `DropOnSlot`/`DragCancel`.
     /// Drives the "eligible drop target" visual class on every other slot.
-    pub drag_source: Option<usize>,
+    pub drag_source: Signal<Option<usize>>,
     /// Resolved drop site while a drag is in flight: `(target_slot, position)`.
     /// Updated continuously by per-slot `on_mouse_move` so the rack can
     /// preview the drop visually before release. Cleared on drag end.
-    pub drop_target: Option<(usize, DropPos)>,
+    pub drop_target: Signal<Option<(usize, DropPos)>>,
     /// Window-local cursor position, refreshed every `MouseMove` while a
     /// drag is in flight. Used to anchor the floating ghost label so the
     /// user always sees what they're dragging next to the cursor.
-    pub cursor_x: f32,
-    pub cursor_y: f32,
+    pub cursor_x: Signal<f32>,
+    pub cursor_y: Signal<f32>,
     /// When true, the DynEQ back view is shown instead of the strip.
-    pub dyneq_open: bool,
+    pub dyneq_open: Signal<bool>,
     /// When true, the Sheen back view is shown instead of the strip.
     /// Mutually exclusive with `dyneq_open` — handlers for either Open*
     /// event clear the other so the model never has two back views true.
-    pub sheen_open: bool,
+    pub sheen_open: Signal<bool>,
     /// GUI-only expand state for each of the 4 DynEQ bands. Never accessed from audio thread.
     pub dyneq_band_expand: Arc<[AtomicBool; 4]>,
-    /// Incremented on every ToggleDynEQBand — used as lens target to trigger .display() re-evaluation.
-    pub dyneq_expand_gen: u32,
+    /// Incremented on every ToggleDynEQBand — used as a Memo dependency to trigger .display() re-evaluation.
+    pub dyneq_expand_gen: Signal<u32>,
     /// Shared with the audio thread — GUI sets true to trigger a masking analysis.
     pub analysis_requested: Arc<AtomicBool>,
     /// Shared with the audio thread — read after analysis completes.
     pub analysis_result: Arc<spectral::AnalysisResult>,
     /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
-    /// Applied via toggle_class to the chassis root; CSS scales slot width + padding
-    /// live, within the current session. See `AppEvent::SetZoom` for why the *real*
-    /// host window only picks up the new size on the next editor open.
-    pub zoom_level: u8,
+    /// Applied via toggle_class to the chassis root for live CSS rescaling, and also
+    /// drives a real host window resize (see `AppEvent::SetZoom`).
+    pub zoom_level: Signal<u8>,
     /// The persisted GUI size/scale state (issue #20). `SetZoom` writes the chosen
     /// zoom's scale factor here so it survives a session save/reload and sizes the
     /// real host window correctly the next time the editor is opened.
@@ -151,7 +150,11 @@ pub struct Data {
     /// and every other slot collapses to its narrow tab regardless of its
     /// per-module hide flag. Set only via keyboard `1..7`; click-to-focus
     /// was removed when the slot body became the drag source.
-    pub focused_slot: Option<usize>,
+    pub focused_slot: Signal<Option<usize>>,
+    /// Host callback surface. `AppEvent::SetZoom` uses this to ask the host
+    /// to actually resize the plugin window once the new size has been
+    /// written into `editor_state` (see `GuiContext::request_resize`).
+    pub gui_context: Arc<dyn GuiContext>,
 }
 
 impl Model for Data {
@@ -167,13 +170,13 @@ impl Model for Data {
         event.map(|win: &WindowEvent, _| match win {
             WindowEvent::KeyDown(code, _) => match code {
                 Code::Escape => {
-                    self.focused_slot = None;
-                    self.drag_source = None;
-                    self.drop_target = None;
+                    self.focused_slot.set(None);
+                    self.drag_source.set(None);
+                    self.drop_target.set(None);
                     // Esc also closes any open back view so users have a
                     // single universal "get me back to the strip" key.
-                    self.dyneq_open = false;
-                    self.sheen_open = false;
+                    self.dyneq_open.set(false);
+                    self.sheen_open.set(false);
                 }
                 Code::Digit1 => self.focus_if_real(0),
                 Code::Digit2 => self.focus_if_real(1),
@@ -188,38 +191,49 @@ impl Model for Data {
                 // Cursor left the editor window. If a drag was in flight,
                 // the OS may not deliver MouseUp back to us — drop the
                 // session defensively so we don't leave drag_source stuck.
-                if self.drag_source.is_some() {
+                if self.drag_source.get().is_some() {
                     cx.emit(AppEvent::DragCancel);
                 }
             }
             WindowEvent::MouseMove(x, y) => {
                 // Track cursor while dragging so the floating ghost label
-                // can follow. Outside a drag we ignore (saves needless lens
-                // notifications since cursor_x/y feed only the ghost view).
-                if self.drag_source.is_some() {
-                    self.cursor_x = *x;
-                    self.cursor_y = *y;
+                // can follow. Outside a drag we ignore (saves needless
+                // signal updates since cursor_x/y feed only the ghost view).
+                if self.drag_source.get().is_some() {
+                    self.cursor_x.set(*x);
+                    self.cursor_y.set(*y);
                 }
             }
             _ => {}
         });
 
+        event.map(|e: &RawParamEvent, _| {
+            // Bump the "params changed" generation whenever automation (host
+            // or our own GUI-driven writes) touches any parameter. Memos
+            // derived from `params` values (module order, hide flags, model
+            // variant selectors) key off this to know when to re-read them —
+            // `params` itself is a plain `Arc`, not a tracked Signal.
+            if matches!(e, RawParamEvent::ParametersChanged) {
+                self.params_gen.update(|g| *g = g.wrapping_add(1));
+            }
+        });
+
         event.map(|e: &AppEvent, _| match e {
             AppEvent::OpenDynEq => {
-                self.dyneq_open = true;
+                self.dyneq_open.set(true);
                 // Mutual exclusion with Sheen back view.
-                self.sheen_open = false;
+                self.sheen_open.set(false);
             }
             AppEvent::CloseDynEq => {
-                self.dyneq_open = false;
+                self.dyneq_open.set(false);
             }
             AppEvent::OpenSheen => {
-                self.sheen_open = true;
+                self.sheen_open.set(true);
                 // Mutual exclusion with DynEQ back view.
-                self.dyneq_open = false;
+                self.dyneq_open.set(false);
             }
             AppEvent::CloseSheen => {
-                self.sheen_open = false;
+                self.sheen_open.set(false);
             }
             AppEvent::RestoreSheenFactory => {
                 // Re-write every Sheen param to the factory default in one
@@ -259,33 +273,30 @@ impl Model for Data {
                 if band < 4 {
                     let current = self.dyneq_band_expand[band].load(Ordering::Relaxed);
                     self.dyneq_band_expand[band].store(!current, Ordering::Relaxed);
-                    self.dyneq_expand_gen = self.dyneq_expand_gen.wrapping_add(1);
+                    self.dyneq_expand_gen.update(|g| *g = g.wrapping_add(1));
                 }
             }
 
             AppEvent::SetZoom(level) => {
-                // NOTE (issue #20): `vizia_baseview` does not implement
-                // `WindowEvent::SetSize`/live resize at all (verified against
-                // both the pinned rev and current upstream `vizia` HEAD — the
-                // handling is stubbed out with `// TODO` comments), so there
-                // is no way to resize the real host window within a single
-                // open editor session, no matter which plugin framework sits
-                // underneath (this is a `vizia`-level gap, unrelated to the
-                // nih_plug → nice-plug migration). Zoom therefore still
-                // rescales content live via CSS classes — slot widths grow,
-                // fonts grow, ScrollView reveals off-screen slots — exactly
-                // as before.
-                //
-                // What *is* new: the chosen zoom's scale factor is written
-                // into `editor_state` (a `#[persist]` field), so it survives
-                // a session save/reload and the real host window opens at
-                // the correct size (`window_sizing::window_size_for_zoom`)
-                // the next time the editor is spawned, instead of always
-                // resetting to the fixed 1300x860 default.
+                // Real, live host-window resize (issue #20). Three steps,
+                // per vizia#701 + vizia-plug#21:
+                //   1. Write the new scale into `editor_state` (a
+                //      `#[persist]` field) — `Editor::size()` reads this via
+                //      `scaled_logical_size()`, and it survives session
+                //      save/reload so the window reopens at the right size.
+                //   2. Emit `WindowEvent::SetUserScale` so the embedded
+                //      vizia_baseview window reflows its own layout at the
+                //      new scale right now, in this session.
+                //   3. Call `GuiContext::request_resize()` so the host
+                //      actually resizes the plugin's parent window to match
+                //      (CLAP host-gui extension / VST3 `IPlugFrame::resizeView`,
+                //      both real implementations in nice-plug).
                 let clamped = crate::window_sizing::clamp_zoom_level(*level);
-                self.zoom_level = clamped;
-                self.editor_state
-                    .set_user_scale_factor(crate::window_sizing::scale_factor_for_zoom(clamped));
+                self.zoom_level.set(clamped);
+                let factor = crate::window_sizing::scale_factor_for_zoom(clamped);
+                self.editor_state.set_user_scale_factor(factor);
+                cx.emit(WindowEvent::SetUserScale(factor));
+                self.gui_context.request_resize();
             }
 
             #[cfg(feature = "dynamic_eq")]
@@ -340,7 +351,7 @@ impl Model for Data {
             AppEvent::AddOrFocusModule(mt) => {
                 if let Some(slot) = slot_containing(&self.params, *mt) {
                     // Module is already in the rack — focus that slot.
-                    self.focused_slot = Some(slot);
+                    self.focused_slot.set(Some(slot));
                 } else if let Some(slot) = first_empty_slot(&self.params) {
                     // Add to the leftmost empty slot, then focus it so
                     // the user can immediately tweak the new module.
@@ -349,7 +360,7 @@ impl Model for Data {
                     cx.emit(RawParamEvent::BeginSetParameter(ptr));
                     cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
                     cx.emit(RawParamEvent::EndSetParameter(ptr));
-                    self.focused_slot = Some(slot);
+                    self.focused_slot.set(Some(slot));
                 } else {
                     // If no empty slot exists, silently no-op (the user
                     // would have to eject something first; baseview lacks
@@ -358,11 +369,11 @@ impl Model for Data {
             }
 
             AppEvent::ClearFocus => {
-                self.focused_slot = None;
-                self.drag_source = None;
-                self.drop_target = None;
-                self.dyneq_open = false;
-                self.sheen_open = false;
+                self.focused_slot.set(None);
+                self.drag_source.set(None);
+                self.drop_target.set(None);
+                self.dyneq_open.set(false);
+                self.sheen_open.set(false);
             }
 
             AppEvent::LoadChain(idx) => {
@@ -381,9 +392,9 @@ impl Model for Data {
                     // Reset transient view state so the loaded chain shows
                     // as the overview instead of focused on whatever was
                     // there before.
-                    self.drag_source = None;
-                    self.drop_target = None;
-                    self.focused_slot = None;
+                    self.drag_source.set(None);
+                    self.drop_target.set(None);
+                    self.focused_slot.set(None);
                 }
             }
 
@@ -400,28 +411,29 @@ impl Model for Data {
                 cx.emit(RawParamEvent::EndSetParameter(ptr));
                 // Clear any in-flight drag — replacing a slot's contents
                 // while a swap is staged would be ambiguous.
-                self.drag_source = None;
-                self.drop_target = None;
+                self.drag_source.set(None);
+                self.drop_target.set(None);
             }
 
             AppEvent::DragStarted(idx) => {
-                self.drag_source = Some(*idx);
-                self.drop_target = None;
+                self.drag_source.set(Some(*idx));
+                self.drop_target.set(None);
             }
 
             AppEvent::DragCancel => {
-                self.drag_source = None;
-                self.drop_target = None;
+                self.drag_source.set(None);
+                self.drop_target.set(None);
             }
 
             AppEvent::DragHover { target, position } => {
                 // Only update if the cursor is over a different slot than
                 // the drag source — self-hover is meaningless and would
                 // light up the source as its own target.
-                if self.drag_source.is_some() && self.drag_source != Some(*target) {
+                let drag_source = self.drag_source.get();
+                if drag_source.is_some() && drag_source != Some(*target) {
                     let next = Some((*target, *position));
-                    if self.drop_target != next {
-                        self.drop_target = next;
+                    if self.drop_target.get() != next {
+                        self.drop_target.set(next);
                     }
                 }
             }
@@ -430,11 +442,11 @@ impl Model for Data {
                 // Resolve drop into a concrete reorder operation. If
                 // drag_source is None (defensive — shouldn't happen because
                 // on_drop only fires after a drag started), no-op.
-                if let Some(src) = self.drag_source {
+                if let Some(src) = self.drag_source.get() {
                     self.reorder(cx, src, *target, *position);
                 }
-                self.drag_source = None;
-                self.drop_target = None;
+                self.drag_source.set(None);
+                self.drop_target.set(None);
             }
         });
     }
@@ -447,9 +459,9 @@ impl Data {
     /// to inspect.
     fn focus_if_real(&mut self, idx: usize) {
         if slot_module_type(&self.params, idx) != ModuleType::Empty {
-            self.focused_slot = Some(idx);
-            self.drag_source = None;
-            self.drop_target = None;
+            self.focused_slot.set(Some(idx));
+            self.drag_source.set(None);
+            self.drop_target.set(None);
         }
     }
 
@@ -828,37 +840,44 @@ fn module_type_short_name(mt: ModuleType) -> &'static str {
 fn build_hide_button_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_api5500)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_api5500)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::ButterComp2 => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_buttercomp2)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_buttercomp2)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::PultecEQ => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_pultec)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_pultec)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::DynamicEQ => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_dynamic_eq)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_dynamic_eq)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::Transformer => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_transformer)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_transformer)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::Punch => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_punch)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_punch)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::Haas => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_haas)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_haas)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
@@ -872,37 +891,44 @@ fn build_hide_button_for_type(cx: &mut Context, mt: ModuleType) {
 fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_api5500)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_api5500)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::ButterComp2 => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_buttercomp2)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_buttercomp2)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::PultecEQ => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_pultec)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_pultec)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::DynamicEQ => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_dynamic_eq)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_dynamic_eq)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::Transformer => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_transformer)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_transformer)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::Punch => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_punch)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_punch)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::Haas => {
-            ParamButton::new(cx, Data::params, |p| &p.hide_haas)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.hide_haas)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
@@ -1047,7 +1073,7 @@ pub(crate) fn create(
     gr_data: Arc<spectral::GainReductionData>,
 ) -> Option<Box<dyn Editor>> {
     let editor_state_for_data = editor_state.clone();
-    create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, _| {
+    create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, gui_cx| {
         cx.add_stylesheet(COMPONENT_STYLES)
             .expect("Failed to add stylesheet");
 
@@ -1060,24 +1086,26 @@ pub(crate) fn create(
 
         Data {
             params: params.clone(),
-            drag_source: None,
-            drop_target: None,
-            cursor_x: 0.0,
-            cursor_y: 0.0,
-            dyneq_open: false,
-            sheen_open: false,
+            params_gen: Signal::new(0),
+            drag_source: Signal::new(None),
+            drop_target: Signal::new(None),
+            cursor_x: Signal::new(0.0),
+            cursor_y: Signal::new(0.0),
+            dyneq_open: Signal::new(false),
+            sheen_open: Signal::new(false),
             dyneq_band_expand: Arc::new([
                 AtomicBool::new(false),
                 AtomicBool::new(false),
                 AtomicBool::new(false),
                 AtomicBool::new(false),
             ]),
-            dyneq_expand_gen: 0,
+            dyneq_expand_gen: Signal::new(0),
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
-            zoom_level: initial_zoom,
+            zoom_level: Signal::new(initial_zoom),
             editor_state: editor_state_for_data.clone(),
-            focused_slot: None,
+            focused_slot: Signal::new(None),
+            gui_context: gui_cx,
         }
         .build(cx);
 
@@ -1087,6 +1115,7 @@ pub(crate) fn create(
         // missing module type so every slot shows a unique module.
         repair_module_order(cx, &params);
 
+        let zoom_level_signal = cx.data::<Data>().zoom_level;
         VStack::new(cx, |cx| {
             // ── Chassis header ──────────────────────────────────────────────
             // Three-zone band: brand title (left) | signal-flow hint (center,
@@ -1108,6 +1137,7 @@ pub(crate) fn create(
                 // fires. So we attach `on_press` to BOTH labels AND the
                 // parent — wherever the click lands inside the plate it
                 // emits OpenSheen.
+                let sheen_open_signal = cx.data::<Data>().sheen_open;
                 HStack::new(cx, |cx| {
                     Label::new(cx, "API")
                         .class("chassis-brand")
@@ -1119,7 +1149,7 @@ pub(crate) fn create(
                         .cursor(CursorIcon::Hand);
                 })
                 .class("brand-plate-brass")
-                .toggle_class("brand-plate-active", Data::sheen_open.map(|s| *s))
+                .toggle_class("brand-plate-active", sheen_open_signal.map(|s| *s))
                 .on_press(|cx| cx.emit(AppEvent::OpenSheen))
                 .cursor(CursorIcon::Hand)
                 .width(Auto)
@@ -1131,11 +1161,12 @@ pub(crate) fn create(
                 // Returns the rack to the all-slots overview. Sized small
                 // because the rest of the header is already busy; positioned
                 // next to the brand so users always know where to look.
+                let focused_slot_signal = cx.data::<Data>().focused_slot;
                 HStack::new(cx, |cx| {
                     Label::new(cx, "\u{2715} EXIT FOCUS").class("exit-focus-label");
                 })
                 .class("exit-focus-btn")
-                .display(Data::focused_slot.map(|f| {
+                .display(focused_slot_signal.map(|f| {
                     if f.is_some() {
                         Display::Flex
                     } else {
@@ -1173,6 +1204,8 @@ pub(crate) fn create(
             // module drops it into the focused empty slot if there is one,
             // otherwise the first empty slot. Clicking an in-rack row
             // focuses that slot.
+            let dyneq_open_signal = cx.data::<Data>().dyneq_open;
+            let sheen_open_signal = cx.data::<Data>().sheen_open;
             HStack::new(cx, |cx| {
                 build_library_sidebar(cx);
 
@@ -1200,13 +1233,17 @@ pub(crate) fn create(
             // Strip view hides whenever EITHER back view (DynEQ or Sheen)
             // is open. `OrLens` short-circuits — no need for nested
             // Bindings or a derived state field.
-            .display(Data::dyneq_open.or(Data::sheen_open).map(|open| {
-                if *open {
-                    Display::None
-                } else {
-                    Display::Flex
-                }
-            }));
+            .display({
+                Memo::<bool>::new(move |_| dyneq_open_signal.get() || sheen_open_signal.get()).map(
+                    |open| {
+                        if *open {
+                            Display::None
+                        } else {
+                            Display::Flex
+                        }
+                    },
+                )
+            });
 
             // ── DynEQ back view ─────────────────────────────────────────────
             build_dyneq_back_view(
@@ -1227,19 +1264,24 @@ pub(crate) fn create(
             // takes it out of the layout flow; left/top track cursor_x/y
             // updated by the chassis MouseMove handler. Only built (Display:
             // Flex) when drag_source is Some.
-            Binding::new(cx, Data::drag_source, |cx, ds_lens| {
-                let Some(slot) = ds_lens.get(cx) else {
-                    return;
-                };
-                let params = Data::params.get(cx);
-                let mt = slot_module_type(&params, slot);
-                let tag = module_type_short_name(mt);
-                Label::new(cx, tag)
-                    .class("drag-ghost")
-                    .position_type(PositionType::Absolute)
-                    .left(Data::cursor_x.map(|x| Pixels(*x + 14.0)))
-                    .top(Data::cursor_y.map(|y| Pixels(*y + 14.0)));
-            });
+            {
+                let drag_source_signal = cx.data::<Data>().drag_source;
+                let cursor_x_signal = cx.data::<Data>().cursor_x;
+                let cursor_y_signal = cx.data::<Data>().cursor_y;
+                Binding::new(cx, drag_source_signal, move |cx| {
+                    let Some(slot) = drag_source_signal.get() else {
+                        return;
+                    };
+                    let params = cx.data::<Data>().params.clone();
+                    let mt = slot_module_type(&params, slot);
+                    let tag = module_type_short_name(mt);
+                    Label::new(cx, tag)
+                        .class("drag-ghost")
+                        .position_type(PositionType::Absolute)
+                        .left(cursor_x_signal.map(|x| Pixels(*x + 14.0)))
+                        .top(cursor_y_signal.map(|y| Pixels(*y + 14.0)));
+                });
+            }
         })
         .class("lunchbox-chassis")
         // Keyboard shortcuts (Esc, 1..7) are routed through
@@ -1252,14 +1294,14 @@ pub(crate) fn create(
         // the model.
         .focusable(true)
         .focused(true)
-        .toggle_class("zoom-75", Data::zoom_level.map(|z| *z == 75))
-        .toggle_class("zoom-100", Data::zoom_level.map(|z| *z == 100))
-        .toggle_class("zoom-125", Data::zoom_level.map(|z| *z == 125))
-        .toggle_class("zoom-150", Data::zoom_level.map(|z| *z == 150))
-        .toggle_class("zoom-200", Data::zoom_level.map(|z| *z == 200))
+        .toggle_class("zoom-75", zoom_level_signal.map(|z| *z == 75))
+        .toggle_class("zoom-100", zoom_level_signal.map(|z| *z == 100))
+        .toggle_class("zoom-125", zoom_level_signal.map(|z| *z == 125))
+        .toggle_class("zoom-150", zoom_level_signal.map(|z| *z == 150))
+        .toggle_class("zoom-200", zoom_level_signal.map(|z| *z == 200))
         .width(Stretch(1.0))
         .height(Stretch(1.0))
-        .padding(Data::zoom_level.map(|z| Pixels(14.0 * (*z as f32) / 100.0)));
+        .padding(zoom_level_signal.map(|z| Pixels(14.0 * (*z as f32) / 100.0)));
         // vizia-plug doesn't support runtime host-window resize
         // (set_user_scale_factor / WindowEvent::SetSize aren't wired into
         // baseview). Zoom rescales content within the fixed window: slot
@@ -1284,11 +1326,17 @@ fn build_library_sidebar(cx: &mut Context) {
         Label::new(cx, "LIBRARY").class("library-sidebar-header");
 
         // Reactive bitset of which module types are currently in the rack.
-        // Rebuilds the row list whenever any slot's contents change.
-        let in_rack_lens = Data::params.map(|p| {
+        // Rebuilds the row list whenever any slot's contents change. `params`
+        // itself never changes identity, so the Memo depends on `params_gen`
+        // (bumped on every `RawParamEvent::ParametersChanged`) to know when
+        // to re-derive from the live param values.
+        let params_gen = cx.data::<Data>().params_gen;
+        let params = cx.data::<Data>().params.clone();
+        let in_rack_memo = Memo::new(move |_| {
+            params_gen.get();
             let mut bits: u8 = 0;
             for s in 0..7 {
-                let mt = slot_module_type(p, s);
+                let mt = slot_module_type(&params, s);
                 if mt != ModuleType::Empty {
                     bits |= 1u8 << module_type_to_usize(mt);
                 }
@@ -1296,8 +1344,8 @@ fn build_library_sidebar(cx: &mut Context) {
             bits
         });
 
-        Binding::new(cx, in_rack_lens, |cx, bits_b| {
-            let in_rack = bits_b.get(cx);
+        Binding::new(cx, in_rack_memo, move |cx| {
+            let in_rack = in_rack_memo.get();
             for mt in ALL_REAL_MODULES {
                 let theme = module_type_to_theme(mt);
                 let bit = 1u8 << module_type_to_usize(mt);
@@ -1380,6 +1428,7 @@ fn create_zoom_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         Label::new(cx, "ZOOM").class("zoom-label");
         HStack::new(cx, |cx| {
+            let zoom_level_signal = cx.data::<Data>().zoom_level;
             for &level in &[75_u8, 100, 125, 150, 200] {
                 VStack::new(cx, |cx| {
                     Label::new(
@@ -1397,7 +1446,7 @@ fn create_zoom_controls(cx: &mut Context) {
                 .class("zoom-btn")
                 .toggle_class(
                     "zoom-btn-active",
-                    Data::zoom_level.map(move |z| *z == level),
+                    zoom_level_signal.map(move |z| *z == level),
                 )
                 .on_press(move |cx| cx.emit(AppEvent::SetZoom(level)))
                 .cursor(CursorIcon::Hand)
@@ -1438,10 +1487,12 @@ fn create_master_section(cx: &mut Context) {
         .bottom(Pixels(0.0));
 
         // Auto-gain compensation toggle.
-        components::create_bool_button(cx, "AUTO GAIN", Data::params, |p| &p.global_auto_gain);
+        components::create_bool_button(cx, "AUTO GAIN", &cx.data::<Data>().params.clone(), |p| {
+            &p.global_auto_gain
+        });
 
         Label::new(cx, "MASTER").class("master-label");
-        components::create_gain_slider(cx, "Gain", Data::params, |p| &p.gain);
+        components::create_gain_slider(cx, "Gain", &cx.data::<Data>().params.clone(), |p| &p.gain);
     })
     .class("master-controls")
     .gap(Pixels(12.0));
@@ -1462,54 +1513,67 @@ fn create_master_section(cx: &mut Context) {
 /// The drag-source highlight is toggled separately via `toggle_class`
 /// which reacts to `Data::drag_source` without a full rebuild.
 fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
-    Binding::new(cx, Data::focused_slot, move |cx, focus_b| {
-        let focus = focus_b.get(cx);
+    let focused_slot_signal = cx.data::<Data>().focused_slot;
+    Binding::new(cx, focused_slot_signal, move |cx| {
+        let focus = focused_slot_signal.get();
         let this_focused = focus == Some(slot_idx);
         let any_focused = focus.is_some();
 
-        // Use usize as the Binding target because vizia requires `Target: Data`,
-        // and usize satisfies that bound whereas our ModuleType enum does not.
-        Binding::new(
-            cx,
-            Data::params.map(move |p| module_type_to_usize(slot_module_type(p, slot_idx))),
-            move |cx, mt_lens| {
-                let mt = usize_to_module_type(mt_lens.get(cx));
-                let theme = module_type_to_theme(mt);
+        // `params` never changes identity, so this Memo (like every other
+        // param-derived one in this file) depends on `params_gen` to know
+        // when to re-derive. usize is used as the Binding target because
+        // vizia requires `T: Clone + PartialEq`, which our ModuleType enum
+        // itself also satisfies, but staying consistent with the original
+        // encoding avoids touching call sites below.
+        let params_gen = cx.data::<Data>().params_gen;
+        let params = cx.data::<Data>().params.clone();
+        let module_type_memo = Memo::new(move |_| {
+            params_gen.get();
+            module_type_to_usize(slot_module_type(&params, slot_idx))
+        });
 
-                // Inner binding watches the hide flag for this module type.
-                // Render rule:
-                //   • this_focused                       → full (focus wins)
-                //   • any other slot is focused          → collapsed
-                //   • nothing focused, hide flag set     → collapsed
-                //   • nothing focused, not hidden        → full
-                // Empty slots are ALWAYS rendered as a slim placeholder tab
-                // regardless of focus or hide flags. There is no body to
-                // expand — adding a module is now done via the global
-                // library sidebar (which auto-targets the focused empty
-                // slot when one exists, falling back to first-empty).
-                if mt == ModuleType::Empty {
-                    build_empty_slot(cx, slot_idx);
-                    return;
+        Binding::new(cx, module_type_memo, move |cx| {
+            let mt = usize_to_module_type(module_type_memo.get());
+            let theme = module_type_to_theme(mt);
+
+            // Inner binding watches the hide flag for this module type.
+            // Render rule:
+            //   • this_focused                       → full (focus wins)
+            //   • any other slot is focused          → collapsed
+            //   • nothing focused, hide flag set     → collapsed
+            //   • nothing focused, not hidden        → full
+            // Empty slots are ALWAYS rendered as a slim placeholder tab
+            // regardless of focus or hide flags. There is no body to
+            // expand — adding a module is now done via the global
+            // library sidebar (which auto-targets the focused empty
+            // slot when one exists, falling back to first-empty).
+            if mt == ModuleType::Empty {
+                build_empty_slot(cx, slot_idx);
+                return;
+            }
+
+            let params_gen = cx.data::<Data>().params_gen;
+            let params = cx.data::<Data>().params.clone();
+            let hide_memo = Memo::new(move |_| {
+                params_gen.get();
+                is_module_hidden(&params, mt)
+            });
+            Binding::new(cx, hide_memo, move |cx| {
+                let hidden = hide_memo.get();
+                let render_full = if this_focused {
+                    true
+                } else if any_focused {
+                    false
+                } else {
+                    !hidden
+                };
+                if render_full {
+                    build_full_slot(cx, slot_idx, mt, theme);
+                } else {
+                    build_collapsed_slot(cx, slot_idx, mt, theme);
                 }
-
-                let hide_lens = Data::params.map(move |p| is_module_hidden(p, mt));
-                Binding::new(cx, hide_lens, move |cx, hide_binding| {
-                    let hidden = hide_binding.get(cx);
-                    let render_full = if this_focused {
-                        true
-                    } else if any_focused {
-                        false
-                    } else {
-                        !hidden
-                    };
-                    if render_full {
-                        build_full_slot(cx, slot_idx, mt, theme);
-                    } else {
-                        build_collapsed_slot(cx, slot_idx, mt, theme);
-                    }
-                });
-            },
-        );
+            });
+        });
     });
 }
 
@@ -1519,6 +1583,10 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
 /// the cursor leaves this view with LMB held; `on_drop` fires on a sibling
 /// when MouseUp lands there with active `drop_data`.
 fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
+    let focused_slot_signal = cx.data::<Data>().focused_slot;
+    let drag_source_signal = cx.data::<Data>().drag_source;
+    let drop_target_signal = cx.data::<Data>().drop_target;
+    let zoom_level_signal = cx.data::<Data>().zoom_level;
     VStack::new(cx, |cx| {
         // ── Module header (name + eject + hide + LED) ────────────────
         HStack::new(cx, |cx| {
@@ -1531,7 +1599,7 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
             .class("module-name-target")
             .toggle_class(
                 "module-name-target-focused",
-                Data::focused_slot.map(move |fs| *fs == Some(slot_idx)),
+                focused_slot_signal.map(move |fs| *fs == Some(slot_idx)),
             )
             .height(Auto)
             .width(Stretch(1.0));
@@ -1561,27 +1629,27 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
     // active drop-target outline only on the slot the cursor is over.
     .toggle_class(
         "slot-eligible-target",
-        Data::drag_source.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
+        drag_source_signal.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
     )
     // Source class: visual feedback that THIS slot is being dragged.
     .toggle_class(
         "slot-drag-source",
-        Data::drag_source.map(move |ds| *ds == Some(slot_idx)),
+        drag_source_signal.map(move |ds| *ds == Some(slot_idx)),
     )
     // Live drop-position indicator: which third of THIS slot is the cursor
     // currently over? Drives the directional bar (left edge / full ring /
     // right edge) so the user previews swap-vs-insert before releasing.
     .toggle_class(
         "drop-pos-before",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
     )
     .toggle_class(
         "drop-pos-onto",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
     )
     .toggle_class(
         "drop-pos-after",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
     )
     // Drag-source: vizia auto-marks Abilities::DRAGGABLE; the closure
     // fires the moment the cursor leaves this view with LMB held.
@@ -1614,7 +1682,7 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
         ex.emit(WindowEvent::SetCursor(CursorIcon::Default));
     })
     .border_color(theme.accent_color())
-    .width(Data::zoom_level.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
+    .width(zoom_level_signal.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
     .height(Stretch(1.0))
     .border_width(Pixels(3.0))
     .background_color(Color::rgb(42, 42, 42))
@@ -1625,6 +1693,8 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
 /// that toggles the hide flag back to false. Width is fixed regardless of
 /// zoom so several collapsed tabs stack neatly next to full slots.
 fn build_collapsed_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: ModuleTheme) {
+    let drag_source_signal = cx.data::<Data>().drag_source;
+    let drop_target_signal = cx.data::<Data>().drop_target;
     VStack::new(cx, |cx| {
         Label::new(cx, module_type_short_name(mt))
             .class("collapsed-name")
@@ -1638,23 +1708,23 @@ fn build_collapsed_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme
     .class(theme.class_name())
     .toggle_class(
         "slot-eligible-target",
-        Data::drag_source.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
+        drag_source_signal.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
     )
     .toggle_class(
         "slot-drag-source",
-        Data::drag_source.map(move |ds| *ds == Some(slot_idx)),
+        drag_source_signal.map(move |ds| *ds == Some(slot_idx)),
     )
     .toggle_class(
         "drop-pos-before",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
     )
     .toggle_class(
         "drop-pos-onto",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
     )
     .toggle_class(
         "drop-pos-after",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
     )
     .on_drag(move |ex| {
         ex.set_drop_data(ex.current());
@@ -1697,42 +1767,55 @@ pub const BASE_SLOT_WIDTH_PX: f32 = 280.0;
 fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
-            ParamButton::new(cx, Data::params, |p| &p.eq_bypass)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.eq_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
         ModuleType::ButterComp2 => {
-            ParamButton::new(cx, Data::params, |p| &p.comp_bypass)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.comp_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
         ModuleType::PultecEQ => {
-            ParamButton::new(cx, Data::params, |p| &p.pultec_bypass)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.pultec_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
         ModuleType::DynamicEQ => {
             #[cfg(feature = "dynamic_eq")]
-            ParamButton::new(cx, Data::params, |p| &p.dyneq_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            {
+                let params = cx.data::<Data>().params.clone();
+                ParamButton::new(cx, &params.dyneq_bypass)
+                    .with_label("")
+                    .class("module-led-indicator");
+            }
         }
         ModuleType::Transformer => {
-            ParamButton::new(cx, Data::params, |p| &p.transformer_bypass)
+            let params = cx.data::<Data>().params.clone();
+            ParamButton::new(cx, &params.transformer_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
         ModuleType::Punch => {
             #[cfg(feature = "punch")]
-            ParamButton::new(cx, Data::params, |p| &p.punch_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            {
+                let params = cx.data::<Data>().params.clone();
+                ParamButton::new(cx, &params.punch_bypass)
+                    .with_label("")
+                    .class("module-led-indicator");
+            }
         }
         ModuleType::Haas => {
             #[cfg(feature = "haas")]
-            ParamButton::new(cx, Data::params, |p| &p.haas_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            {
+                let params = cx.data::<Data>().params.clone();
+                ParamButton::new(cx, &params.haas_bypass)
+                    .with_label("")
+                    .class("module-led-indicator");
+            }
         }
         // No LED for empty slots — there is nothing to indicate.
         ModuleType::Empty => {}
@@ -1801,9 +1884,11 @@ fn build_controls_for_type(cx: &mut Context, mt: ModuleType, slot_idx: usize) {
 /// is the same as inserting between the surrounding slots.
 fn build_empty_slot(cx: &mut Context, slot_idx: usize) {
     let theme = ModuleTheme::Empty;
+    let drag_source_signal = cx.data::<Data>().drag_source;
+    let drop_target_signal = cx.data::<Data>().drop_target;
     VStack::new(cx, |cx| {
         Label::new(cx, "+").class("empty-slot-glyph");
-        Label::new(cx, format!("SLOT {}", slot_idx + 1).as_str()).class("empty-slot-label");
+        Label::new(cx, format!("SLOT {}", slot_idx + 1)).class("empty-slot-label");
     })
     .alignment(Alignment::Center)
     .gap(Pixels(2.0))
@@ -1813,19 +1898,19 @@ fn build_empty_slot(cx: &mut Context, slot_idx: usize) {
     .class(theme.class_name())
     .toggle_class(
         "slot-eligible-target",
-        Data::drag_source.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
+        drag_source_signal.map(move |ds| ds.is_some() && *ds != Some(slot_idx)),
     )
     .toggle_class(
         "drop-pos-before",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::Before))),
     )
     .toggle_class(
         "drop-pos-onto",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::Onto))),
     )
     .toggle_class(
         "drop-pos-after",
-        Data::drop_target.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
+        drop_target_signal.map(move |dt| *dt == Some((slot_idx, DropPos::After))),
     )
     .on_mouse_move(move |ex, x, _y| {
         let bounds = ex.bounds();
@@ -1862,8 +1947,18 @@ fn build_api5500_controls(cx: &mut Context) {
                     .class("section-label")
                     .height(Pixels(16.0))
                     .width(Stretch(1.0));
-                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.lf_freq);
-                components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.lf_gain);
+                components::create_frequency_slider(
+                    cx,
+                    "FREQ",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.lf_freq,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "GAIN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.lf_gain,
+                );
             })
             .gap(Pixels(4.0))
             .height(Auto)
@@ -1877,8 +1972,18 @@ fn build_api5500_controls(cx: &mut Context) {
                     .class("section-label")
                     .height(Pixels(16.0))
                     .width(Stretch(1.0));
-                components::create_frequency_slider(cx, "FREQ", Data::params, |p| &p.hf_freq);
-                components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.hf_gain);
+                components::create_frequency_slider(
+                    cx,
+                    "FREQ",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.hf_freq,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "GAIN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.hf_gain,
+                );
             })
             .gap(Pixels(4.0))
             .height(Auto)
@@ -1894,19 +1999,43 @@ fn build_api5500_controls(cx: &mut Context) {
 
         // ── Parametric bands: LMF → MF → HMF (low to high) ──────────────────
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "LMF", Data::params, |p| &p.lmf_freq);
-            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.lmf_gain);
-            components::create_param_slider(cx, "Q", Data::params, |p| &p.lmf_q);
+            components::create_frequency_slider(
+                cx,
+                "LMF",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.lmf_freq,
+            );
+            components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
+                &p.lmf_gain
+            });
+            components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
+                &p.lmf_q
+            });
         });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "MF", Data::params, |p| &p.mf_freq);
-            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.mf_gain);
-            components::create_param_slider(cx, "Q", Data::params, |p| &p.mf_q);
+            components::create_frequency_slider(cx, "MF", &cx.data::<Data>().params.clone(), |p| {
+                &p.mf_freq
+            });
+            components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
+                &p.mf_gain
+            });
+            components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
+                &p.mf_q
+            });
         });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "HMF", Data::params, |p| &p.hmf_freq);
-            components::create_gain_slider(cx, "GAIN", Data::params, |p| &p.hmf_gain);
-            components::create_param_slider(cx, "Q", Data::params, |p| &p.hmf_q);
+            components::create_frequency_slider(
+                cx,
+                "HMF",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.hmf_freq,
+            );
+            components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
+                &p.hmf_gain
+            });
+            components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
+                &p.hmf_q
+            });
         });
     })
     .gap(Pixels(6.0))
@@ -1920,24 +2049,30 @@ fn build_buttercomp2_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         // Model selector — always visible above the reactive control surface.
         #[cfg(feature = "buttercomp2")]
-        components::create_param_slider(cx, "MODEL", Data::params, |p| &p.comp_model);
+        components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
+            &p.comp_model
+        });
 
         // Reactive control surface — rebuilds when model enum changes.
-        // Map the EnumParam value to usize so Binding gets a `Data`-implementing target.
+        // Map the EnumParam value to usize so Binding gets a `Clone + PartialEq` target.
         #[cfg(feature = "buttercomp2")]
-        Binding::new(
-            cx,
-            Data::params.map(|p| p.comp_model.value() as usize),
-            |cx, model_lens| {
-                let model_idx = model_lens.get(cx);
+        {
+            let params_gen = cx.data::<Data>().params_gen;
+            let params = cx.data::<Data>().params.clone();
+            let model_memo = Memo::new(move |_| {
+                params_gen.get();
+                params.comp_model.value() as usize
+            });
+            Binding::new(cx, model_memo, move |cx| {
+                let model_idx = model_memo.get();
                 match model_idx {
                     1 => build_optical_controls(cx), // ButterComp2Model::Optical as usize == 1
                     2 => build_vca_controls(cx),     // ButterComp2Model::Vca    as usize == 2
                     3 => build_fet_controls(cx),     // ButterComp2Model::Fet    as usize == 3
                     _ => build_classic_controls(cx), // 0 = Classic; also safe fallback
                 }
-            },
-        );
+            });
+        }
 
         // Fallback when buttercomp2 feature is disabled — render classic controls directly.
         #[cfg(not(feature = "buttercomp2"))]
@@ -1953,11 +2088,25 @@ fn build_buttercomp2_controls(cx: &mut Context) {
 /// Classic ButterComp2 control surface — Compress, Output, SC HP, Dry/Wet.
 fn build_classic_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        components::create_ratio_slider(cx, "COMPRESS", Data::params, |p| &p.comp_compress);
-        components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.comp_output);
+        components::create_ratio_slider(cx, "COMPRESS", &cx.data::<Data>().params.clone(), |p| {
+            &p.comp_compress
+        });
+        components::create_gain_slider(cx, "OUTPUT", &cx.data::<Data>().params.clone(), |p| {
+            &p.comp_output
+        });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
-            components::create_param_slider(cx, "DRY/WET", Data::params, |p| &p.comp_dry_wet);
+            components::create_frequency_slider(
+                cx,
+                "SC HP",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.comp_sc_hp_freq,
+            );
+            components::create_param_slider(
+                cx,
+                "DRY/WET",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.comp_dry_wet,
+            );
         });
     })
     .gap(Pixels(6.0))
@@ -1971,16 +2120,34 @@ fn build_classic_controls(cx: &mut Context) {
 fn build_vca_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "THRESH", Data::params, |p| &p.vca_thresh);
-            components::create_ratio_slider(cx, "RATIO", Data::params, |p| &p.vca_ratio);
+            components::create_param_slider(cx, "THRESH", &cx.data::<Data>().params.clone(), |p| {
+                &p.vca_thresh
+            });
+            components::create_ratio_slider(cx, "RATIO", &cx.data::<Data>().params.clone(), |p| {
+                &p.vca_ratio
+            });
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.vca_atk);
-            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.vca_rel);
+            components::create_param_slider(cx, "ATTACK", &cx.data::<Data>().params.clone(), |p| {
+                &p.vca_atk
+            });
+            components::create_param_slider(
+                cx,
+                "RELEASE",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.vca_rel,
+            );
         });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
-            components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+            components::create_frequency_slider(
+                cx,
+                "SC HP",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.comp_sc_hp_freq,
+            );
+            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
+                &p.comp_dry_wet
+            });
         });
     })
     .gap(Pixels(6.0))
@@ -1994,13 +2161,26 @@ fn build_vca_controls(cx: &mut Context) {
 fn build_optical_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "THRESH", Data::params, |p| &p.opt_thresh);
-            components::create_param_slider(cx, "CHAR %", Data::params, |p| &p.opt_char);
+            components::create_param_slider(cx, "THRESH", &cx.data::<Data>().params.clone(), |p| {
+                &p.opt_thresh
+            });
+            components::create_param_slider(cx, "CHAR %", &cx.data::<Data>().params.clone(), |p| {
+                &p.opt_char
+            });
         });
-        components::create_param_slider(cx, "SPEED", Data::params, |p| &p.opt_speed);
+        components::create_param_slider(cx, "SPEED", &cx.data::<Data>().params.clone(), |p| {
+            &p.opt_speed
+        });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
-            components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+            components::create_frequency_slider(
+                cx,
+                "SC HP",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.comp_sc_hp_freq,
+            );
+            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
+                &p.comp_dry_wet
+            });
         });
     })
     .gap(Pixels(6.0))
@@ -2015,20 +2195,45 @@ fn build_optical_controls(cx: &mut Context) {
 fn build_fet_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
-            components::create_gain_slider(cx, "INPUT", Data::params, |p| &p.fet_input_db);
-            components::create_gain_slider(cx, "OUTPUT", Data::params, |p| &p.fet_output_db);
+            components::create_gain_slider(cx, "INPUT", &cx.data::<Data>().params.clone(), |p| {
+                &p.fet_input_db
+            });
+            components::create_gain_slider(cx, "OUTPUT", &cx.data::<Data>().params.clone(), |p| {
+                &p.fet_output_db
+            });
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.fet_attack_ms);
-            components::create_param_slider(cx, "RELEASE", Data::params, |p| &p.fet_release_ms);
+            components::create_param_slider(cx, "ATTACK", &cx.data::<Data>().params.clone(), |p| {
+                &p.fet_attack_ms
+            });
+            components::create_param_slider(
+                cx,
+                "RELEASE",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.fet_release_ms,
+            );
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "RATIO", Data::params, |p| &p.fet_ratio);
-            components::create_bool_button(cx, "AUTO REL", Data::params, |p| &p.fet_auto_release);
+            components::create_param_slider(cx, "RATIO", &cx.data::<Data>().params.clone(), |p| {
+                &p.fet_ratio
+            });
+            components::create_bool_button(
+                cx,
+                "AUTO REL",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.fet_auto_release,
+            );
         });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "SC HP", Data::params, |p| &p.comp_sc_hp_freq);
-            components::create_param_slider(cx, "MIX", Data::params, |p| &p.comp_dry_wet);
+            components::create_frequency_slider(
+                cx,
+                "SC HP",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.comp_sc_hp_freq,
+            );
+            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
+                &p.comp_dry_wet
+            });
         });
     })
     .gap(Pixels(6.0))
@@ -2045,24 +2250,36 @@ fn build_pultec_controls(cx: &mut Context) {
         // EQP-1A boost+cut trick (boost at 60 Hz, cut at 200 Hz → tight lows).
         components::module_section(cx, "LOW FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "FREQ", Data::params, |p| {
-                    &p.pultec_lf_boost_freq
-                });
-                components::create_gain_slider(cx, "BOOST", Data::params, |p| {
-                    &p.pultec_lf_boost_gain
-                });
-                components::create_param_slider(cx, "BW", Data::params, |p| {
+                components::create_frequency_slider(
+                    cx,
+                    "FREQ",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_lf_boost_freq,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "BOOST",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_lf_boost_gain,
+                );
+                components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
                     &p.pultec_lf_boost_bandwidth
                 });
             });
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| {
-                    &p.pultec_lf_cut_freq
-                });
-                components::create_gain_slider(cx, "ATTEN", Data::params, |p| {
-                    &p.pultec_lf_cut_gain
-                });
-                components::create_param_slider(cx, "BW", Data::params, |p| {
+                components::create_frequency_slider(
+                    cx,
+                    "ATTEN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_lf_cut_freq,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "ATTEN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_lf_cut_gain,
+                );
+                components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
                     &p.pultec_lf_cut_bandwidth
                 });
             });
@@ -2070,30 +2287,45 @@ fn build_pultec_controls(cx: &mut Context) {
         // HIGH FREQUENCY: boost and cut each on their own row (freq + gain/bw)
         components::module_section(cx, "HIGH FREQUENCY", |cx| {
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "FREQ", Data::params, |p| {
-                    &p.pultec_hf_boost_freq
-                });
-                components::create_gain_slider(cx, "BOOST", Data::params, |p| {
-                    &p.pultec_hf_boost_gain
-                });
-                components::create_param_slider(cx, "BW", Data::params, |p| {
+                components::create_frequency_slider(
+                    cx,
+                    "FREQ",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_hf_boost_freq,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "BOOST",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_hf_boost_gain,
+                );
+                components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
                     &p.pultec_hf_boost_bandwidth
                 });
             });
             components::module_row(cx, |cx| {
-                components::create_frequency_slider(cx, "ATTEN", Data::params, |p| {
-                    &p.pultec_hf_cut_freq
-                });
-                components::create_gain_slider(cx, "ATTEN", Data::params, |p| {
-                    &p.pultec_hf_cut_gain
-                });
+                components::create_frequency_slider(
+                    cx,
+                    "ATTEN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_hf_cut_freq,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "ATTEN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec_hf_cut_gain,
+                );
             });
         });
         // OUTPUT: tube drive separate from the EQ bands
         components::module_section(cx, "OUTPUT", |cx| {
-            components::create_param_slider(cx, "TUBE DRIVE", Data::params, |p| {
-                &p.pultec_tube_drive
-            });
+            components::create_param_slider(
+                cx,
+                "TUBE DRIVE",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.pultec_tube_drive,
+            );
         });
     })
     .gap(Pixels(4.0))
@@ -2296,9 +2528,10 @@ impl View for SpectrumCanvas {
         line_paint.set_stroke_width(1.0);
         line_paint.set_anti_alias(false);
         for &cx_px in &cx_x {
-            let mut vline = vg::Path::new();
-            vline.move_to((cx_px, bounds.y));
-            vline.line_to((cx_px, bounds.y + bounds.h));
+            let mut vline_builder = vg::PathBuilder::new();
+            vline_builder.move_to((cx_px, bounds.y));
+            vline_builder.line_to((cx_px, bounds.y + bounds.h));
+            let vline = vline_builder.detach();
             canvas.draw_path(&vline, &line_paint);
         }
 
@@ -2310,23 +2543,24 @@ impl View for SpectrumCanvas {
             .fold(0.0_f32, f32::max)
             .max(f32::MIN_POSITIVE);
         if max_overlap > f32::MIN_POSITIVE * 2.0 {
-            let mut ovl_path = vg::Path::new();
+            let mut ovl_builder = vg::PathBuilder::new();
             let mut ovl_started = false;
             for (i, &ov) in overlap.iter().enumerate() {
                 let norm = (ov / max_overlap).clamp(0.0, 1.0);
                 let x = bounds.x + i as f32 * x_step;
                 let y = bounds.y + bounds.h - norm * bounds.h;
                 if !ovl_started {
-                    ovl_path.move_to((x, y));
+                    ovl_builder.move_to((x, y));
                     ovl_started = true;
                 } else {
-                    ovl_path.line_to((x, y));
+                    ovl_builder.line_to((x, y));
                 }
             }
             if ovl_started {
-                ovl_path.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
-                ovl_path.line_to((bounds.x, bounds.y + bounds.h));
-                ovl_path.close();
+                ovl_builder.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
+                ovl_builder.line_to((bounds.x, bounds.y + bounds.h));
+                ovl_builder.close();
+                let ovl_path = ovl_builder.detach();
                 let mut ovl_paint = vg::Paint::default();
                 // Semi-transparent orange — stands out clearly against the teal spectrum.
                 ovl_paint.set_color(vg::Color::from_argb(90, 255, 110, 20));
@@ -2337,7 +2571,7 @@ impl View for SpectrumCanvas {
         }
 
         // ── Spectrum filled area (dBFS: −90 dB → bottom, 0 dB → top) ─────
-        let mut fill = vg::Path::new();
+        let mut fill_builder = vg::PathBuilder::new();
         let mut started = false;
         for (i, &mag) in bins.iter().enumerate() {
             let db = 20.0 * mag.max(1e-9_f32).log10();
@@ -2345,15 +2579,16 @@ impl View for SpectrumCanvas {
             let x = bounds.x + i as f32 * x_step;
             let y = bounds.y + bounds.h - norm * bounds.h;
             if !started {
-                fill.move_to((x, y));
+                fill_builder.move_to((x, y));
                 started = true;
             } else {
-                fill.line_to((x, y));
+                fill_builder.line_to((x, y));
             }
         }
-        fill.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
-        fill.line_to((bounds.x, bounds.y + bounds.h));
-        fill.close();
+        fill_builder.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
+        fill_builder.line_to((bounds.x, bounds.y + bounds.h));
+        fill_builder.close();
+        let fill = fill_builder.detach();
         let mut fill_paint = vg::Paint::default();
         fill_paint.set_color(vg::Color::from_argb(60, 50, 180, 150));
         fill_paint.set_style(vg::PaintStyle::Fill);
@@ -2361,7 +2596,7 @@ impl View for SpectrumCanvas {
         canvas.draw_path(&fill, &fill_paint);
 
         // ── Stroke line ──────────────────────────────────────────────────────
-        let mut line = vg::Path::new();
+        let mut line_builder = vg::PathBuilder::new();
         let mut started = false;
         for (i, &mag) in bins.iter().enumerate() {
             let db = 20.0 * mag.max(1e-9_f32).log10();
@@ -2369,12 +2604,13 @@ impl View for SpectrumCanvas {
             let x = bounds.x + i as f32 * x_step;
             let y = bounds.y + bounds.h - norm * bounds.h;
             if !started {
-                line.move_to((x, y));
+                line_builder.move_to((x, y));
                 started = true;
             } else {
-                line.line_to((x, y));
+                line_builder.line_to((x, y));
             }
         }
+        let line = line_builder.detach();
         let mut stroke_paint = vg::Paint::default();
         stroke_paint.set_color(vg::Color::from_argb(200, 80, 220, 180));
         stroke_paint.set_style(vg::PaintStyle::Stroke);
@@ -2419,6 +2655,16 @@ impl View for SpectrumCanvas {
 //       band_N_enabled, band_N_solo,
 //       band_N_freq, band_N_threshold, band_N_ratio,
 //       band_N_q, band_N_mode, band_N_attack, band_N_release, band_N_gain);
+// Helper so the closure literals passed to `dyneq_slider!` get their parameter
+// type pinned down by this function's signature (a bare `|p| &p.field` closure
+// called inline cannot infer `p`'s type on its own).
+fn dyneq_param<'p, P: Param>(
+    params: &'p Arc<BusChannelStripParams>,
+    pf: impl Fn(&'p Arc<BusChannelStripParams>) -> &'p P,
+) -> &'p P {
+    pf(params)
+}
+
 macro_rules! dyneq_slider {
     ($cx:expr, $label:literal, $pf:expr) => {{
         VStack::new($cx, |cx| {
@@ -2426,9 +2672,12 @@ macro_rules! dyneq_slider {
                 .class("dyneq-param-label")
                 .height(Pixels(13.0))
                 .width(Stretch(1.0));
-            ParamSlider::new(cx, Data::params, $pf)
-                .height(Pixels(16.0))
-                .width(Stretch(1.0));
+            {
+                let params = cx.data::<Data>().params.clone();
+                ParamSlider::new(cx, dyneq_param(&params, $pf))
+                    .height(Pixels(16.0))
+                    .width(Stretch(1.0));
+            }
         })
         .class("param-control")
         .width(Stretch(1.0))
@@ -2457,13 +2706,14 @@ macro_rules! dyneq_band_col {
                     .bottom(Pixels(0.0));
                 components::create_on_button(cx, |p| &p.$enabled);
                 components::create_bypass_button(cx, "SOLO", |p| &p.$solo);
-                // Chevron toggle button — reactive label via dyneq_expand_gen lens
+                // Chevron toggle button — reactive label via dyneq_expand_gen signal
                 {
-                    let expand_arc_chevron = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
+                    let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
+                    let dyneq_expand_gen_signal = cx.data::<Data>().dyneq_expand_gen;
                     Button::new(cx, |cx| {
                         Label::new(
                             cx,
-                            Data::dyneq_expand_gen.map(move |_| {
+                            dyneq_expand_gen_signal.map(move |_| {
                                 if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) {
                                     "▼"
                                 } else {
@@ -2497,8 +2747,9 @@ macro_rules! dyneq_band_col {
             // Binding destroys and rebuilds its subtree on every gen change, guaranteeing
             // the correct show/hide state in both directions.
             {
-                let expand_arc_tier2 = cx.data::<Data>().unwrap().dyneq_band_expand.clone();
-                Binding::new(cx, Data::dyneq_expand_gen, move |cx, _gen| {
+                let expand_arc_tier2 = cx.data::<Data>().dyneq_band_expand.clone();
+                let dyneq_expand_gen_signal = cx.data::<Data>().dyneq_expand_gen;
+                Binding::new(cx, dyneq_expand_gen_signal, move |cx| {
                     if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
                         VStack::new(cx, |cx| {
                             dyneq_slider!(cx, "RATIO", |p| &p.$ratio);
@@ -2534,6 +2785,7 @@ fn build_dyneq_back_view(
     analysis_result: Arc<spectral::AnalysisResult>,
     gr_data: Arc<spectral::GainReductionData>,
 ) {
+    let dyneq_open_signal = cx.data::<Data>().dyneq_open;
     VStack::new(cx, |cx| {
         // ── Back-view header ──────────────────────────────────────────────────
         HStack::new(cx, |cx| {
@@ -2713,7 +2965,7 @@ fn build_dyneq_back_view(
     .width(Stretch(1.0))
     .gap(Pixels(12.0))
     .padding(Pixels(16.0))
-    .display(Data::dyneq_open.map(|o| if *o { Display::Flex } else { Display::None }));
+    .display(dyneq_open_signal.map(|o| if *o { Display::Flex } else { Display::None }));
 }
 
 // ============================================================================
@@ -2725,6 +2977,7 @@ fn build_dyneq_back_view(
 /// (BODY / PRESENCE / AIR / WARMTH / WIDTH), each with its own per-stage
 /// bypass. Brass theme throughout to match the front-panel plate.
 fn build_sheen_back_view(cx: &mut Context) {
+    let sheen_open_signal = cx.data::<Data>().sheen_open;
     VStack::new(cx, |cx| {
         // ── Header row: back button + wordmark ─────────────────────────
         HStack::new(cx, |cx| {
@@ -2763,7 +3016,8 @@ fn build_sheen_back_view(cx: &mut Context) {
                     .class("param-label")
                     .height(Pixels(14.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, Data::params, |p| &p.sheen_bypass)
+                let params = cx.data::<Data>().params.clone();
+                ParamButton::new(cx, &params.sheen_bypass)
                     .class("sheen-master-bypass")
                     .height(Pixels(32.0))
                     .width(Stretch(1.0));
@@ -2824,7 +3078,7 @@ fn build_sheen_back_view(cx: &mut Context) {
     .width(Stretch(1.0))
     .gap(Pixels(12.0))
     .padding(Pixels(16.0))
-    .display(Data::sheen_open.map(|o| if *o { Display::Flex } else { Display::None }));
+    .display(sheen_open_signal.map(|o| if *o { Display::Flex } else { Display::None }));
 }
 
 /// One vertical column for a Sheen stage. The `is_first` flag decides which
@@ -2846,53 +3100,54 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
         // Param slider + per-stage bypass — branched by stage name. Each
         // branch wires both the value param and the corresponding bypass
         // param so the two sliders below stay in sync visually.
+        let params = cx.data::<Data>().params.clone();
         match name {
             "BODY" => {
-                ParamSlider::new(cx, Data::params, |p| &p.sheen_body_db)
+                ParamSlider::new(cx, &params.sheen_body_db)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, Data::params, |p| &p.sheen_body_bypass)
+                ParamButton::new(cx, &params.sheen_body_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "PRESENCE" => {
-                ParamSlider::new(cx, Data::params, |p| &p.sheen_presence_db)
+                ParamSlider::new(cx, &params.sheen_presence_db)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, Data::params, |p| &p.sheen_presence_bypass)
+                ParamButton::new(cx, &params.sheen_presence_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "AIR" => {
-                ParamSlider::new(cx, Data::params, |p| &p.sheen_air_db)
+                ParamSlider::new(cx, &params.sheen_air_db)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, Data::params, |p| &p.sheen_air_bypass)
+                ParamButton::new(cx, &params.sheen_air_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "WARMTH" => {
-                ParamSlider::new(cx, Data::params, |p| &p.sheen_warmth)
+                ParamSlider::new(cx, &params.sheen_warmth)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, Data::params, |p| &p.sheen_warmth_bypass)
+                ParamButton::new(cx, &params.sheen_warmth_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "WIDTH" => {
-                ParamSlider::new(cx, Data::params, |p| &p.sheen_width)
+                ParamSlider::new(cx, &params.sheen_width)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, Data::params, |p| &p.sheen_width_bypass)
+                ParamButton::new(cx, &params.sheen_width_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
@@ -2912,42 +3167,62 @@ fn build_transformer_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         // Model + compression on one row
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "MODEL", Data::params, |p| &p.transformer_model);
-            components::create_ratio_slider(cx, "COMP", Data::params, |p| {
+            components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
+                &p.transformer_model
+            });
+            components::create_ratio_slider(cx, "COMP", &cx.data::<Data>().params.clone(), |p| {
                 &p.transformer_compression
             });
         });
         // Input stage: drive + saturation paired
         components::module_section(cx, "INPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "DRIVE", Data::params, |p| {
-                    &p.transformer_input_drive
-                });
-                components::create_param_slider(cx, "SAT", Data::params, |p| {
-                    &p.transformer_input_saturation
-                });
+                components::create_param_slider(
+                    cx,
+                    "DRIVE",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.transformer_input_drive,
+                );
+                components::create_param_slider(
+                    cx,
+                    "SAT",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.transformer_input_saturation,
+                );
             });
         });
         // Output stage: drive + saturation paired
         components::module_section(cx, "OUTPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "DRIVE", Data::params, |p| {
-                    &p.transformer_output_drive
-                });
-                components::create_param_slider(cx, "SAT", Data::params, |p| {
-                    &p.transformer_output_saturation
-                });
+                components::create_param_slider(
+                    cx,
+                    "DRIVE",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.transformer_output_drive,
+                );
+                components::create_param_slider(
+                    cx,
+                    "SAT",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.transformer_output_saturation,
+                );
             });
         });
         // Tone shaping: low/high response
         components::module_section(cx, "TONE", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "LOW", Data::params, |p| {
-                    &p.transformer_low_response
-                });
-                components::create_param_slider(cx, "HIGH", Data::params, |p| {
-                    &p.transformer_high_response
-                });
+                components::create_param_slider(
+                    cx,
+                    "LOW",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.transformer_low_response,
+                );
+                components::create_param_slider(
+                    cx,
+                    "HIGH",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.transformer_high_response,
+                );
             });
         });
     })
@@ -2963,33 +3238,75 @@ fn build_punch_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_section(cx, "CLIPPER", |cx| {
             components::module_row(cx, |cx| {
-                components::create_gain_slider(cx, "THRESH", Data::params, |p| &p.punch_threshold);
-                components::create_param_slider(cx, "MODE", Data::params, |p| &p.punch_clip_mode);
+                components::create_gain_slider(
+                    cx,
+                    "THRESH",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_threshold,
+                );
+                components::create_param_slider(
+                    cx,
+                    "MODE",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_clip_mode,
+                );
             });
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "SOFT", Data::params, |p| &p.punch_softness);
-                components::create_param_slider(cx, "OVSMP", Data::params, |p| {
-                    &p.punch_oversampling
-                });
+                components::create_param_slider(
+                    cx,
+                    "SOFT",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_softness,
+                );
+                components::create_param_slider(
+                    cx,
+                    "OVSMP",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_oversampling,
+                );
             });
         });
         components::module_section(cx, "TRANSIENTS", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "ATTACK", Data::params, |p| &p.punch_attack);
-                components::create_param_slider(cx, "SUSTAIN", Data::params, |p| &p.punch_sustain);
+                components::create_param_slider(
+                    cx,
+                    "ATTACK",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_attack,
+                );
+                components::create_param_slider(
+                    cx,
+                    "SUSTAIN",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_sustain,
+                );
             });
-            components::create_param_slider(cx, "SENS", Data::params, |p| &p.punch_sensitivity);
+            components::create_param_slider(cx, "SENS", &cx.data::<Data>().params.clone(), |p| {
+                &p.punch_sensitivity
+            });
         });
         components::module_section(cx, "OUTPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_gain_slider(cx, "IN", Data::params, |p| &p.punch_input_gain);
-                components::create_gain_slider(cx, "OUT", Data::params, |p| &p.punch_output_gain);
+                components::create_gain_slider(cx, "IN", &cx.data::<Data>().params.clone(), |p| {
+                    &p.punch_input_gain
+                });
+                components::create_gain_slider(cx, "OUT", &cx.data::<Data>().params.clone(), |p| {
+                    &p.punch_output_gain
+                });
             });
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "MIX", Data::params, |p| &p.punch_mix);
-                components::create_frequency_slider(cx, "WET HPF", Data::params, |p| {
-                    &p.punch_wet_hpf_hz
-                });
+                components::create_param_slider(
+                    cx,
+                    "MIX",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_mix,
+                );
+                components::create_frequency_slider(
+                    cx,
+                    "WET HPF",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch_wet_hpf_hz,
+                );
             });
         });
     })
@@ -3005,19 +3322,40 @@ fn build_haas_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_section(cx, "M/S GAIN", |cx| {
             components::module_row(cx, |cx| {
-                components::create_gain_slider(cx, "MID", Data::params, |p| &p.haas_mid_gain);
-                components::create_gain_slider(cx, "SIDE", Data::params, |p| &p.haas_side_gain);
+                components::create_gain_slider(cx, "MID", &cx.data::<Data>().params.clone(), |p| {
+                    &p.haas_mid_gain
+                });
+                components::create_gain_slider(
+                    cx,
+                    "SIDE",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.haas_side_gain,
+                );
             });
         });
         components::module_section(cx, "COMB", |cx| {
             components::module_row(cx, |cx| {
-                components::create_param_slider(cx, "DEPTH", Data::params, |p| &p.haas_comb_depth);
-                components::create_param_slider(cx, "TIME", Data::params, |p| &p.haas_comb_time);
+                components::create_param_slider(
+                    cx,
+                    "DEPTH",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.haas_comb_depth,
+                );
+                components::create_param_slider(
+                    cx,
+                    "TIME",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.haas_comb_time,
+                );
             });
-            components::create_param_slider(cx, "MODE", Data::params, |p| &p.haas_comb_mode);
+            components::create_param_slider(cx, "MODE", &cx.data::<Data>().params.clone(), |p| {
+                &p.haas_comb_mode
+            });
         });
         components::module_section(cx, "OUTPUT", |cx| {
-            components::create_param_slider(cx, "MIX", Data::params, |p| &p.haas_mix);
+            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
+                &p.haas_mix
+            });
         });
     })
     .gap(Pixels(4.0))
