@@ -379,7 +379,7 @@ These need a decision before any code lands:
 
 1. ~~**4× oversampling floor or "CPU saver" toggle?**~~ **Decided 2026-09-05: 4× floor, no toggle.** (Tracked in [#14](https://github.com/fsecada01/bus_channel_strip/issues/14).)
 2. ~~**TPT migration or fallback?**~~ **Decided 2026-09-05: hard migrate, no biquad fallback.** (Tracked in [#15](https://github.com/fsecada01/bus_channel_strip/issues/15).)
-3. **Preisach hysteresis depth — single-cell or multi-cell?** (Recommendation: single-cell for v2.0.)
+3. ~~**Preisach hysteresis depth — single-cell or multi-cell?**~~ **Decided 2026-09-05: single-cell for v2.0.** (Tracked in [#16](https://github.com/fsecada01/bus_channel_strip/issues/16).)
 4. **TMT detuning — exposed knob or hard-coded?** (Recommendation: hard-coded at 0.3%.)
 5. **ButterComp2 adaptation — exposed knob or auto?** (Recommendation: auto with bypass.)
 6. **Resize aspect ratio — locked or free?** (Recommendation: locked.)

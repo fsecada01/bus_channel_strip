@@ -16,6 +16,7 @@
 //!
 //! Stage rationale and citations live in `docs/adr/0006-sheen-pinned-master-end-polish.md`.
 
+use crate::hysteresis::HysteresisCell;
 use crate::oversampler::Oversampler;
 use crate::shaping::{Filter, FilterType};
 use crate::svf::{SvfCoefficients, SvfType, TptSvf};
@@ -106,11 +107,18 @@ pub struct SheenModule {
     // inline (one sample in → OS_FACTOR samples out) like Pultec's tube
     // stage and Transformer's saturation core.
     warmth_os: [Oversampler; 2],
+    /// Play-operator hysteresis cells (#16, ADR-0012) for the "tape"
+    /// sub-mode — one per channel, engaged only when `tape_mode` is set.
+    warmth_hysteresis: [HysteresisCell; 2],
     /// Tracks whether the WARMTH stage actually ran on the previous buffer,
     /// so `process()` can flush `warmth_os`'s FIR delay lines exactly on the
     /// active→skipped transition rather than leaving them holding stale
     /// pre-gap content for the stage's eventual re-entry (see #27 review).
     warmth_was_active: bool,
+    /// #16: routes WARMTH through the hysteresis cell when true. Off by
+    /// default — WARMTH's factory-default sound is unchanged unless a user
+    /// opts in.
+    tape_mode: bool,
 
     // Cached parameter values. Compared against incoming params each buffer
     // so coefficients only regenerate when a slider actually moves —
@@ -193,7 +201,9 @@ impl SheenModule {
             width_hpf: TptSvf::new(hpf_coeff),
             width_shelf: TptSvf::new(shelf_coeff),
             warmth_os: [make_warmth_os(), make_warmth_os()],
+            warmth_hysteresis: [HysteresisCell::new(), HysteresisCell::new()],
             warmth_was_active: false,
+            tape_mode: false,
             body_db: 1.0,
             presence_db: 0.0,
             air_db: 1.8,
@@ -228,6 +238,7 @@ impl SheenModule {
         air_bypass: bool,
         warmth_effect: f32,
         warmth_bypass: bool,
+        warmth_tape_mode: bool,
         width_param: f32,
         width_bypass: bool,
     ) {
@@ -259,6 +270,7 @@ impl SheenModule {
         self.presence_bypass = presence_bypass;
         self.air_bypass = air_bypass;
         self.warmth_bypass = warmth_bypass;
+        self.tape_mode = warmth_tape_mode;
         self.width_bypass = width_bypass;
     }
 
@@ -283,6 +295,9 @@ impl SheenModule {
             // re-entry with this cascade's ~46-tap history depth.
             for os in &mut self.warmth_os {
                 os.reset();
+            }
+            for h in &mut self.warmth_hysteresis {
+                h.reset();
             }
         }
         self.warmth_was_active = warmth_active;
@@ -352,6 +367,9 @@ impl SheenModule {
         for os in &mut self.warmth_os {
             os.reset();
         }
+        for h in &mut self.warmth_hysteresis {
+            h.reset();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -417,7 +435,12 @@ impl SheenModule {
         {
             let up = self.warmth_os[ch].upsample(x, 0);
             for i in 0..OS_FACTOR {
-                scratch[i] = dry * up[i] + mix * inflator(up[i]);
+                let shaped = if self.tape_mode {
+                    inflator(self.warmth_hysteresis[ch].process(up[i], mix))
+                } else {
+                    inflator(up[i])
+                };
+                scratch[i] = dry * up[i] + mix * shaped;
             }
         }
         self.warmth_os[ch].downsample(&scratch[..OS_FACTOR], 0)
@@ -513,7 +536,7 @@ mod tests {
         let mut sheen = SheenModule::new(SR);
         sheen.update_parameters(
             true, // sheen_bypass = true
-            3.0, false, 3.0, false, 4.0, false, 1.0, false, 1.0, false,
+            3.0, false, 3.0, false, 4.0, false, 1.0, false, false, 1.0, false,
         );
 
         let n = 1024;
@@ -549,7 +572,7 @@ mod tests {
             3.0, true, // body bypassed
             3.0, true, // presence bypassed
             4.0, true, // air bypassed
-            1.0, true, // warmth bypassed
+            1.0, true, false, // warmth bypassed, tape mode off
             1.0, true, // width bypassed
         );
 
@@ -592,7 +615,7 @@ mod tests {
         let mut sheen = SheenModule::new(SR);
         // Flat EQ stages, WARMTH pushed to full effect.
         sheen.update_parameters(
-            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, 0.0, true,
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, false, 0.0, true,
         );
 
         let n = 2048;
@@ -638,7 +661,7 @@ mod tests {
         // Phase 1: WARMTH active, hot near-Nyquist signal — fills the FIR
         // delay lines with substantial energy.
         sheen.update_parameters(
-            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, 0.0, true,
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, false, 0.0, true,
         );
         let mut hot_l: Vec<f32> = (0..n)
             .map(|i| (2.0 * core::f32::consts::PI * 0.45 * i as f32).sin())
@@ -656,7 +679,9 @@ mod tests {
 
         // Phase 2: bypass WARMTH for one buffer — this is the
         // active→skipped transition that must trigger the flush.
-        sheen.update_parameters(false, 0.0, true, 0.0, true, 0.0, true, 1.0, true, 0.0, true);
+        sheen.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, true, false, 0.0, true,
+        );
         let mut silent_l = vec![0.0_f32; n];
         let mut silent_r = vec![0.0_f32; n];
         let mut buffer = Buffer::default();
@@ -671,7 +696,7 @@ mod tests {
 
         // Phase 3: re-activate WARMTH on pure silence.
         sheen.update_parameters(
-            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, 0.0, true,
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, false, 0.0, true,
         );
         let mut check_l = vec![0.0_f32; n];
         let mut check_r = vec![0.0_f32; n];
@@ -699,7 +724,7 @@ mod tests {
         let mut sheen = SheenModule::new(SR);
         // Spec defaults: body+1 dB, presence 0, air +1.8, warmth 0.2, width 0.5
         sheen.update_parameters(
-            false, 1.0, false, 0.0, false, 1.8, false, 0.20, false, 0.50, false,
+            false, 1.0, false, 0.0, false, 1.8, false, 0.20, false, false, 0.50, false,
         );
 
         let n = 4096;
@@ -726,5 +751,77 @@ mod tests {
             assert!(l.abs() < 4.0, "L exploded at {i}: {l}");
             assert!(r.abs() < 4.0, "R exploded at {i}: {r}");
         }
+    }
+
+    // ── WARMTH tape sub-mode (#16, ADR-0012) ────────────────────────────────
+
+    /// Tape mode must actually change WARMTH's output on a hot signal —
+    /// proof the hysteresis cell is wired in, not a dead field. Bounded and
+    /// finite output confirms the play operator doesn't destabilize the
+    /// existing oversampled Inflator path.
+    #[test]
+    fn warmth_tape_mode_diverges_from_default_polynomial_path() {
+        let n = 1024;
+        let make_signal = || -> (Vec<f32>, Vec<f32>) {
+            let l: Vec<f32> = (0..n)
+                .map(|i| (2.0 * core::f32::consts::PI * 0.1 * i as f32).sin() * 0.9)
+                .collect();
+            let r = l.clone();
+            (l, r)
+        };
+
+        let mut sheen_off = SheenModule::new(SR);
+        sheen_off.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, false, 0.0, true,
+        );
+        let (mut l_off, mut r_off) = make_signal();
+        let mut buf_off = Buffer::default();
+        unsafe {
+            buf_off.set_slices(n, |s| {
+                s.clear();
+                s.push(&mut l_off);
+                s.push(&mut r_off);
+            });
+        }
+        sheen_off.process(&mut buf_off);
+
+        let mut sheen_on = SheenModule::new(SR);
+        sheen_on.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, true, 0.0, true,
+        );
+        let (mut l_on, mut r_on) = make_signal();
+        let mut buf_on = Buffer::default();
+        unsafe {
+            buf_on.set_slices(n, |s| {
+                s.clear();
+                s.push(&mut l_on);
+                s.push(&mut r_on);
+            });
+        }
+        sheen_on.process(&mut buf_on);
+
+        let mut diverged = false;
+        for i in 0..n {
+            assert!(l_on[i].is_finite(), "non-finite at {i}: {}", l_on[i]);
+            assert!(r_on[i].is_finite(), "non-finite at {i}: {}", r_on[i]);
+            assert!(l_on[i].abs() < 4.0, "implausibly large at {i}: {}", l_on[i]);
+            if (l_on[i] - l_off[i]).abs() > 1.0e-6 {
+                diverged = true;
+            }
+        }
+        assert!(diverged, "tape mode never changed WARMTH's output");
+    }
+
+    #[test]
+    fn sheen_reset_clears_warmth_hysteresis_state() {
+        let mut sheen = SheenModule::new(SR);
+        // Pin the play operator away from zero.
+        sheen.warmth_hysteresis[0].process(0.9, 0.6);
+        sheen.reset();
+        let probe = sheen.warmth_hysteresis[0].process(0.01, 0.6);
+        assert!(
+            (probe - 0.0).abs() < 1.0e-6,
+            "warmth hysteresis state not cleared by reset: {probe}"
+        );
     }
 }

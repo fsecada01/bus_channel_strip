@@ -1,3 +1,4 @@
+use crate::hysteresis::HysteresisCell;
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
 use biquad::{Biquad, DirectForm1, Type};
@@ -45,6 +46,11 @@ pub struct TransformerModule {
     cached_model: TransformerModel,
     cached_low_response: f32,
     cached_high_response: f32,
+
+    /// #16: skips both stages' hysteresis cells entirely when true, so the
+    /// pre-#16 v1.0 saturation path is bit-identical. Default is `false`
+    /// (hysteresis on) — see ADR-0012.
+    hysteresis_bypass: bool,
 }
 
 /// Individual transformer stage (input or output)
@@ -59,6 +65,10 @@ struct TransformerStage {
     // Gentle compression (transformer loading effect)
     compression_amount: f32,
     envelope: f32,
+
+    /// Play-operator memory (#16, ADR-0012) — driven signal passes through
+    /// this before the model-specific saturation curve.
+    hysteresis: HysteresisCell,
 }
 
 /// Transformer model types
@@ -82,21 +92,23 @@ impl TransformerStage {
             harmonic_state: 0.0,
             compression_amount: 0.0,
             envelope: 0.0,
+            hysteresis: HysteresisCell::new(),
         }
     }
 
     /// Process sample through transformer stage with an oversampled
     /// saturation path for anti-aliasing.
     ///
-    /// The saturation step is pointwise (memoryless), so we upsample the
-    /// driven signal, apply the model's nonlinearity to each oversampled
-    /// frame, then downsample. The transformer loading compression runs at
-    /// native rate — its envelope time constants would be off by `factor` if
-    /// oversampled.
+    /// The per-model curve is pointwise (memoryless), so we upsample the
+    /// driven signal, run each oversampled frame through the hysteresis
+    /// cell (#16, ADR-0012) then the model's nonlinearity, then downsample.
+    /// The transformer loading compression runs at native rate — its
+    /// envelope time constants would be off by `factor` if oversampled.
     fn process_sample(
         &mut self,
         input: f32,
         model: TransformerModel,
+        hysteresis_bypass: bool,
         os: &mut Oversampler,
         scratch: &mut [f32; TRANSFORMER_OS_FACTOR],
     ) -> f32 {
@@ -107,13 +119,18 @@ impl TransformerStage {
         // Apply input drive
         let driven_signal = input * self.drive_gain;
 
-        // Oversampled saturation: upsample → pointwise nonlinearity → downsample.
+        // Oversampled saturation: upsample → hysteresis → pointwise nonlinearity → downsample.
         let saturated = {
             let up = os.upsample(driven_signal, 0);
             // Borrow ends at end of this scope; copy to scratch so we can
             // mutably re-borrow `os` for downsample.
             for i in 0..TRANSFORMER_OS_FACTOR {
-                scratch[i] = saturate_by_model(up[i], self.saturation_amount, model);
+                let x = if hysteresis_bypass {
+                    up[i]
+                } else {
+                    self.hysteresis.process(up[i], self.saturation_amount)
+                };
+                scratch[i] = saturate_by_model(x, self.saturation_amount, model);
             }
             os.downsample(&scratch[..TRANSFORMER_OS_FACTOR], 0)
         };
@@ -175,10 +192,12 @@ impl TransformerModule {
             cached_model: TransformerModel::Vintage,
             cached_low_response: f32::NAN, // NAN forces recompute on first call
             cached_high_response: f32::NAN,
+            hysteresis_bypass: false,
         }
     }
 
     /// Update transformer parameters
+    #[allow(clippy::too_many_arguments)]
     pub fn update_parameters(
         &mut self,
         model: TransformerModel,
@@ -189,8 +208,10 @@ impl TransformerModule {
         low_frequency_response: f32,  // -1 to 1 (cut to boost)
         high_frequency_response: f32, // -1 to 1 (cut to boost)
         transformer_compression: f32, // Overall compression amount
+        hysteresis_bypass: bool,      // #16: true restores bit-identical v1.0 output
     ) {
         self.model = model;
+        self.hysteresis_bypass = hysteresis_bypass;
 
         // Input transformer settings - much gentler
         self.input_transformer.drive_gain = 1.0 + input_drive * 0.8; // 1x to 1.8x gain
@@ -271,9 +292,13 @@ impl TransformerModule {
                 } else {
                     &mut self.input_os_r
                 };
-                s = self
-                    .input_transformer
-                    .process_sample(s, self.model, in_os, &mut scratch);
+                s = self.input_transformer.process_sample(
+                    s,
+                    self.model,
+                    self.hysteresis_bypass,
+                    in_os,
+                    &mut scratch,
+                );
 
                 // 2. Frequency response modeling (native rate)
                 s = self.low_shelf.run(s);
@@ -285,9 +310,13 @@ impl TransformerModule {
                 } else {
                     &mut self.output_os_r
                 };
-                s = self
-                    .output_transformer
-                    .process_sample(s, self.model, out_os, &mut scratch);
+                s = self.output_transformer.process_sample(
+                    s,
+                    self.model,
+                    self.hysteresis_bypass,
+                    out_os,
+                    &mut scratch,
+                );
 
                 *sample = s;
             }
@@ -298,8 +327,10 @@ impl TransformerModule {
     pub fn reset(&mut self) {
         self.input_transformer.envelope = 0.0;
         self.input_transformer.harmonic_state = 0.0;
+        self.input_transformer.hysteresis.reset();
         self.output_transformer.envelope = 0.0;
         self.output_transformer.harmonic_state = 0.0;
+        self.output_transformer.hysteresis.reset();
         self.input_os_l.reset();
         self.input_os_r.reset();
         self.output_os_l.reset();
@@ -533,7 +564,17 @@ mod tests {
             "cached_high_response should start NaN"
         );
         // First update_parameters call should not panic
-        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.3,
+            false,
+        );
         assert!(
             !t.cached_low_response.is_nan(),
             "cached_low_response should be set after first update"
@@ -549,7 +590,7 @@ mod tests {
             TransformerModel::British,
             TransformerModel::American,
         ] {
-            t.update_parameters(model, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+            t.update_parameters(model, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3, false);
             assert_eq!(t.model, model, "Model should be updated to {:?}", model);
         }
     }
@@ -558,11 +599,31 @@ mod tests {
     fn test_transformer_module_cache_skips_filter_recompute() {
         let mut t = TransformerModule::new(44100.0);
         // First call — triggers recompute and sets cache
-        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.2, 0.2, 0.3);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.2,
+            0.2,
+            0.3,
+            false,
+        );
         let cached_low = t.cached_low_response;
         let cached_high = t.cached_high_response;
         // Same values — cache should match, no recompute
-        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.2, 0.2, 0.3);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.2,
+            0.2,
+            0.3,
+            false,
+        );
         assert_eq!(t.cached_low_response.to_bits(), cached_low.to_bits());
         assert_eq!(t.cached_high_response.to_bits(), cached_high.to_bits());
     }
@@ -570,17 +631,47 @@ mod tests {
     #[test]
     fn test_transformer_module_model_change_updates_cache() {
         let mut t = TransformerModule::new(44100.0);
-        t.update_parameters(TransformerModel::Vintage, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.3,
+            false,
+        );
         assert_eq!(t.cached_model, TransformerModel::Vintage);
         // Change model — cached_model should update
-        t.update_parameters(TransformerModel::British, 0.3, 0.3, 0.3, 0.3, 0.0, 0.0, 0.3);
+        t.update_parameters(
+            TransformerModel::British,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.3,
+            false,
+        );
         assert_eq!(t.cached_model, TransformerModel::British);
     }
 
     #[test]
     fn test_transformer_module_reset_clears_envelopes() {
         let mut t = TransformerModule::new(44100.0);
-        t.update_parameters(TransformerModel::Vintage, 0.5, 0.8, 0.5, 0.8, 0.0, 0.0, 0.5);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.5,
+            0.8,
+            0.5,
+            0.8,
+            0.0,
+            0.0,
+            0.5,
+            false,
+        );
         // Manually set envelope state
         t.input_transformer.envelope = 0.9;
         t.output_transformer.envelope = 0.7;
@@ -593,12 +684,32 @@ mod tests {
     fn test_transformer_input_drive_scales() {
         let mut t = TransformerModule::new(44100.0);
         // input_drive=0 → drive_gain = 1.0; input_drive=1 → drive_gain = 1.8
-        t.update_parameters(TransformerModel::Vintage, 0.0, 0.3, 0.3, 0.3, 0.0, 0.0, 0.0);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.0,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.0,
+            false,
+        );
         assert!(
             (t.input_transformer.drive_gain - 1.0).abs() < 1e-5,
             "drive=0 should give gain 1.0"
         );
-        t.update_parameters(TransformerModel::Vintage, 1.0, 0.3, 0.3, 0.3, 0.0, 0.0, 0.0);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            1.0,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.0,
+            false,
+        );
         assert!(
             (t.input_transformer.drive_gain - 1.8).abs() < 1e-5,
             "drive=1 should give gain 1.8"
@@ -617,7 +728,7 @@ mod tests {
             TransformerModel::British,
             TransformerModel::American,
         ] {
-            t44.update_parameters(model, 0.3, 0.3, 0.3, 0.3, 0.5, -0.5, 0.3);
+            t44.update_parameters(model, 0.3, 0.3, 0.3, 0.3, 0.5, -0.5, 0.3, false);
         }
     }
 
@@ -628,7 +739,17 @@ mod tests {
     fn test_transformer_saturation_oversampled_bounded() {
         let mut t = TransformerModule::new(44100.0);
         // Maximum saturation on both stages to exercise the nonlinearity.
-        t.update_parameters(TransformerModel::Vintage, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+        );
 
         // Pass 1024 samples of hot sine through by reaching into the private
         // per-stage method. No Buffer needed — we just need to verify the
@@ -641,9 +762,113 @@ mod tests {
         stage.compression_amount = 0.3;
         for i in 0..1024 {
             let x = (2.0 * core::f32::consts::PI * 0.4 * i as f32).sin(); // ~17.6 kHz
-            let y = stage.process_sample(x, TransformerModel::Vintage, &mut os, &mut scratch);
+            let y =
+                stage.process_sample(x, TransformerModel::Vintage, false, &mut os, &mut scratch);
             assert!(y.is_finite(), "non-finite sample {y} at i={i}");
             assert!(y.abs() < 10.0, "implausibly large sample {y} at i={i}");
         }
+    }
+
+    // ── Hysteresis integration (#16, ADR-0012) ─────────────────────────────────
+
+    /// Bypassed and engaged hysteresis must diverge on a swept signal — proof
+    /// the play operator is actually wired into the saturation path, not a
+    /// dead field.
+    #[test]
+    fn test_hysteresis_bypass_vs_engaged_differ_on_swept_signal() {
+        let mut os_bypass = Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
+        let mut os_engaged = Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
+        let mut scratch = [0.0_f32; TRANSFORMER_OS_FACTOR];
+        let mut stage_bypass = TransformerStage::new();
+        let mut stage_engaged = TransformerStage::new();
+        for s in [&mut stage_bypass, &mut stage_engaged] {
+            s.drive_gain = 1.8;
+            s.saturation_amount = 0.6;
+        }
+
+        let n = 512;
+        let mut diverged = false;
+        for i in 0..n {
+            let x = (2.0 * core::f32::consts::PI * 0.05 * i as f32).sin() * 0.9;
+            let yb = stage_bypass.process_sample(
+                x,
+                TransformerModel::Vintage,
+                true,
+                &mut os_bypass,
+                &mut scratch,
+            );
+            let ye = stage_engaged.process_sample(
+                x,
+                TransformerModel::Vintage,
+                false,
+                &mut os_engaged,
+                &mut scratch,
+            );
+            assert!(yb.is_finite() && ye.is_finite());
+            if (yb - ye).abs() > 1.0e-6 {
+                diverged = true;
+            }
+        }
+        assert!(
+            diverged,
+            "hysteresis-engaged output never differed from bypassed output"
+        );
+    }
+
+    #[test]
+    fn test_transformer_module_hysteresis_bypass_threads_through() {
+        let mut t = TransformerModule::new(44100.0);
+        assert!(!t.hysteresis_bypass, "default should be hysteresis ON");
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.3,
+            true,
+        );
+        assert!(t.hysteresis_bypass);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.3,
+            0.3,
+            0.3,
+            0.3,
+            0.0,
+            0.0,
+            0.3,
+            false,
+        );
+        assert!(!t.hysteresis_bypass);
+    }
+
+    #[test]
+    fn test_transformer_reset_clears_hysteresis_state() {
+        let mut t = TransformerModule::new(44100.0);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+        );
+        // Pin the play operator away from zero.
+        t.input_transformer.hysteresis.process(0.9, 0.6);
+        t.reset();
+        // A small probe would still be clamped to the old rail if state
+        // survived reset; with a fresh y_prev=0.0 it passes through untouched
+        // (probe is inside the ±r band around 0).
+        let probe = t.input_transformer.hysteresis.process(0.01, 0.6);
+        assert!(
+            (probe - 0.0).abs() < 1.0e-6,
+            "hysteresis state not cleared by reset: {probe}"
+        );
     }
 }

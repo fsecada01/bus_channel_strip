@@ -27,6 +27,13 @@ A new **Linear Phase** switch on the Pultec (parameter `pultec_linear_phase`, of
 - **Low-frequency resolution.** The 513-tap kernel resolves roughly fs/513 (≈ 94 Hz at 48 kHz). HF sections reproduce within a fraction of a dB; the LF boost shelf and its resonant bump are delivered but with a softer corner than minimum-phase mode below ~200 Hz. A longer-kernel "high resolution" option is a planned follow-up.
 - Defaults off, so v1.0 sessions keep their zero-latency behaviour on load.
 
+### Transformer + Sheen WARMTH: hysteresis-modeled saturation (bigger, noticeably-warmer sound change)
+
+A single-cell play-operator hysteresis model — a Preisach-lite approximation of the memory effect in real magnetic tape and transformer cores — is now part of Transformer's saturation core, and available as an optional "tape" sub-mode on Sheen's WARMTH stage. Unlike the plugin's previous memoryless waveshapers, output now depends on recent input history, not just the present sample. Tracked in [#16](https://github.com/fsecada01/bus_channel_strip/issues/16); rationale in [`docs/adr/0012-single-cell-hysteresis-saturation.md`](https://github.com/fsecada01/bus_channel_strip/blob/main/docs/adr/0012-single-cell-hysteresis-saturation.md).
+
+- **Transformer: on by default.** This is a bigger sound change than the TPT filter migration above — sessions with Transformer enabled will sound noticeably warmer than in v1.0. A new `transformer_hysteresis_bypass` switch (default off, meaning hysteresis is ON) restores bit-identical v1.0 saturation for anyone who needs it.
+- **Sheen WARMTH: opt-in.** A new "tape" sub-mode toggle (default off) routes WARMTH through the same hysteresis cell before its existing Inflator-style polynomial. WARMTH's factory-default sound is unchanged unless you turn it on.
+
 ## v1.0.0 — 2026-04
 
 Two major workstreams shipped together: **Sheen** (a hidden master-end polish coat) and a **full multi-fx rack UX redesign** that finally makes module reordering feel native.
