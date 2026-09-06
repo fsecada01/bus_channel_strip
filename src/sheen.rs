@@ -435,11 +435,13 @@ impl SheenModule {
         {
             let up = self.warmth_os[ch].upsample(x, 0);
             for i in 0..OS_FACTOR {
-                let shaped = if self.tape_mode {
-                    inflator(self.warmth_hysteresis[ch].process(up[i], mix))
-                } else {
-                    inflator(up[i])
-                };
+                // Off still calls through with amount=0 (an exact passthrough,
+                // see HysteresisCell::process) rather than skipping the cell
+                // entirely, so y_prev keeps tracking the live signal instead
+                // of freezing at a stale value that would click when tape
+                // mode is re-engaged.
+                let hyst_amount = if self.tape_mode { mix } else { 0.0 };
+                let shaped = inflator(self.warmth_hysteresis[ch].process(up[i], hyst_amount));
                 scratch[i] = dry * up[i] + mix * shaped;
             }
         }

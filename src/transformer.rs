@@ -67,8 +67,11 @@ struct TransformerStage {
     envelope: f32,
 
     /// Play-operator memory (#16, ADR-0012) — driven signal passes through
-    /// this before the model-specific saturation curve.
-    hysteresis: HysteresisCell,
+    /// this before the model-specific saturation curve. One cell per
+    /// channel: `TransformerStage` is a single instance shared by L and R
+    /// (only the oversamplers are per-channel), so a shared cell would let
+    /// each channel's hysteresis state bleed into the other's.
+    hysteresis: [HysteresisCell; 2],
 }
 
 /// Transformer model types
@@ -92,7 +95,7 @@ impl TransformerStage {
             harmonic_state: 0.0,
             compression_amount: 0.0,
             envelope: 0.0,
-            hysteresis: HysteresisCell::new(),
+            hysteresis: [HysteresisCell::new(), HysteresisCell::new()],
         }
     }
 
@@ -108,6 +111,7 @@ impl TransformerStage {
         &mut self,
         input: f32,
         model: TransformerModel,
+        ch: usize,
         hysteresis_bypass: bool,
         os: &mut Oversampler,
         scratch: &mut [f32; TRANSFORMER_OS_FACTOR],
@@ -125,11 +129,17 @@ impl TransformerStage {
             // Borrow ends at end of this scope; copy to scratch so we can
             // mutably re-borrow `os` for downsample.
             for i in 0..TRANSFORMER_OS_FACTOR {
-                let x = if hysteresis_bypass {
-                    up[i]
+                // Bypass still calls through with amount=0 (an exact
+                // passthrough, see HysteresisCell::process) rather than
+                // skipping the cell entirely, so y_prev keeps tracking the
+                // live signal instead of freezing at a stale value that
+                // would click on re-engagement.
+                let hyst_amount = if hysteresis_bypass {
+                    0.0
                 } else {
-                    self.hysteresis.process(up[i], self.saturation_amount)
+                    self.saturation_amount
                 };
+                let x = self.hysteresis[ch].process(up[i], hyst_amount);
                 scratch[i] = saturate_by_model(x, self.saturation_amount, model);
             }
             os.downsample(&scratch[..TRANSFORMER_OS_FACTOR], 0)
@@ -295,6 +305,7 @@ impl TransformerModule {
                 s = self.input_transformer.process_sample(
                     s,
                     self.model,
+                    ch,
                     self.hysteresis_bypass,
                     in_os,
                     &mut scratch,
@@ -313,6 +324,7 @@ impl TransformerModule {
                 s = self.output_transformer.process_sample(
                     s,
                     self.model,
+                    ch,
                     self.hysteresis_bypass,
                     out_os,
                     &mut scratch,
@@ -327,10 +339,14 @@ impl TransformerModule {
     pub fn reset(&mut self) {
         self.input_transformer.envelope = 0.0;
         self.input_transformer.harmonic_state = 0.0;
-        self.input_transformer.hysteresis.reset();
+        for h in &mut self.input_transformer.hysteresis {
+            h.reset();
+        }
         self.output_transformer.envelope = 0.0;
         self.output_transformer.harmonic_state = 0.0;
-        self.output_transformer.hysteresis.reset();
+        for h in &mut self.output_transformer.hysteresis {
+            h.reset();
+        }
         self.input_os_l.reset();
         self.input_os_r.reset();
         self.output_os_l.reset();
@@ -762,8 +778,14 @@ mod tests {
         stage.compression_amount = 0.3;
         for i in 0..1024 {
             let x = (2.0 * core::f32::consts::PI * 0.4 * i as f32).sin(); // ~17.6 kHz
-            let y =
-                stage.process_sample(x, TransformerModel::Vintage, false, &mut os, &mut scratch);
+            let y = stage.process_sample(
+                x,
+                TransformerModel::Vintage,
+                0,
+                false,
+                &mut os,
+                &mut scratch,
+            );
             assert!(y.is_finite(), "non-finite sample {y} at i={i}");
             assert!(y.abs() < 10.0, "implausibly large sample {y} at i={i}");
         }
@@ -793,6 +815,7 @@ mod tests {
             let yb = stage_bypass.process_sample(
                 x,
                 TransformerModel::Vintage,
+                0,
                 true,
                 &mut os_bypass,
                 &mut scratch,
@@ -800,6 +823,7 @@ mod tests {
             let ye = stage_engaged.process_sample(
                 x,
                 TransformerModel::Vintage,
+                0,
                 false,
                 &mut os_engaged,
                 &mut scratch,
@@ -812,6 +836,45 @@ mod tests {
         assert!(
             diverged,
             "hysteresis-engaged output never differed from bypassed output"
+        );
+    }
+
+    /// Regression for the reviewer-confirmed cross-channel bleed: feeding
+    /// distinct L/R signals through the same `TransformerStage` must not let
+    /// one channel's play-operator memory leak into the other's output.
+    #[test]
+    fn test_hysteresis_state_is_independent_per_channel() {
+        let mut os_l = Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
+        let mut os_r = Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
+        let mut scratch = [0.0_f32; TRANSFORMER_OS_FACTOR];
+        let mut stage = TransformerStage::new();
+        stage.drive_gain = 1.8;
+        stage.saturation_amount = 0.6;
+
+        // Drive L hard positive first so its play-operator rail is pinned
+        // high, while R stays silent. If the cells were shared, R would
+        // inherit L's rail state on its very first sample.
+        for _ in 0..64 {
+            stage.process_sample(
+                0.9,
+                TransformerModel::Vintage,
+                0,
+                false,
+                &mut os_l,
+                &mut scratch,
+            );
+        }
+        let r_first = stage.process_sample(
+            0.0,
+            TransformerModel::Vintage,
+            1,
+            false,
+            &mut os_r,
+            &mut scratch,
+        );
+        assert!(
+            r_first.abs() < 1.0e-3,
+            "channel 1 output was contaminated by channel 0's hysteresis state: {r_first}"
         );
     }
 
@@ -860,12 +923,12 @@ mod tests {
             false,
         );
         // Pin the play operator away from zero.
-        t.input_transformer.hysteresis.process(0.9, 0.6);
+        t.input_transformer.hysteresis[0].process(0.9, 0.6);
         t.reset();
         // A small probe would still be clamped to the old rail if state
         // survived reset; with a fresh y_prev=0.0 it passes through untouched
         // (probe is inside the ±r band around 0).
-        let probe = t.input_transformer.hysteresis.process(0.01, 0.6);
+        let probe = t.input_transformer.hysteresis[0].process(0.01, 0.6);
         assert!(
             (probe - 0.0).abs() < 1.0e-6,
             "hysteresis state not cleared by reset: {probe}"
