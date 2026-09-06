@@ -7,6 +7,11 @@ mod oversampler;
 mod params;
 #[cfg(test)]
 mod plugin_integration_tests;
+// Only consumed from `editor.rs` (gui-gated); kept testable in non-gui
+// builds too so `cargo test` always exercises preset save/load and the
+// factory preset library.
+#[cfg(any(feature = "gui", test))]
+mod presets;
 mod shaping;
 mod spectral;
 mod svf;

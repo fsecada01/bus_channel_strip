@@ -1,8 +1,10 @@
 // src/editor.rs
 // Vizia GUI implementation for Bus Channel Strip
 
+use nice_plug::plugin::ParamValue;
 use nice_plug::prelude::*;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
@@ -10,6 +12,7 @@ use vizia_plug::widgets::{ParamButton, ParamButtonExt, ParamSlider, RawParamEven
 use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
 use crate::components::{self, ModuleTheme};
+use crate::presets::{self, Preset};
 use crate::spectral;
 use crate::styles::COMPONENT_STYLES;
 use crate::{BusChannelStripParams, ModuleType};
@@ -29,7 +32,7 @@ pub enum DropPos {
     After,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum AppEvent {
     /// Emitted from a slot's `on_drag` callback the moment vizia detects
     /// drag-start (cursor leaves source view with LMB held). Sets the
@@ -93,6 +96,19 @@ pub enum AppEvent {
         freq: f32,
         threshold_db: f32,
     },
+    /// Show/hide the preset browser panel. Wired to the header's preset-name
+    /// pill (issue #21) — distinct from `LoadChain`, which only rewrites
+    /// routing: this loads a *full* plugin preset (all ~152 params).
+    TogglePresetBrowser,
+    /// Apply a full preset via `GuiContext::set_state` — a complete,
+    /// deterministic reset of every parameter to the preset's stored values.
+    LoadPreset(Arc<Preset>),
+    /// Snapshot every current parameter value and save it as a new user
+    /// preset under `~/Documents/Bus Channel Strip/Presets/`, named from
+    /// `Data::preset_save_name`.
+    SaveUserPreset,
+    /// Live-updates `Data::preset_save_name` as the save-name textbox is edited.
+    SetPresetSaveName(String),
 }
 
 // ============================================================================
@@ -154,7 +170,22 @@ pub struct Data {
     /// Host callback surface. `AppEvent::SetZoom` uses this to ask the host
     /// to actually resize the plugin window once the new size has been
     /// written into `editor_state` (see `GuiContext::request_resize`).
+    /// Also used by `AppEvent::LoadPreset` (`set_state`) to apply a full
+    /// preset (issue #21).
     pub gui_context: Arc<dyn GuiContext>,
+    /// The ~20 factory presets (issue #21). Computed once at editor spawn —
+    /// never changes at runtime, so it's a plain `Arc`, not a `Signal`.
+    pub factory_presets: Arc<Vec<Preset>>,
+    /// Presets the user has saved, loaded from `presets::presets_dir()` at
+    /// editor spawn and refreshed after every `SaveUserPreset`.
+    pub user_presets: Signal<Vec<Preset>>,
+    /// Whether the preset browser panel is visible.
+    pub preset_browser_open: Signal<bool>,
+    /// The preset currently applied to the plugin (if any) — drives the
+    /// header's name display and the diverged-from-preset "dirty" dot.
+    pub loaded_preset: Signal<Option<Arc<Preset>>>,
+    /// Live text of the "save current as" textbox in the preset browser.
+    pub preset_save_name: Signal<String>,
 }
 
 impl Model for Data {
@@ -447,6 +478,49 @@ impl Model for Data {
                 }
                 self.drag_source.set(None);
                 self.drop_target.set(None);
+            }
+
+            AppEvent::TogglePresetBrowser => {
+                self.preset_browser_open.update(|open| *open = !*open);
+            }
+
+            AppEvent::LoadPreset(preset) => {
+                // A complete, deterministic reset: nice-plug's own
+                // `set_state()` writes every value in `preset.params` and
+                // leaves the (deliberately omitted) `fields` map — and
+                // therefore #[persist] GUI state like window zoom — alone.
+                // The host rescan this triggers flows back to us as
+                // `RawParamEvent::ParametersChanged`, which bumps
+                // `params_gen` and refreshes every bound widget.
+                let state = PluginState {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    params: preset.params.clone(),
+                    fields: BTreeMap::new(),
+                };
+                self.gui_context.set_state(state);
+                self.loaded_preset.set(Some(preset.clone()));
+            }
+
+            AppEvent::SaveUserPreset => {
+                let name = self.preset_save_name.get();
+                let name = if name.trim().is_empty() {
+                    "Untitled".to_string()
+                } else {
+                    name
+                };
+                let params = presets::extract_param_values(self.params.as_ref());
+                let preset = Preset::new(name, "User", params);
+                if presets::save_user_preset(&preset).is_ok() {
+                    self.loaded_preset.set(Some(Arc::new(preset)));
+                    if let Ok(mut saved) = presets::list_user_presets() {
+                        saved.sort_by(|a, b| a.name.cmp(&b.name));
+                        self.user_presets.set(saved);
+                    }
+                }
+            }
+
+            AppEvent::SetPresetSaveName(name) => {
+                self.preset_save_name.set(name.clone());
             }
         });
     }
@@ -1106,6 +1180,15 @@ pub(crate) fn create(
             editor_state: editor_state_for_data.clone(),
             focused_slot: Signal::new(None),
             gui_context: gui_cx,
+            factory_presets: Arc::new(presets::factory_presets()),
+            user_presets: Signal::new({
+                let mut saved = presets::list_user_presets().unwrap_or_default();
+                saved.sort_by(|a, b| a.name.cmp(&b.name));
+                saved
+            }),
+            preset_browser_open: Signal::new(false),
+            loaded_preset: Signal::new(None),
+            preset_save_name: Signal::new(String::new()),
         }
         .build(cx);
 
@@ -1180,6 +1263,12 @@ pub(crate) fn create(
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0));
 
+                // Preset name + diverged-from-preset dot + browser toggle
+                // (issue #21). Distinct from the chain-preset selector below:
+                // this loads/saves a *full* plugin preset (all ~152 params),
+                // not just routing order.
+                build_preset_header_pill(cx);
+
                 // Chain preset selector — centered, takes remaining space.
                 // One button per stock chain; clicking writes all 7
                 // module_order_* params atomically. Replaces the old
@@ -1226,6 +1315,10 @@ pub(crate) fn create(
                 .class("strip-scroll")
                 .height(Stretch(1.0))
                 .width(Stretch(1.0));
+
+                // Preset browser panel (issue #21) — right-hand column,
+                // hidden by default. Toggled by the header's preset pill.
+                build_preset_browser_panel(cx);
             })
             .height(Stretch(1.0))
             .width(Stretch(1.0))
@@ -1405,6 +1498,145 @@ fn build_library_sidebar(cx: &mut Context) {
     .height(Stretch(1.0))
     .width(Pixels(72.0))
     .gap(Pixels(2.0));
+}
+
+// ============================================================================
+// Preset Browser (issue #21)
+// ============================================================================
+//
+// A *full* plugin preset — every ~152 automatable parameter, applied via
+// `GuiContext::set_state()` — as opposed to the chain-preset selector above,
+// which only rewrites the 7 `module_order_*` routing params. Two pieces:
+//   - `build_preset_header_pill`: shows the loaded preset's name plus a
+//     dot when the live params have diverged from it, and toggles the panel.
+//   - `build_preset_browser_panel`: categorized factory list + a dynamic
+//     user-preset list + a "save current as" row. Hidden by default.
+
+/// Category display order for the factory library — must match every
+/// category string used in `presets::factory_presets()`.
+const FACTORY_PRESET_CATEGORIES: &[&str] =
+    &["Drums", "Vocals", "Voice", "Mastering", "Instruments"];
+
+/// True if `preset`'s stored values exactly match `current` (both keyed by
+/// parameter id). Drives the header's diverged-from-preset dot.
+fn preset_matches_current(preset: &Preset, current: &BTreeMap<String, ParamValue>) -> bool {
+    preset.params.len() == current.len()
+        && preset.params.iter().all(|(id, value)| {
+            current
+                .get(id)
+                .is_some_and(|cur| presets::param_values_equal(value, cur))
+        })
+}
+
+fn build_preset_header_pill(cx: &mut Context) {
+    let loaded_preset_signal = cx.data::<Data>().loaded_preset;
+    let params_gen_signal = cx.data::<Data>().params_gen;
+    let params_for_diff = cx.data::<Data>().params.clone();
+
+    let dirty_memo = Memo::<bool>::new(move |_| {
+        params_gen_signal.get();
+        match loaded_preset_signal.get() {
+            Some(preset) => {
+                let current = presets::extract_param_values(params_for_diff.as_ref());
+                !preset_matches_current(&preset, &current)
+            }
+            None => false,
+        }
+    });
+    let name_memo = loaded_preset_signal.map(|p| {
+        p.as_ref()
+            .map(|preset| preset.name.clone())
+            .unwrap_or_else(|| "No Preset".to_string())
+    });
+
+    HStack::new(cx, |cx| {
+        Label::new(cx, name_memo).class("preset-name-label");
+        Label::new(cx, "\u{25CF}")
+            .class("preset-dirty-dot")
+            .display(dirty_memo.map(|d| if *d { Display::Flex } else { Display::None }));
+    })
+    .class("preset-header-btn")
+    .on_press(|cx| cx.emit(AppEvent::TogglePresetBrowser))
+    .cursor(CursorIcon::Hand)
+    .height(Pixels(28.0))
+    .width(Auto)
+    .gap(Pixels(4.0))
+    .alignment(Alignment::Center);
+}
+
+/// One clickable row for a single preset — shared by the factory and user
+/// sections below.
+fn preset_row(cx: &mut Context, preset: Preset) {
+    let preset = Arc::new(preset);
+    let name = preset.name.clone();
+    Label::new(cx, name)
+        .class("preset-row")
+        .on_press(move |cx| cx.emit(AppEvent::LoadPreset(preset.clone())))
+        .cursor(CursorIcon::Hand)
+        .height(Pixels(24.0))
+        .width(Stretch(1.0));
+}
+
+fn build_preset_browser_panel(cx: &mut Context) {
+    let open_signal = cx.data::<Data>().preset_browser_open;
+    let factory_presets = cx.data::<Data>().factory_presets.clone();
+    let user_presets_signal = cx.data::<Data>().user_presets;
+    let save_name_signal = cx.data::<Data>().preset_save_name;
+
+    ScrollView::new(cx, move |cx| {
+        VStack::new(cx, |cx| {
+            Label::new(cx, "PRESETS").class("preset-browser-header");
+
+            // Save the current full param state as a new user preset.
+            HStack::new(cx, |cx| {
+                Textbox::new(cx, save_name_signal)
+                    .on_edit(|cx, text| cx.emit(AppEvent::SetPresetSaveName(text)))
+                    .width(Stretch(1.0));
+                Label::new(cx, "SAVE")
+                    .class("preset-save-btn")
+                    .on_press(|cx| cx.emit(AppEvent::SaveUserPreset))
+                    .cursor(CursorIcon::Hand);
+            })
+            .class("preset-save-row")
+            .height(Pixels(28.0))
+            .gap(Pixels(4.0));
+
+            // Factory presets, grouped by category (single-click load).
+            for category in FACTORY_PRESET_CATEGORIES {
+                let rows: Vec<Preset> = factory_presets
+                    .iter()
+                    .filter(|p| p.category == *category)
+                    .cloned()
+                    .collect();
+                if rows.is_empty() {
+                    continue;
+                }
+                Label::new(cx, *category).class("preset-category-label");
+                for preset in rows {
+                    preset_row(cx, preset);
+                }
+            }
+
+            // User presets — dynamic, rebuilds on every save.
+            Label::new(cx, "User").class("preset-category-label");
+            Binding::new(cx, user_presets_signal, move |cx| {
+                let user_presets = user_presets_signal.get();
+                if user_presets.is_empty() {
+                    Label::new(cx, "No saved presets yet").class("preset-empty-hint");
+                } else {
+                    for preset in user_presets {
+                        preset_row(cx, preset);
+                    }
+                }
+            });
+        })
+        .gap(Pixels(4.0))
+        .width(Stretch(1.0));
+    })
+    .class("preset-browser-panel")
+    .width(Pixels(220.0))
+    .height(Stretch(1.0))
+    .display(open_signal.map(|open| if *open { Display::Flex } else { Display::None }));
 }
 
 // Chain preset selector — horizontal row of compact buttons in the chassis

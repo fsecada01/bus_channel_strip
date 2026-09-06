@@ -434,6 +434,102 @@ pub const COMPONENT_STYLES: &str = r#"
     width: 1s;
 }
 
+/* ── Preset browser (issue #21) ────────────────────────────────────────────
+   Header pill shows the loaded preset name + a diverged-from-preset dot;
+   the panel is a right-hand column (hidden by default) listing factory
+   presets by category plus a dynamic user-preset list and a save row. */
+
+.preset-header-btn {
+    background: linear-gradient(180deg, #222730, #1b1f27);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    padding: 4px 10px;
+    alignment: center;
+}
+.preset-header-btn:hover {
+    background: linear-gradient(180deg, #2c3340, #242a36);
+    border-color: rgba(180, 200, 255, 0.3);
+}
+.preset-name-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #c0c8d4;
+    letter-spacing: 0.6px;
+    height: 14px;
+    width: Auto;
+}
+.preset-dirty-dot {
+    font-size: 9px;
+    color: #ffc85a;
+    width: Auto;
+    height: 14px;
+}
+
+.preset-browser-panel {
+    background: linear-gradient(180deg, rgba(20, 23, 30, 0.85), rgba(14, 16, 22, 0.9));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.preset-browser-header {
+    font-size: 10px;
+    font-weight: 800;
+    color: #8c98a8;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    height: 14px;
+    width: 1s;
+}
+
+.preset-save-row {
+    alignment: center;
+}
+.preset-save-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #c0c8d4;
+    letter-spacing: 0.6px;
+}
+.preset-save-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.preset-category-label {
+    font-size: 9px;
+    font-weight: 800;
+    color: #6c98d4;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    height: 14px;
+    width: 1s;
+    top: 4px;
+}
+
+.preset-row {
+    padding: 2px 6px;
+    font-size: 11px;
+    color: #c8d0dc;
+    background: transparent;
+    border-radius: 3px;
+}
+.preset-row:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+}
+
+.preset-empty-hint {
+    font-size: 10px;
+    font-style: italic;
+    color: #6c7686;
+    height: 16px;
+    width: 1s;
+}
+
 /* ── Drag-and-drop: source + eligible target + active hover ────────────────
    Vizia's on_drag/on_drop API drives reorder. Three visual states:
 
