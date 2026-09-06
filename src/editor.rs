@@ -154,6 +154,8 @@ pub struct Data {
     pub analysis_requested: Arc<AtomicBool>,
     /// Shared with the audio thread — read after analysis completes.
     pub analysis_result: Arc<spectral::AnalysisResult>,
+    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading (issue #19).
+    pub true_peak_data: Arc<spectral::TruePeakData>,
     /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
     /// Applied via toggle_class to the chassis root for live CSS rescaling, and also
     /// drives a real host window resize (see `AppEvent::SetZoom`).
@@ -1145,6 +1147,7 @@ pub(crate) fn create(
     analysis_requested: Arc<AtomicBool>,
     analysis_result: Arc<spectral::AnalysisResult>,
     gr_data: Arc<spectral::GainReductionData>,
+    true_peak_data: Arc<spectral::TruePeakData>,
 ) -> Option<Box<dyn Editor>> {
     let editor_state_for_data = editor_state.clone();
     create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, gui_cx| {
@@ -1176,6 +1179,7 @@ pub(crate) fn create(
             dyneq_expand_gen: Signal::new(0),
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
+            true_peak_data: true_peak_data.clone(),
             zoom_level: Signal::new(initial_zoom),
             editor_state: editor_state_for_data.clone(),
             focused_slot: Signal::new(None),
@@ -2876,6 +2880,83 @@ impl View for SpectrumCanvas {
 }
 
 // ============================================================================
+// Punch True-Peak Meter — issue #19
+// ============================================================================
+//
+// Small horizontal-bar meter surfacing Punch's ITU-R BS.1770-4 true-peak
+// reading in the module's control panel. Follows the same lock-free-atomic
+// + custom-View-draw() pattern as `SpectrumCanvas`'s gain-reduction display
+// above: the audio thread publishes dBTP readings via `TruePeakData`
+// (Relaxed — display only), and this view re-reads them every frame.
+
+/// Meter floor (dBTP) — values at or below this render as an empty bar.
+const TRUE_PEAK_METER_FLOOR_DB: f32 = -24.0;
+/// Meter ceiling (dBTP) — values at or above this render as a full bar.
+const TRUE_PEAK_METER_CEILING_DB: f32 = 3.0;
+/// Above this reading the bar renders in the "over" warning color.
+const TRUE_PEAK_WARN_DB: f32 = -1.0;
+
+struct PunchTruePeakMeter {
+    true_peak_data: Arc<spectral::TruePeakData>,
+}
+
+impl PunchTruePeakMeter {
+    fn new(cx: &mut Context, true_peak_data: Arc<spectral::TruePeakData>) -> Handle<'_, Self> {
+        Self { true_peak_data }.build(cx, |_cx| {})
+    }
+}
+
+impl View for PunchTruePeakMeter {
+    fn element(&self) -> Option<&'static str> {
+        Some("true-peak-meter")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        use vizia_plug::vizia::vg;
+
+        let bounds = cx.bounds();
+        if bounds.w < 1.0 || bounds.h < 1.0 {
+            return;
+        }
+
+        let db = [
+            f32::from_bits(self.true_peak_data.channels[0].load(Ordering::Relaxed)),
+            f32::from_bits(self.true_peak_data.channels[1].load(Ordering::Relaxed)),
+        ];
+
+        let mut bg_paint = vg::Paint::default();
+        bg_paint.set_color(vg::Color::from_argb(255, 18, 25, 31));
+        bg_paint.set_style(vg::PaintStyle::Fill);
+        canvas.draw_rect(
+            vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h),
+            &bg_paint,
+        );
+
+        let bar_h = (bounds.h - 2.0) / 2.0;
+        for (i, &ch_db) in db.iter().enumerate() {
+            let norm = ((ch_db - TRUE_PEAK_METER_FLOOR_DB)
+                / (TRUE_PEAK_METER_CEILING_DB - TRUE_PEAK_METER_FLOOR_DB))
+                .clamp(0.0, 1.0);
+            let y = bounds.y + i as f32 * (bar_h + 2.0);
+            let w = norm * bounds.w;
+
+            let mut bar_paint = vg::Paint::default();
+            if ch_db >= TRUE_PEAK_WARN_DB {
+                bar_paint.set_color(vg::Color::from_argb(220, 230, 90, 60)); // over: red-orange
+            } else {
+                bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160)); // nominal: teal-green
+            }
+            bar_paint.set_style(vg::PaintStyle::Fill);
+            if w > 0.5 {
+                canvas.draw_rect(vg::Rect::from_xywh(bounds.x, y, w, bar_h), &bar_paint);
+            }
+        }
+
+        cx.needs_redraw();
+    }
+}
+
+// ============================================================================
 // DynEQ Band Column — macro-based component
 // ============================================================================
 //
@@ -3489,6 +3570,13 @@ fn build_transformer_controls(cx: &mut Context) {
 fn build_punch_controls(cx: &mut Context) {
     #[cfg(feature = "punch")]
     VStack::new(cx, |cx| {
+        components::module_section(cx, "TRUE PEAK", |cx| {
+            let true_peak_data = cx.data::<Data>().true_peak_data.clone();
+            PunchTruePeakMeter::new(cx, true_peak_data)
+                .class("punch-true-peak-meter")
+                .height(Pixels(20.0))
+                .width(Stretch(1.0));
+        });
         components::module_section(cx, "CLIPPER", |cx| {
             components::module_row(cx, |cx| {
                 components::create_gain_slider(

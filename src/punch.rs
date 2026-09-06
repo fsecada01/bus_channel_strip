@@ -297,6 +297,92 @@ fn apply_clipping(input: f32, threshold: f32, softness: f32, mode: ClipMode) -> 
 }
 
 // ============================================================================
+// True-Peak Detector (ITU-R BS.1770-4)
+// ============================================================================
+
+/// Oversampling factor used for true-peak measurement. ITU-R BS.1770-4
+/// requires a minimum of 4x oversampling for intersample-peak detection; it
+/// does not mandate a specific interpolation kernel, only adequate stopband
+/// attenuation, so the existing halfband-Kaiser `Oversampler` (~-40 dB
+/// stopband) satisfies the spirit of the standard.
+const TRUE_PEAK_OS_FACTOR: usize = 4;
+
+/// How long a peak reading is held before it starts decaying, in ms. Long
+/// enough that a brief true-peak excursion stays legible on the meter.
+const TRUE_PEAK_HOLD_MS: f32 = 300.0;
+
+/// Decay rate once the hold period elapses, in dB/s — a standard PPM-style
+/// ballistic (fast enough to track program material, slow enough to read).
+const TRUE_PEAK_DECAY_DB_PER_S: f32 = 20.0;
+
+/// Floor value (dBTP) reported before any audio has driven the detector.
+const TRUE_PEAK_FLOOR_DB: f32 = -120.0;
+
+/// ITU-R BS.1770-4 true-peak (intersample-peak) detector for a single
+/// channel.
+///
+/// Wraps a dedicated 4x `Oversampler` used only for its `upsample()` half —
+/// true-peak metering never reconstructs back to the native rate, so
+/// `downsample()` is never called. The true peak of a sample interval is
+/// `max(|s|)` across the 4 interpolated points the oversampler produces for
+/// that interval, approximating the peak of the reconstructed continuous
+/// waveform between the two surrounding samples.
+struct TruePeakDetector {
+    oversampler: Oversampler,
+    /// Current metered value in dBTP, with peak-hold-then-decay ballistics.
+    held_peak_db: f32,
+    /// Samples remaining in the current hold period.
+    hold_counter: usize,
+    hold_samples: usize,
+    decay_db_per_sample: f32,
+}
+
+impl TruePeakDetector {
+    fn new(sample_rate: f32, max_block_size: usize) -> Self {
+        Self {
+            oversampler: Oversampler::new_at_factor(TRUE_PEAK_OS_FACTOR, max_block_size),
+            held_peak_db: TRUE_PEAK_FLOOR_DB,
+            hold_counter: 0,
+            hold_samples: ((sample_rate * TRUE_PEAK_HOLD_MS / 1000.0) as usize).max(1),
+            decay_db_per_sample: TRUE_PEAK_DECAY_DB_PER_S / sample_rate.max(1.0),
+        }
+    }
+
+    /// Process one input sample, updating the held true-peak reading.
+    /// `idx` is this sample's position within the current block (see
+    /// `Oversampler::upsample`).
+    #[inline]
+    fn process(&mut self, input: f32, idx: usize) {
+        let upsampled = self.oversampler.upsample(input, idx);
+        let mut block_peak = 0.0f32;
+        for &s in upsampled {
+            block_peak = block_peak.max(s.abs());
+        }
+        let block_peak_db = linear_to_db(block_peak);
+
+        if block_peak_db >= self.held_peak_db {
+            self.held_peak_db = block_peak_db;
+            self.hold_counter = self.hold_samples;
+        } else if self.hold_counter > 0 {
+            self.hold_counter -= 1;
+        } else {
+            self.held_peak_db = (self.held_peak_db - self.decay_db_per_sample).max(block_peak_db);
+        }
+    }
+
+    /// Current metered true-peak value in dBTP.
+    fn value_db(&self) -> f32 {
+        self.held_peak_db
+    }
+
+    fn reset(&mut self) {
+        self.oversampler.reset();
+        self.held_peak_db = TRUE_PEAK_FLOOR_DB;
+        self.hold_counter = 0;
+    }
+}
+
+// ============================================================================
 // Punch Module - Main Processor
 // ============================================================================
 
@@ -340,6 +426,8 @@ pub struct PunchModule {
     // Metering (for GUI)
     current_gain_reduction: f32,
     current_transient_activity: f32,
+    true_peak_l: TruePeakDetector,
+    true_peak_r: TruePeakDetector,
 }
 
 impl PunchModule {
@@ -387,6 +475,8 @@ impl PunchModule {
             // Metering
             current_gain_reduction: 0.0,
             current_transient_activity: 0.0,
+            true_peak_l: TruePeakDetector::new(sample_rate, Self::MAX_BLOCK_SIZE),
+            true_peak_r: TruePeakDetector::new(sample_rate, Self::MAX_BLOCK_SIZE),
         }
     }
 
@@ -565,6 +655,16 @@ impl PunchModule {
                 let mixed = dry * (1.0 - self.mix) + wet * self.mix;
                 let output = mixed * self.output_gain;
 
+                // 7. True-peak metering on the final output (ITU-R BS.1770-4,
+                //    issue #19) — measured post-everything so the meter
+                //    reflects what will actually hit the DAC.
+                let true_peak_detector = if ch_idx == 0 {
+                    &mut self.true_peak_l
+                } else {
+                    &mut self.true_peak_r
+                };
+                true_peak_detector.process(output, sample_idx);
+
                 // SAFETY: sample_ptr is valid and aligned (set above from NIH-plug buffer).
                 unsafe {
                     *sample_ptr = output;
@@ -586,6 +686,8 @@ impl PunchModule {
         self.oversampler_r.reset();
         self.current_gain_reduction = 0.0;
         self.current_transient_activity = 0.0;
+        self.true_peak_l.reset();
+        self.true_peak_r.reset();
     }
 
     /// Get current gain reduction (0.0 - 1.0) for metering.
@@ -601,6 +703,12 @@ impl PunchModule {
     pub fn get_transient_activity(&self) -> f32 {
         self.current_transient_activity
     }
+
+    /// Current true-peak reading (dBTP) for each channel, per ITU-R
+    /// BS.1770-4 — surfaced to the Punch GUI meter (issue #19).
+    pub fn get_true_peak_db(&self) -> (f32, f32) {
+        (self.true_peak_l.value_db(), self.true_peak_r.value_db())
+    }
 }
 
 // ============================================================================
@@ -615,7 +723,6 @@ fn db_to_linear(db: f32) -> f32 {
 
 /// Convert linear gain to decibels
 #[inline]
-#[allow(dead_code)]
 fn linear_to_db(linear: f32) -> f32 {
     if linear > 0.0 {
         20.0 * linear.log10()
@@ -735,6 +842,166 @@ mod tests {
 
         // +6dB should be ~2.0
         assert!((db_to_linear(6.0) - 1.995).abs() < 0.01);
+    }
+
+    // ── True-Peak Detector (ITU-R BS.1770-4, issue #19) ─────────────────────
+
+    /// Intersample-peak conformance-style test: a sine at Fs/3 (three
+    /// samples per cycle) rarely lands a sample exactly on the waveform's
+    /// true peak, so the sample-domain peak understates the reconstructed
+    /// continuous-time peak. A true-peak detector must recover a reading
+    /// closer to the actual amplitude than the raw sample peak does.
+    #[test]
+    fn test_true_peak_detector_exceeds_sample_domain_peak() {
+        let sr = 44_100.0_f32;
+        let mut detector = TruePeakDetector::new(sr, 4096);
+        let amplitude = 0.9_f32;
+        let two_pi = core::f32::consts::TAU;
+        let cycle_samples = 3.0_f32; // Fs/3 — 3 samples per cycle, no phase alignment to the peak.
+
+        let mut raw_sample_peak = 0.0f32;
+        let n = 300;
+        for idx in 0..n {
+            let x = amplitude * (two_pi * idx as f32 / cycle_samples).sin();
+            raw_sample_peak = raw_sample_peak.max(x.abs());
+            detector.process(x, idx % 4096);
+        }
+
+        // Sample-domain peak is well below the true amplitude for this
+        // deliberately mis-aligned sampling — that's the whole premise of
+        // needing a true-peak (not sample-peak) meter.
+        assert!(
+            raw_sample_peak < 0.85,
+            "raw sample peak should understate the true amplitude, got {raw_sample_peak}"
+        );
+
+        let true_peak_db = detector.value_db();
+        let raw_sample_peak_db = linear_to_db(raw_sample_peak);
+        assert!(
+            true_peak_db > raw_sample_peak_db,
+            "true-peak reading ({true_peak_db} dBTP) should exceed the raw sample peak \
+             ({raw_sample_peak_db} dBTP) for an intersample-peak signal"
+        );
+        // Should recover close to the actual 0.9 amplitude (~-0.92 dBTP),
+        // allowing headroom for halfband-FIR passband ripple/interpolation error.
+        let expected_db = linear_to_db(amplitude);
+        assert!(
+            (true_peak_db - expected_db).abs() < 1.0,
+            "true-peak reading ({true_peak_db} dBTP) should be close to the actual \
+             amplitude ({expected_db} dBTP)"
+        );
+    }
+
+    #[test]
+    fn test_true_peak_detector_starts_at_floor() {
+        let detector = TruePeakDetector::new(44_100.0, 512);
+        assert!(
+            (detector.value_db() - TRUE_PEAK_FLOOR_DB).abs() < 0.01,
+            "Fresh detector should start at the floor, got {}",
+            detector.value_db()
+        );
+    }
+
+    #[test]
+    fn test_true_peak_detector_holds_then_decays() {
+        let sr = 44_100.0_f32;
+        let mut detector = TruePeakDetector::new(sr, 512);
+
+        // One loud sample, then silence. The cascaded halfband FIRs have
+        // group delay, so the impulse's filtered peak doesn't appear at the
+        // very next call — give it a window to propagate through both
+        // stages before reading.
+        detector.process(0.99, 0);
+        for idx in 1..50 {
+            detector.process(0.0, idx);
+        }
+        let peak_after_hit = detector.value_db();
+        assert!(
+            peak_after_hit > -6.0,
+            "should register a near-0dBTP hit after the FIR group delay, got {peak_after_hit}"
+        );
+
+        // Shortly after, still within the hold window — should not have decayed.
+        for idx in 50..60 {
+            detector.process(0.0, idx % 512);
+        }
+        assert!(
+            (detector.value_db() - peak_after_hit).abs() < 0.01,
+            "value should be held steady shortly after the peak"
+        );
+
+        // Run well past the hold window with silence — should decay toward the floor.
+        // Decay is 20 dB/s; budget enough extra samples past the hold window
+        // for a clearly-measurable (>3 dB) drop.
+        let hold_samples = (sr * TRUE_PEAK_HOLD_MS / 1000.0) as usize;
+        for idx in 0..(hold_samples + 10_000) {
+            detector.process(0.0, idx % 512);
+        }
+        assert!(
+            detector.value_db() < peak_after_hit - 3.0,
+            "value should have decayed well below the initial peak after hold+decay, \
+             got {} (was {peak_after_hit})",
+            detector.value_db()
+        );
+    }
+
+    #[test]
+    fn test_true_peak_detector_reset() {
+        let mut detector = TruePeakDetector::new(44_100.0, 512);
+        detector.process(0.99, 0);
+        for idx in 1..50 {
+            detector.process(0.0, idx);
+        }
+        assert!(detector.value_db() > TRUE_PEAK_FLOOR_DB + 1.0);
+
+        detector.reset();
+        assert!(
+            (detector.value_db() - TRUE_PEAK_FLOOR_DB).abs() < 0.01,
+            "reset() should return the detector to the floor"
+        );
+    }
+
+    #[test]
+    fn test_punch_module_true_peak_getter_reports_hot_signal() {
+        let sr = 44_100.0_f32;
+        let mut punch = PunchModule::new(sr);
+        punch.update_parameters(
+            -1.0,                   // threshold
+            ClipMode::Hard,         // mode
+            0.0,                    // softness
+            OversamplingFactor::X4, // oversampling
+            0.0,                    // attack
+            0.0,                    // sustain
+            5.0,                    // attack_time
+            100.0,                  // release_time
+            0.5,                    // sensitivity
+            0.0,                    // input gain
+            0.0,                    // output gain
+            1.0,                    // mix (fully wet)
+            20.0,                   // wet HPF (off)
+        );
+
+        let n = 256;
+        let mut l: Vec<f32> = (0..n)
+            .map(|i| 0.95 * (core::f32::consts::TAU * 3.0 * i as f32 / n as f32).sin())
+            .collect();
+        let mut r = l.clone();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        punch.process(&mut buf);
+
+        let (peak_l, peak_r) = punch.get_true_peak_db();
+        assert!(
+            peak_l > -6.0 && peak_r > -6.0,
+            "a near-full-scale sine driven through the clipper should report a \
+             true-peak reading close to its ceiling, got L={peak_l} R={peak_r}"
+        );
     }
 
     #[test]

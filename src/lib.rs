@@ -218,6 +218,11 @@ struct BusChannelStrip {
     analysis_result: Arc<spectral::AnalysisResult>,
     /// audio → GUI: per-band gain reduction for the DynEQ spectrum display.
     gr_data: Arc<spectral::GainReductionData>,
+    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading (issue #19).
+    /// Not feature-gated behind "punch" — kept unconditional so the field
+    /// always exists and threads through `editor::create()` uniformly; it's
+    /// simply never written to when the "punch" feature is disabled.
+    true_peak_data: Arc<spectral::TruePeakData>,
 
     /// Smoothed auto-gain correction factor (linear, 1.0 = unity).
     /// Updated per buffer; reset to 1.0 when auto-gain is disabled.
@@ -289,6 +294,7 @@ impl Default for BusChannelStrip {
             analysis_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             analysis_result: Arc::new(spectral::AnalysisResult::new()),
             gr_data: Arc::new(spectral::GainReductionData::new()),
+            true_peak_data: Arc::new(spectral::TruePeakData::new()),
             auto_gain_correction: 1.0,
         }
     }
@@ -713,6 +719,14 @@ impl BusChannelStrip {
         if !self.params.punch.punch_bypass.value() {
             self.punch.process(buffer);
         }
+
+        // Publish the true-peak meter reading to the GUI (Relaxed — display only).
+        {
+            use std::sync::atomic::Ordering;
+            let (peak_l, peak_r) = self.punch.get_true_peak_db();
+            self.true_peak_data.channels[0].store(peak_l.to_bits(), Ordering::Relaxed);
+            self.true_peak_data.channels[1].store(peak_r.to_bits(), Ordering::Relaxed);
+        }
     }
 
     /// Dispatch a single module by type, honoring feature flags.
@@ -843,6 +857,7 @@ impl Plugin for BusChannelStrip {
             self.analysis_requested.clone(),
             self.analysis_result.clone(),
             self.gr_data.clone(),
+            self.true_peak_data.clone(),
         )
     }
 

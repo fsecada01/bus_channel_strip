@@ -67,7 +67,11 @@ impl Default for PunchParams {
             #[cfg(feature = "punch")]
             punch_threshold: FloatParam::new(
                 "Clip Threshold",
-                -0.1, // -0.1dB default (gentle, near 0dB ceiling)
+                // -1.0 dBTP default (issue #19): leaves ~1dB of headroom for
+                // DAC reconstruction/intersample overshoot, per the common
+                // mastering convention. Was -0.1 dB prior to true-peak
+                // detection landing.
+                -1.0,
                 FloatRange::Linear {
                     min: -12.0,
                     max: 0.0,

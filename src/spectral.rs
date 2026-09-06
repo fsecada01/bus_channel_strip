@@ -142,6 +142,41 @@ impl Default for GainReductionData {
     }
 }
 
+// ── TruePeakData ──────────────────────────────────────────────────────────────
+//
+// Lock-free per-channel true-peak (ITU-R BS.1770-4 intersample-peak) reading
+// written by the audio thread and read by the GUI thread for Punch's
+// true-peak meter (issue #19). Relaxed ordering is sufficient — display only.
+
+/// Lock-free stereo true-peak reading (dBTP) shared with the GUI thread.
+pub struct TruePeakData {
+    /// Left/right true-peak level in dBTP, as raw f32 bits. Initialized to
+    /// a very low floor (silence) rather than 0.0 dB, since 0.0 would read
+    /// as "at full scale" for a meter that hasn't processed any audio yet.
+    pub channels: [AtomicU32; 2],
+}
+
+/// Floor value (dBTP) a fresh/reset `TruePeakData` reports before any audio
+/// has been processed.
+pub const TRUE_PEAK_FLOOR_DB: f32 = -120.0;
+
+impl TruePeakData {
+    pub fn new() -> Self {
+        Self {
+            channels: [
+                AtomicU32::new(TRUE_PEAK_FLOOR_DB.to_bits()),
+                AtomicU32::new(TRUE_PEAK_FLOOR_DB.to_bits()),
+            ],
+        }
+    }
+}
+
+impl Default for TruePeakData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +333,32 @@ mod tests {
         assert!(
             (recovered - test_db).abs() < 1e-6,
             "GR write/read: expected {test_db}, got {recovered}"
+        );
+    }
+
+    // ── TruePeakData ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_true_peak_data_initialized_to_floor() {
+        let tpd = TruePeakData::new();
+        for (i, ch) in tpd.channels.iter().enumerate() {
+            let val = f32::from_bits(ch.load(Ordering::Relaxed));
+            assert!(
+                (val - TRUE_PEAK_FLOOR_DB).abs() < 1e-6,
+                "Channel {i} should init at the floor ({TRUE_PEAK_FLOOR_DB} dBTP), got {val}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_true_peak_data_write_read() {
+        let tpd = TruePeakData::new();
+        let test_db = -0.8_f32;
+        tpd.channels[1].store(test_db.to_bits(), Ordering::Relaxed);
+        let recovered = f32::from_bits(tpd.channels[1].load(Ordering::Relaxed));
+        assert!(
+            (recovered - test_db).abs() < 1e-6,
+            "True-peak write/read: expected {test_db}, got {recovered}"
         );
     }
 
