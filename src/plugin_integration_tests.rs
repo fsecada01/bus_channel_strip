@@ -52,9 +52,9 @@ mod plugin_integration_tests {
     #[test]
     fn test_pultec_lf_boost_param_range_is_db() {
         let plugin = BusChannelStrip::default();
-        let range = plugin.params.pultec_lf_boost_gain.range();
+        let range = plugin.params.pultec.pultec_lf_boost_gain.range();
         let max_db = range.unnormalize(1.0);
-        let default_db = plugin.params.pultec_lf_boost_gain.value();
+        let default_db = plugin.params.pultec.pultec_lf_boost_gain.value();
         assert!(
             (max_db - 18.0).abs() < 0.01,
             "LF boost param max should be 18.0 dB, got {max_db:.4}"
@@ -72,7 +72,7 @@ mod plugin_integration_tests {
     fn test_pultec_bypass_defaults_to_true() {
         let plugin = BusChannelStrip::default();
         assert!(
-            plugin.params.pultec_bypass.value(),
+            plugin.params.pultec.pultec_bypass.value(),
             "pultec_bypass must default to true (module inactive until user enables it)"
         );
     }
@@ -163,7 +163,7 @@ mod plugin_integration_tests {
     fn test_pultec_linear_phase_param_defaults_off() {
         let plugin = BusChannelStrip::default();
         assert!(
-            !plugin.params.pultec_linear_phase.value(),
+            !plugin.params.pultec.pultec_linear_phase.value(),
             "pultec_linear_phase must default to false"
         );
         let ids: Vec<String> = plugin
