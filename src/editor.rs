@@ -255,17 +255,17 @@ impl Model for Data {
                     cx.emit(RawParamEvent::SetParameterNormalized(ptr, norm));
                     cx.emit(RawParamEvent::EndSetParameter(ptr));
                 };
-                restore_bool(cx, self.params.sheen_bypass.as_ptr(), false);
-                restore(cx, self.params.sheen_body_db.as_ptr(), 1.0);
-                restore_bool(cx, self.params.sheen_body_bypass.as_ptr(), false);
-                restore(cx, self.params.sheen_presence_db.as_ptr(), 0.0);
-                restore_bool(cx, self.params.sheen_presence_bypass.as_ptr(), false);
-                restore(cx, self.params.sheen_air_db.as_ptr(), 1.8);
-                restore_bool(cx, self.params.sheen_air_bypass.as_ptr(), false);
-                restore(cx, self.params.sheen_warmth.as_ptr(), 0.20);
-                restore_bool(cx, self.params.sheen_warmth_bypass.as_ptr(), false);
-                restore(cx, self.params.sheen_width.as_ptr(), 0.50);
-                restore_bool(cx, self.params.sheen_width_bypass.as_ptr(), false);
+                restore_bool(cx, self.params.sheen.sheen_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen.sheen_body_db.as_ptr(), 1.0);
+                restore_bool(cx, self.params.sheen.sheen_body_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen.sheen_presence_db.as_ptr(), 0.0);
+                restore_bool(cx, self.params.sheen.sheen_presence_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen.sheen_air_db.as_ptr(), 1.8);
+                restore_bool(cx, self.params.sheen.sheen_air_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen.sheen_warmth.as_ptr(), 0.20);
+                restore_bool(cx, self.params.sheen.sheen_warmth_bypass.as_ptr(), false);
+                restore(cx, self.params.sheen.sheen_width.as_ptr(), 0.50);
+                restore_bool(cx, self.params.sheen.sheen_width_bypass.as_ptr(), false);
             }
 
             AppEvent::ToggleDynEQBand(band) => {
@@ -315,20 +315,20 @@ impl Model for Data {
 
                 let (freq_ptr, thresh_ptr) = match *band {
                     0 => (
-                        self.params.dyneq_band1_freq.as_ptr(),
-                        self.params.dyneq_band1_threshold.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band1_freq.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band1_threshold.as_ptr(),
                     ),
                     1 => (
-                        self.params.dyneq_band2_freq.as_ptr(),
-                        self.params.dyneq_band2_threshold.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band2_freq.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band2_threshold.as_ptr(),
                     ),
                     2 => (
-                        self.params.dyneq_band3_freq.as_ptr(),
-                        self.params.dyneq_band3_threshold.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band3_freq.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band3_threshold.as_ptr(),
                     ),
                     _ => (
-                        self.params.dyneq_band4_freq.as_ptr(),
-                        self.params.dyneq_band4_threshold.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band4_freq.as_ptr(),
+                        self.params.dynamic_eq.dyneq_band4_threshold.as_ptr(),
                     ),
                 };
 
@@ -480,13 +480,13 @@ impl Data {
         }
 
         let mut order: [ModuleType; 7] = [
-            self.params.module_order_1.value(),
-            self.params.module_order_2.value(),
-            self.params.module_order_3.value(),
-            self.params.module_order_4.value(),
-            self.params.module_order_5.value(),
-            self.params.module_order_6.value(),
-            self.params.module_order_7.value(),
+            self.params.routing.module_order_1.value(),
+            self.params.routing.module_order_2.value(),
+            self.params.routing.module_order_3.value(),
+            self.params.routing.module_order_4.value(),
+            self.params.routing.module_order_5.value(),
+            self.params.routing.module_order_6.value(),
+            self.params.routing.module_order_7.value(),
         ];
 
         match position {
@@ -534,13 +534,13 @@ impl Data {
 
         // Write back only the slots that actually changed.
         let before: [ModuleType; 7] = [
-            self.params.module_order_1.value(),
-            self.params.module_order_2.value(),
-            self.params.module_order_3.value(),
-            self.params.module_order_4.value(),
-            self.params.module_order_5.value(),
-            self.params.module_order_6.value(),
-            self.params.module_order_7.value(),
+            self.params.routing.module_order_1.value(),
+            self.params.routing.module_order_2.value(),
+            self.params.routing.module_order_3.value(),
+            self.params.routing.module_order_4.value(),
+            self.params.routing.module_order_5.value(),
+            self.params.routing.module_order_6.value(),
+            self.params.routing.module_order_7.value(),
         ];
         for slot in 0..7usize {
             if before[slot] == order[slot] {
@@ -577,25 +577,25 @@ fn hit_test_drop_pos(cursor_x: f32, bounds: BoundingBox) -> DropPos {
 
 fn slot_module_type(params: &Arc<BusChannelStripParams>, slot: usize) -> ModuleType {
     match slot {
-        0 => params.module_order_1.value(),
-        1 => params.module_order_2.value(),
-        2 => params.module_order_3.value(),
-        3 => params.module_order_4.value(),
-        4 => params.module_order_5.value(),
-        5 => params.module_order_6.value(),
-        _ => params.module_order_7.value(),
+        0 => params.routing.module_order_1.value(),
+        1 => params.routing.module_order_2.value(),
+        2 => params.routing.module_order_3.value(),
+        3 => params.routing.module_order_4.value(),
+        4 => params.routing.module_order_5.value(),
+        5 => params.routing.module_order_6.value(),
+        _ => params.routing.module_order_7.value(),
     }
 }
 
 fn slot_param_ptr(params: &Arc<BusChannelStripParams>, slot: usize) -> ParamPtr {
     match slot {
-        0 => params.module_order_1.as_ptr(),
-        1 => params.module_order_2.as_ptr(),
-        2 => params.module_order_3.as_ptr(),
-        3 => params.module_order_4.as_ptr(),
-        4 => params.module_order_5.as_ptr(),
-        5 => params.module_order_6.as_ptr(),
-        _ => params.module_order_7.as_ptr(),
+        0 => params.routing.module_order_1.as_ptr(),
+        1 => params.routing.module_order_2.as_ptr(),
+        2 => params.routing.module_order_3.as_ptr(),
+        3 => params.routing.module_order_4.as_ptr(),
+        4 => params.routing.module_order_5.as_ptr(),
+        5 => params.routing.module_order_6.as_ptr(),
+        _ => params.routing.module_order_7.as_ptr(),
     }
 }
 
@@ -618,13 +618,13 @@ fn slot_preview_normalized(
 ) -> f32 {
     // EnumParam::preview_normalized takes the enum variant directly (Plain = ModuleType)
     match slot {
-        0 => params.module_order_1.preview_normalized(mt),
-        1 => params.module_order_2.preview_normalized(mt),
-        2 => params.module_order_3.preview_normalized(mt),
-        3 => params.module_order_4.preview_normalized(mt),
-        4 => params.module_order_5.preview_normalized(mt),
-        5 => params.module_order_6.preview_normalized(mt),
-        _ => params.module_order_7.preview_normalized(mt),
+        0 => params.routing.module_order_1.preview_normalized(mt),
+        1 => params.routing.module_order_2.preview_normalized(mt),
+        2 => params.routing.module_order_3.preview_normalized(mt),
+        3 => params.routing.module_order_4.preview_normalized(mt),
+        4 => params.routing.module_order_5.preview_normalized(mt),
+        5 => params.routing.module_order_6.preview_normalized(mt),
+        _ => params.routing.module_order_7.preview_normalized(mt),
     }
 }
 
@@ -806,13 +806,13 @@ fn module_type_name(mt: ModuleType) -> &'static str {
 /// visibility setting.
 fn is_module_hidden(params: &Arc<BusChannelStripParams>, mt: ModuleType) -> bool {
     match mt {
-        ModuleType::Api5500EQ => params.hide_api5500.value(),
-        ModuleType::ButterComp2 => params.hide_buttercomp2.value(),
-        ModuleType::PultecEQ => params.hide_pultec.value(),
-        ModuleType::DynamicEQ => params.hide_dynamic_eq.value(),
-        ModuleType::Transformer => params.hide_transformer.value(),
-        ModuleType::Punch => params.hide_punch.value(),
-        ModuleType::Haas => params.hide_haas.value(),
+        ModuleType::Api5500EQ => params.routing.hide_api5500.value(),
+        ModuleType::ButterComp2 => params.routing.hide_buttercomp2.value(),
+        ModuleType::PultecEQ => params.routing.hide_pultec.value(),
+        ModuleType::DynamicEQ => params.routing.hide_dynamic_eq.value(),
+        ModuleType::Transformer => params.routing.hide_transformer.value(),
+        ModuleType::Punch => params.routing.hide_punch.value(),
+        ModuleType::Haas => params.routing.hide_haas.value(),
         // Empty slots are never collapsible: there is no module to hide and
         // the picker affordance must stay reachable.
         ModuleType::Empty => false,
@@ -841,43 +841,43 @@ fn build_hide_button_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_api5500)
+            ParamButton::new(cx, &params.routing.hide_api5500)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::ButterComp2 => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_buttercomp2)
+            ParamButton::new(cx, &params.routing.hide_buttercomp2)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::PultecEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_pultec)
+            ParamButton::new(cx, &params.routing.hide_pultec)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::DynamicEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_dynamic_eq)
+            ParamButton::new(cx, &params.routing.hide_dynamic_eq)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::Transformer => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_transformer)
+            ParamButton::new(cx, &params.routing.hide_transformer)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::Punch => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_punch)
+            ParamButton::new(cx, &params.routing.hide_punch)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
         ModuleType::Haas => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_haas)
+            ParamButton::new(cx, &params.routing.hide_haas)
                 .with_label("\u{00d7}")
                 .class("hide-btn");
         }
@@ -892,43 +892,43 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_api5500)
+            ParamButton::new(cx, &params.routing.hide_api5500)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::ButterComp2 => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_buttercomp2)
+            ParamButton::new(cx, &params.routing.hide_buttercomp2)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::PultecEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_pultec)
+            ParamButton::new(cx, &params.routing.hide_pultec)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::DynamicEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_dynamic_eq)
+            ParamButton::new(cx, &params.routing.hide_dynamic_eq)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::Transformer => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_transformer)
+            ParamButton::new(cx, &params.routing.hide_transformer)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::Punch => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_punch)
+            ParamButton::new(cx, &params.routing.hide_punch)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
         ModuleType::Haas => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.hide_haas)
+            ParamButton::new(cx, &params.routing.hide_haas)
                 .with_label("\u{25B6}")
                 .class("expand-btn");
         }
@@ -963,13 +963,13 @@ fn build_eject_button(cx: &mut Context, slot_idx: usize) {
 /// skipped by the dedup check.
 fn repair_module_order(cx: &mut Context, params: &Arc<BusChannelStripParams>) {
     let raw = [
-        params.module_order_1.value(),
-        params.module_order_2.value(),
-        params.module_order_3.value(),
-        params.module_order_4.value(),
-        params.module_order_5.value(),
-        params.module_order_6.value(),
-        params.module_order_7.value(),
+        params.routing.module_order_1.value(),
+        params.routing.module_order_2.value(),
+        params.routing.module_order_3.value(),
+        params.routing.module_order_4.value(),
+        params.routing.module_order_5.value(),
+        params.routing.module_order_6.value(),
+        params.routing.module_order_7.value(),
     ];
     let mut seen = [false; 7]; // indices 0..6 cover real modules only
     let mut dupe_slots: Vec<usize> = Vec::new();
@@ -1500,7 +1500,7 @@ fn create_master_section(cx: &mut Context) {
                 .height(Pixels(16.0))
                 .width(Stretch(1.0));
             let params = cx.data::<Data>().params.clone();
-            components::create_bypass_button(cx, "BYPASS", &params, |p| &p.global_bypass);
+            components::create_bypass_button(cx, "BYPASS", &params, |p| &p.global.global_bypass);
         })
         .height(Auto)
         .width(Pixels(80.0))
@@ -1510,11 +1510,13 @@ fn create_master_section(cx: &mut Context) {
 
         // Auto-gain compensation toggle.
         components::create_bool_button(cx, "AUTO GAIN", &cx.data::<Data>().params.clone(), |p| {
-            &p.global_auto_gain
+            &p.global.global_auto_gain
         });
 
         Label::new(cx, "MASTER").class("master-label");
-        components::create_gain_slider(cx, "Gain", &cx.data::<Data>().params.clone(), |p| &p.gain);
+        components::create_gain_slider(cx, "Gain", &cx.data::<Data>().params.clone(), |p| {
+            &p.global.gain
+        });
     })
     .class("master-controls")
     .gap(Pixels(12.0));
@@ -1782,19 +1784,19 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.eq_bypass)
+            ParamButton::new(cx, &params.api5500.eq_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
         ModuleType::ButterComp2 => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.comp_bypass)
+            ParamButton::new(cx, &params.buttercomp2.comp_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
         ModuleType::PultecEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.pultec_bypass)
+            ParamButton::new(cx, &params.pultec.pultec_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
@@ -1802,14 +1804,14 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
             #[cfg(feature = "dynamic_eq")]
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.dyneq_bypass)
+                ParamButton::new(cx, &params.dynamic_eq.dyneq_bypass)
                     .with_label("")
                     .class("module-led-indicator");
             }
         }
         ModuleType::Transformer => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.transformer_bypass)
+            ParamButton::new(cx, &params.transformer.transformer_bypass)
                 .with_label("")
                 .class("module-led-indicator");
         }
@@ -1817,7 +1819,7 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
             #[cfg(feature = "punch")]
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.punch_bypass)
+                ParamButton::new(cx, &params.punch.punch_bypass)
                     .with_label("")
                     .class("module-led-indicator");
             }
@@ -1826,7 +1828,7 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
             #[cfg(feature = "haas")]
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.haas_bypass)
+                ParamButton::new(cx, &params.haas.haas_bypass)
                     .with_label("")
                     .class("module-led-indicator");
             }
@@ -1840,28 +1842,30 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
     let params = cx.data::<Data>().params.clone();
     match mt {
         ModuleType::Api5500EQ => {
-            components::create_active_led_button(cx, &params, |p| &p.eq_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.api5500.eq_bypass);
         }
         ModuleType::ButterComp2 => {
-            components::create_active_led_button(cx, &params, |p| &p.comp_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.buttercomp2.comp_bypass);
         }
         ModuleType::PultecEQ => {
-            components::create_active_led_button(cx, &params, |p| &p.pultec_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.pultec.pultec_bypass);
         }
         ModuleType::DynamicEQ => {
             #[cfg(feature = "dynamic_eq")]
-            components::create_active_led_button(cx, &params, |p| &p.dyneq_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.dynamic_eq.dyneq_bypass);
         }
         ModuleType::Transformer => {
-            components::create_active_led_button(cx, &params, |p| &p.transformer_bypass);
+            components::create_active_led_button(cx, &params, |p| {
+                &p.transformer.transformer_bypass
+            });
         }
         ModuleType::Punch => {
             #[cfg(feature = "punch")]
-            components::create_active_led_button(cx, &params, |p| &p.punch_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.punch.punch_bypass);
         }
         ModuleType::Haas => {
             #[cfg(feature = "haas")]
-            components::create_active_led_button(cx, &params, |p| &p.haas_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.haas.haas_bypass);
         }
         // No bypass for empty slots — pass-through is unconditional.
         ModuleType::Empty => {}
@@ -1966,13 +1970,13 @@ fn build_api5500_controls(cx: &mut Context) {
                     cx,
                     "FREQ",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.lf_freq,
+                    |p| &p.api5500.lf_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "GAIN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.lf_gain,
+                    |p| &p.api5500.lf_gain,
                 );
             })
             .gap(Pixels(4.0))
@@ -1991,13 +1995,13 @@ fn build_api5500_controls(cx: &mut Context) {
                     cx,
                     "FREQ",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.hf_freq,
+                    |p| &p.api5500.hf_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "GAIN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.hf_gain,
+                    |p| &p.api5500.hf_gain,
                 );
             })
             .gap(Pixels(4.0))
@@ -2018,24 +2022,24 @@ fn build_api5500_controls(cx: &mut Context) {
                 cx,
                 "LMF",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.lmf_freq,
+                |p| &p.api5500.lmf_freq,
             );
             components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
-                &p.lmf_gain
+                &p.api5500.lmf_gain
             });
             components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
-                &p.lmf_q
+                &p.api5500.lmf_q
             });
         });
         components::module_row(cx, |cx| {
             components::create_frequency_slider(cx, "MF", &cx.data::<Data>().params.clone(), |p| {
-                &p.mf_freq
+                &p.api5500.mf_freq
             });
             components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
-                &p.mf_gain
+                &p.api5500.mf_gain
             });
             components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
-                &p.mf_q
+                &p.api5500.mf_q
             });
         });
         components::module_row(cx, |cx| {
@@ -2043,13 +2047,13 @@ fn build_api5500_controls(cx: &mut Context) {
                 cx,
                 "HMF",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.hmf_freq,
+                |p| &p.api5500.hmf_freq,
             );
             components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
-                &p.hmf_gain
+                &p.api5500.hmf_gain
             });
             components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
-                &p.hmf_q
+                &p.api5500.hmf_q
             });
         });
     })
@@ -2065,14 +2069,15 @@ fn build_buttercomp2_controls(cx: &mut Context) {
         // Model selector — always visible above the reactive control surface.
         #[cfg(feature = "buttercomp2")]
         components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
-            &p.comp_model
+            &p.buttercomp2.comp_model
         });
 
         // Reactive control surface — rebuilds when model enum changes.
         // Map the EnumParam value to usize so Binding gets a `Clone + PartialEq` target.
         #[cfg(feature = "buttercomp2")]
         {
-            let model_memo = param_memo(cx, |params| params.comp_model.value() as usize);
+            let model_memo =
+                param_memo(cx, |params| params.buttercomp2.comp_model.value() as usize);
             Binding::new(cx, model_memo, move |cx| {
                 let model_idx = model_memo.get();
                 match model_idx {
@@ -2099,23 +2104,23 @@ fn build_buttercomp2_controls(cx: &mut Context) {
 fn build_classic_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::create_ratio_slider(cx, "COMPRESS", &cx.data::<Data>().params.clone(), |p| {
-            &p.comp_compress
+            &p.buttercomp2.comp_compress
         });
         components::create_gain_slider(cx, "OUTPUT", &cx.data::<Data>().params.clone(), |p| {
-            &p.comp_output
+            &p.buttercomp2.comp_output
         });
         components::module_row(cx, |cx| {
             components::create_frequency_slider(
                 cx,
                 "SC HP",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.comp_sc_hp_freq,
+                |p| &p.buttercomp2.comp_sc_hp_freq,
             );
             components::create_param_slider(
                 cx,
                 "DRY/WET",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.comp_dry_wet,
+                |p| &p.buttercomp2.comp_dry_wet,
             );
         });
     })
@@ -2131,21 +2136,21 @@ fn build_vca_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "THRESH", &cx.data::<Data>().params.clone(), |p| {
-                &p.vca_thresh
+                &p.buttercomp2.vca_thresh
             });
             components::create_ratio_slider(cx, "RATIO", &cx.data::<Data>().params.clone(), |p| {
-                &p.vca_ratio
+                &p.buttercomp2.vca_ratio
             });
         });
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "ATTACK", &cx.data::<Data>().params.clone(), |p| {
-                &p.vca_atk
+                &p.buttercomp2.vca_atk
             });
             components::create_param_slider(
                 cx,
                 "RELEASE",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.vca_rel,
+                |p| &p.buttercomp2.vca_rel,
             );
         });
         components::module_row(cx, |cx| {
@@ -2153,10 +2158,10 @@ fn build_vca_controls(cx: &mut Context) {
                 cx,
                 "SC HP",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.comp_sc_hp_freq,
+                |p| &p.buttercomp2.comp_sc_hp_freq,
             );
             components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.comp_dry_wet
+                &p.buttercomp2.comp_dry_wet
             });
         });
     })
@@ -2172,24 +2177,24 @@ fn build_optical_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "THRESH", &cx.data::<Data>().params.clone(), |p| {
-                &p.opt_thresh
+                &p.buttercomp2.opt_thresh
             });
             components::create_param_slider(cx, "CHAR %", &cx.data::<Data>().params.clone(), |p| {
-                &p.opt_char
+                &p.buttercomp2.opt_char
             });
         });
         components::create_param_slider(cx, "SPEED", &cx.data::<Data>().params.clone(), |p| {
-            &p.opt_speed
+            &p.buttercomp2.opt_speed
         });
         components::module_row(cx, |cx| {
             components::create_frequency_slider(
                 cx,
                 "SC HP",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.comp_sc_hp_freq,
+                |p| &p.buttercomp2.comp_sc_hp_freq,
             );
             components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.comp_dry_wet
+                &p.buttercomp2.comp_dry_wet
             });
         });
     })
@@ -2206,32 +2211,32 @@ fn build_fet_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
             components::create_gain_slider(cx, "INPUT", &cx.data::<Data>().params.clone(), |p| {
-                &p.fet_input_db
+                &p.buttercomp2.fet_input_db
             });
             components::create_gain_slider(cx, "OUTPUT", &cx.data::<Data>().params.clone(), |p| {
-                &p.fet_output_db
+                &p.buttercomp2.fet_output_db
             });
         });
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "ATTACK", &cx.data::<Data>().params.clone(), |p| {
-                &p.fet_attack_ms
+                &p.buttercomp2.fet_attack_ms
             });
             components::create_param_slider(
                 cx,
                 "RELEASE",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.fet_release_ms,
+                |p| &p.buttercomp2.fet_release_ms,
             );
         });
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "RATIO", &cx.data::<Data>().params.clone(), |p| {
-                &p.fet_ratio
+                &p.buttercomp2.fet_ratio
             });
             components::create_bool_button(
                 cx,
                 "AUTO REL",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.fet_auto_release,
+                |p| &p.buttercomp2.fet_auto_release,
             );
         });
         components::module_row(cx, |cx| {
@@ -2239,10 +2244,10 @@ fn build_fet_controls(cx: &mut Context) {
                 cx,
                 "SC HP",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.comp_sc_hp_freq,
+                |p| &p.buttercomp2.comp_sc_hp_freq,
             );
             components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.comp_dry_wet
+                &p.buttercomp2.comp_dry_wet
             });
         });
     })
@@ -2264,16 +2269,16 @@ fn build_pultec_controls(cx: &mut Context) {
                     cx,
                     "FREQ",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_lf_boost_freq,
+                    |p| &p.pultec.pultec_lf_boost_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "BOOST",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_lf_boost_gain,
+                    |p| &p.pultec.pultec_lf_boost_gain,
                 );
                 components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
-                    &p.pultec_lf_boost_bandwidth
+                    &p.pultec.pultec_lf_boost_bandwidth
                 });
             });
             components::module_row(cx, |cx| {
@@ -2281,16 +2286,16 @@ fn build_pultec_controls(cx: &mut Context) {
                     cx,
                     "ATTEN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_lf_cut_freq,
+                    |p| &p.pultec.pultec_lf_cut_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "ATTEN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_lf_cut_gain,
+                    |p| &p.pultec.pultec_lf_cut_gain,
                 );
                 components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
-                    &p.pultec_lf_cut_bandwidth
+                    &p.pultec.pultec_lf_cut_bandwidth
                 });
             });
         });
@@ -2301,16 +2306,16 @@ fn build_pultec_controls(cx: &mut Context) {
                     cx,
                     "FREQ",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_hf_boost_freq,
+                    |p| &p.pultec.pultec_hf_boost_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "BOOST",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_hf_boost_gain,
+                    |p| &p.pultec.pultec_hf_boost_gain,
                 );
                 components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
-                    &p.pultec_hf_boost_bandwidth
+                    &p.pultec.pultec_hf_boost_bandwidth
                 });
             });
             components::module_row(cx, |cx| {
@@ -2318,13 +2323,13 @@ fn build_pultec_controls(cx: &mut Context) {
                     cx,
                     "ATTEN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_hf_cut_freq,
+                    |p| &p.pultec.pultec_hf_cut_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "ATTEN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.pultec_hf_cut_gain,
+                    |p| &p.pultec.pultec_hf_cut_gain,
                 );
             });
         });
@@ -2334,7 +2339,7 @@ fn build_pultec_controls(cx: &mut Context) {
                 cx,
                 "TUBE DRIVE",
                 &cx.data::<Data>().params.clone(),
-                |p| &p.pultec_tube_drive,
+                |p| &p.pultec.pultec_tube_drive,
             );
         });
     })
@@ -2644,7 +2649,7 @@ impl View for SpectrumCanvas {
 //
 // Each of the 4 band columns has identical layout (title, ON/SOLO, 8 sliders)
 // differing only in which parameter field is accessed. Because each closure
-// `|p| &p.dyneq_band1_freq` is a distinct concrete type, we cannot unify them
+// `|p| &p.dynamic_eq.dyneq_band1_freq` is a distinct concrete type, we cannot unify them
 // through generics without 10 type parameters. A macro gives us a single layout
 // definition that expands per band at compile time.
 //
@@ -2715,8 +2720,8 @@ macro_rules! dyneq_band_col {
                     .top(Pixels(0.0))
                     .bottom(Pixels(0.0));
                 let params = cx.data::<Data>().params.clone();
-                components::create_on_button(cx, &params, |p| &p.$enabled);
-                components::create_bypass_button(cx, "SOLO", &params, |p| &p.$solo);
+                components::create_on_button(cx, &params, |p| &p.dynamic_eq.$enabled);
+                components::create_bypass_button(cx, "SOLO", &params, |p| &p.dynamic_eq.$solo);
                 // Chevron toggle button — reactive label via dyneq_expand_gen signal
                 {
                     let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
@@ -2747,10 +2752,10 @@ macro_rules! dyneq_band_col {
             .height(Auto);
 
             // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
-            dyneq_slider!(cx, "MODE", |p| &p.$mode);
-            dyneq_slider!(cx, "FREQ", |p| &p.$freq);
-            dyneq_slider!(cx, "THRESH", |p| &p.$thresh);
-            dyneq_slider!(cx, "GAIN", |p| &p.$gain);
+            dyneq_slider!(cx, "MODE", |p| &p.dynamic_eq.$mode);
+            dyneq_slider!(cx, "FREQ", |p| &p.dynamic_eq.$freq);
+            dyneq_slider!(cx, "THRESH", |p| &p.dynamic_eq.$thresh);
+            dyneq_slider!(cx, "GAIN", |p| &p.dynamic_eq.$gain);
 
             // Tier 2 — conditionally built when band is expanded.
             // Uses Binding::new rather than .display() because .display(lens.map(...))
@@ -2763,10 +2768,10 @@ macro_rules! dyneq_band_col {
                 Binding::new(cx, dyneq_expand_gen_signal, move |cx| {
                     if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
                         VStack::new(cx, |cx| {
-                            dyneq_slider!(cx, "RATIO", |p| &p.$ratio);
-                            dyneq_slider!(cx, "Q", |p| &p.$q);
-                            dyneq_slider!(cx, "ATK ms", |p| &p.$atk);
-                            dyneq_slider!(cx, "REL ms", |p| &p.$rel);
+                            dyneq_slider!(cx, "RATIO", |p| &p.dynamic_eq.$ratio);
+                            dyneq_slider!(cx, "Q", |p| &p.dynamic_eq.$q);
+                            dyneq_slider!(cx, "ATK ms", |p| &p.dynamic_eq.$atk);
+                            dyneq_slider!(cx, "REL ms", |p| &p.dynamic_eq.$rel);
                         })
                         .width(Stretch(1.0))
                         .height(Auto)
@@ -2824,7 +2829,9 @@ fn build_dyneq_back_view(
             #[cfg(feature = "dynamic_eq")]
             {
                 let params = cx.data::<Data>().params.clone();
-                components::create_bypass_button(cx, "BYPASS", &params, |p| &p.dyneq_bypass);
+                components::create_bypass_button(cx, "BYPASS", &params, |p| {
+                    &p.dynamic_eq.dyneq_bypass
+                });
             }
 
             // ── Sidechain masking analysis controls ──────────────────────────
@@ -3031,7 +3038,7 @@ fn build_sheen_back_view(cx: &mut Context) {
                     .height(Pixels(14.0))
                     .width(Stretch(1.0));
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.sheen_bypass)
+                ParamButton::new(cx, &params.sheen.sheen_bypass)
                     .class("sheen-master-bypass")
                     .height(Pixels(32.0))
                     .width(Stretch(1.0));
@@ -3117,51 +3124,51 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
         let params = cx.data::<Data>().params.clone();
         match name {
             "BODY" => {
-                ParamSlider::new(cx, &params.sheen_body_db)
+                ParamSlider::new(cx, &params.sheen.sheen_body_db)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen_body_bypass)
+                ParamButton::new(cx, &params.sheen.sheen_body_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "PRESENCE" => {
-                ParamSlider::new(cx, &params.sheen_presence_db)
+                ParamSlider::new(cx, &params.sheen.sheen_presence_db)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen_presence_bypass)
+                ParamButton::new(cx, &params.sheen.sheen_presence_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "AIR" => {
-                ParamSlider::new(cx, &params.sheen_air_db)
+                ParamSlider::new(cx, &params.sheen.sheen_air_db)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen_air_bypass)
+                ParamButton::new(cx, &params.sheen.sheen_air_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "WARMTH" => {
-                ParamSlider::new(cx, &params.sheen_warmth)
+                ParamSlider::new(cx, &params.sheen.sheen_warmth)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen_warmth_bypass)
+                ParamButton::new(cx, &params.sheen.sheen_warmth_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "WIDTH" => {
-                ParamSlider::new(cx, &params.sheen_width)
+                ParamSlider::new(cx, &params.sheen.sheen_width)
                     .class("sheen-slider")
                     .height(Pixels(22.0))
                     .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen_width_bypass)
+                ParamButton::new(cx, &params.sheen.sheen_width_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
@@ -3182,10 +3189,10 @@ fn build_transformer_controls(cx: &mut Context) {
         // Model + compression on one row
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
-                &p.transformer_model
+                &p.transformer.transformer_model
             });
             components::create_ratio_slider(cx, "COMP", &cx.data::<Data>().params.clone(), |p| {
-                &p.transformer_compression
+                &p.transformer.transformer_compression
             });
         });
         // Input stage: drive + saturation paired
@@ -3195,13 +3202,13 @@ fn build_transformer_controls(cx: &mut Context) {
                     cx,
                     "DRIVE",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.transformer_input_drive,
+                    |p| &p.transformer.transformer_input_drive,
                 );
                 components::create_param_slider(
                     cx,
                     "SAT",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.transformer_input_saturation,
+                    |p| &p.transformer.transformer_input_saturation,
                 );
             });
         });
@@ -3212,13 +3219,13 @@ fn build_transformer_controls(cx: &mut Context) {
                     cx,
                     "DRIVE",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.transformer_output_drive,
+                    |p| &p.transformer.transformer_output_drive,
                 );
                 components::create_param_slider(
                     cx,
                     "SAT",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.transformer_output_saturation,
+                    |p| &p.transformer.transformer_output_saturation,
                 );
             });
         });
@@ -3229,13 +3236,13 @@ fn build_transformer_controls(cx: &mut Context) {
                     cx,
                     "LOW",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.transformer_low_response,
+                    |p| &p.transformer.transformer_low_response,
                 );
                 components::create_param_slider(
                     cx,
                     "HIGH",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.transformer_high_response,
+                    |p| &p.transformer.transformer_high_response,
                 );
             });
         });
@@ -3256,13 +3263,13 @@ fn build_punch_controls(cx: &mut Context) {
                     cx,
                     "THRESH",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_threshold,
+                    |p| &p.punch.punch_threshold,
                 );
                 components::create_param_slider(
                     cx,
                     "MODE",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_clip_mode,
+                    |p| &p.punch.punch_clip_mode,
                 );
             });
             components::module_row(cx, |cx| {
@@ -3270,13 +3277,13 @@ fn build_punch_controls(cx: &mut Context) {
                     cx,
                     "SOFT",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_softness,
+                    |p| &p.punch.punch_softness,
                 );
                 components::create_param_slider(
                     cx,
                     "OVSMP",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_oversampling,
+                    |p| &p.punch.punch_oversampling,
                 );
             });
         });
@@ -3286,26 +3293,26 @@ fn build_punch_controls(cx: &mut Context) {
                     cx,
                     "ATTACK",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_attack,
+                    |p| &p.punch.punch_attack,
                 );
                 components::create_param_slider(
                     cx,
                     "SUSTAIN",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_sustain,
+                    |p| &p.punch.punch_sustain,
                 );
             });
             components::create_param_slider(cx, "SENS", &cx.data::<Data>().params.clone(), |p| {
-                &p.punch_sensitivity
+                &p.punch.punch_sensitivity
             });
         });
         components::module_section(cx, "OUTPUT", |cx| {
             components::module_row(cx, |cx| {
                 components::create_gain_slider(cx, "IN", &cx.data::<Data>().params.clone(), |p| {
-                    &p.punch_input_gain
+                    &p.punch.punch_input_gain
                 });
                 components::create_gain_slider(cx, "OUT", &cx.data::<Data>().params.clone(), |p| {
-                    &p.punch_output_gain
+                    &p.punch.punch_output_gain
                 });
             });
             components::module_row(cx, |cx| {
@@ -3313,13 +3320,13 @@ fn build_punch_controls(cx: &mut Context) {
                     cx,
                     "MIX",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_mix,
+                    |p| &p.punch.punch_mix,
                 );
                 components::create_frequency_slider(
                     cx,
                     "WET HPF",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.punch_wet_hpf_hz,
+                    |p| &p.punch.punch_wet_hpf_hz,
                 );
             });
         });
@@ -3337,13 +3344,13 @@ fn build_haas_controls(cx: &mut Context) {
         components::module_section(cx, "M/S GAIN", |cx| {
             components::module_row(cx, |cx| {
                 components::create_gain_slider(cx, "MID", &cx.data::<Data>().params.clone(), |p| {
-                    &p.haas_mid_gain
+                    &p.haas.haas_mid_gain
                 });
                 components::create_gain_slider(
                     cx,
                     "SIDE",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.haas_side_gain,
+                    |p| &p.haas.haas_side_gain,
                 );
             });
         });
@@ -3353,22 +3360,22 @@ fn build_haas_controls(cx: &mut Context) {
                     cx,
                     "DEPTH",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.haas_comb_depth,
+                    |p| &p.haas.haas_comb_depth,
                 );
                 components::create_param_slider(
                     cx,
                     "TIME",
                     &cx.data::<Data>().params.clone(),
-                    |p| &p.haas_comb_time,
+                    |p| &p.haas.haas_comb_time,
                 );
             });
             components::create_param_slider(cx, "MODE", &cx.data::<Data>().params.clone(), |p| {
-                &p.haas_comb_mode
+                &p.haas.haas_comb_mode
             });
         });
         components::module_section(cx, "OUTPUT", |cx| {
             components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.haas_mix
+                &p.haas.haas_mix
             });
         });
     })
