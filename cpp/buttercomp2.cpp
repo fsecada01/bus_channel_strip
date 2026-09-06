@@ -154,46 +154,34 @@ void buttercomp2_process_stereo(ButterComp2State* state,
     const double release_speed = 0.001 * one_over_sample_rate;
 
     // #18: measure this block's crest factor from the dry input (before any
-    // compression flattens it) and derive a release-time scale from it.
-    // Uses the *previous* call's smoothed value to process this block —
-    // fully causal, no added latency — then updates the smoothed value from
-    // this block's own stats for the next call.
+    // compression flattens it) and derive a release-time scale from it. Uses
+    // the *previous* call's smoothed value to process this block — fully
+    // causal, no added latency — then updates the smoothed value from this
+    // block's own stats (accumulated below, inline in the main loop below
+    // rather than a separate pass) for the next call. While bypassed,
+    // crest_scale_smoothed is frozen entirely (neither read for
+    // release_scale nor updated) so re-enabling adaptation later resumes
+    // from wherever it was left, instead of snapping in a value that drifted
+    // during the bypassed period.
     double release_scale = state->adaptive_envelope_bypass ? 1.0 : state->crest_scale_smoothed;
-    if (num_samples > 0) {
-        double peak = 0.0;
-        double sum_sq = 0.0;
-        for (int i = 0; i < num_samples; i++) {
-            double l = (double)left_channel[i];
-            double r = (double)right_channel[i];
-            peak = std::max(peak, std::max(fabs(l), fabs(r)));
-            sum_sq += l * l + r * r;
-        }
-        double rms = std::sqrt(sum_sq / (2.0 * num_samples));
-        double crest_db = 20.0 * std::log10(std::max(peak, 1e-9) / std::max(rms, 1e-9));
-        // Inverted: higher crest factor (transient/bursty) -> smaller scale
-        // -> slower dynamic_release_speed -> softer release. Lower crest
-        // factor (sustained) -> larger scale -> tighter/faster release.
-        double target_scale = std::pow(2.0, (kCrestRefDb - crest_db) / kCrestRangeDb);
-        // std::min/max, not std::clamp (C++17-only) — matches this file's
-        // existing clamping style and avoids depending on the toolchain's
-        // default C++ standard on non-MSVC targets.
-        target_scale = std::max(kMinReleaseScale, std::min(kMaxReleaseScale, target_scale));
-
-        double block_duration_s = (double)num_samples / state->sample_rate;
-        double smooth_coeff = std::exp(-block_duration_s / kCrestSmoothTcSeconds);
-        state->crest_scale_smoothed =
-            smooth_coeff * state->crest_scale_smoothed + (1.0 - smooth_coeff) * target_scale;
-    }
     const double dynamic_release_speed = release_speed * release_scale;
+    double crest_peak = 0.0;
+    double crest_sum_sq = 0.0;
 
     for (int i = 0; i < num_samples; i++) {
         // Process both channels
         float* channels[2] = {&left_channel[i], &right_channel[i]};
-        
+
         for (int ch = 0; ch < 2; ch++) {
             double input_sample = (double)(*channels[ch]);
             double dry_sample = input_sample;
-            
+
+            if (!state->adaptive_envelope_bypass) {
+                double a = fabs(dry_sample);
+                if (a > crest_peak) crest_peak = a;
+                crest_sum_sq += dry_sample * dry_sample;
+            }
+
             // Airwindows ButterComp2 algorithm implementation
             
             // Input conditioning
@@ -251,6 +239,30 @@ void buttercomp2_process_stereo(ButterComp2State* state,
             
             *channels[ch] = (float)output_sample;
         }
+    }
+
+    // #18: fold this block's crest stats into the smoothed release-scale for
+    // the next call. Skipped while bypassed (see above) and on a
+    // near-silent block — silence carries no real crest information, and
+    // without this guard the 1e-9 floor below biases crest_db toward 0 dB
+    // (i.e. target_scale toward the *tightened* end) purely as a flooring
+    // artifact, not because anything about the material calls for it.
+    if (!state->adaptive_envelope_bypass && num_samples > 0 && crest_peak > 1e-6) {
+        double rms = std::sqrt(crest_sum_sq / (2.0 * num_samples));
+        double crest_db = 20.0 * std::log10(std::max(crest_peak, 1e-9) / std::max(rms, 1e-9));
+        // Inverted: higher crest factor (transient/bursty) -> smaller scale
+        // -> slower dynamic_release_speed -> softer release. Lower crest
+        // factor (sustained) -> larger scale -> tighter/faster release.
+        double target_scale = std::pow(2.0, (kCrestRefDb - crest_db) / kCrestRangeDb);
+        // std::min/max, not std::clamp (C++17-only) — matches this file's
+        // existing clamping style and avoids depending on the toolchain's
+        // default C++ standard on non-MSVC targets.
+        target_scale = std::max(kMinReleaseScale, std::min(kMaxReleaseScale, target_scale));
+
+        double block_duration_s = (double)num_samples / state->sample_rate;
+        double smooth_coeff = std::exp(-block_duration_s / kCrestSmoothTcSeconds);
+        state->crest_scale_smoothed =
+            smooth_coeff * state->crest_scale_smoothed + (1.0 - smooth_coeff) * target_scale;
     }
 }
 

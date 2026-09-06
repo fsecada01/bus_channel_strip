@@ -1036,7 +1036,9 @@ mod tests {
         // below the 9 dB neutral reference) so the smoothed release-scale
         // settles above 1.0x (tighter/faster response to the probe).
         let omega = 2.0 * core::f32::consts::PI * 220.0 / sr;
-        let warmup: Vec<f32> = (0..20_000).map(|i| 0.9 * (omega * i as f32).sin()).collect();
+        let warmup: Vec<f32> = (0..20_000)
+            .map(|i| 0.9 * (omega * i as f32).sin())
+            .collect();
 
         let mut adaptive = ButterComp2::new(sr);
         run_buttercomp2(&mut adaptive, 1.0, false, &warmup);

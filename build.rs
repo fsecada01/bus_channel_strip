@@ -50,6 +50,14 @@ fn main() {
         return;
     }
 
+    // Without an explicit rerun-if-changed, Cargo's fallback ("rerun if any
+    // file in the package changed") isn't reliably tripping in this repo's
+    // setup — editing cpp/buttercomp2.cpp alone can leave a stale compiled
+    // buttercomp2.lib linked in silently. Declare the C++ sources explicitly
+    // so a source edit always triggers a recompile.
+    println!("cargo:rerun-if-changed=cpp/buttercomp2.cpp");
+    println!("cargo:rerun-if-changed=cpp/buttercomp2.h");
+
     // Unset problematic environment variables to prevent cc-rs from auto-reading them
     // and mis-parsing quoted paths. We will add flags and includes manually.
     env::remove_var("CXXFLAGS");
