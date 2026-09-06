@@ -340,7 +340,13 @@ struct TruePeakDetector {
 impl TruePeakDetector {
     fn new(sample_rate: f32, max_block_size: usize) -> Self {
         Self {
-            oversampler: Oversampler::new_at_factor(TRUE_PEAK_OS_FACTOR, max_block_size),
+            // `new_upsample_only`, not `new_at_factor`: this detector only
+            // ever calls `upsample()` (see the struct doc above), so the
+            // downsample scratch buffer and the 16x-sized upsample buffer
+            // `new_at_factor` would otherwise allocate are pure waste —
+            // right-size to the 4x this detector actually uses (review
+            // finding on issue #19).
+            oversampler: Oversampler::new_upsample_only(TRUE_PEAK_OS_FACTOR, max_block_size),
             held_peak_db: TRUE_PEAK_FLOOR_DB,
             hold_counter: 0,
             hold_samples: ((sample_rate * TRUE_PEAK_HOLD_MS / 1000.0) as usize).max(1),
