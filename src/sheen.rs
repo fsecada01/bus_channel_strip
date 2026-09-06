@@ -16,6 +16,7 @@
 //!
 //! Stage rationale and citations live in `docs/adr/0006-sheen-pinned-master-end-polish.md`.
 
+use crate::detune::{micro_detune_pair, DetuneRng};
 use crate::hysteresis::HysteresisCell;
 use crate::oversampler::Oversampler;
 use crate::shaping::{Filter, FilterType};
@@ -98,6 +99,13 @@ pub struct SheenModule {
     presence: Filter,
     air: Filter,
 
+    /// Per-instance stereo micro-detune (#17, TMT-style) applied to BODY /
+    /// PRESENCE / AIR — WIDTH's `width_hpf`/`width_shelf` only ever see the
+    /// mono-derived side signal, so there's no L/R to decorrelate there.
+    /// Redrawn on `reset()`. Not exposed as a parameter.
+    detune_rng: DetuneRng,
+    detune: [f32; 2],
+
     // WIDTH side-channel filters. These see ONE signal (the M/S-derived
     // side), so a single TPT SVF — not a stereo `Filter` — is correct.
     width_hpf: TptSvf,
@@ -157,12 +165,16 @@ impl SheenModule {
     /// processed buffer already has the right tonality even before the
     /// host pushes its first parameter update.
     pub fn new(sample_rate: f32) -> Self {
+        let mut detune_rng = DetuneRng::seed_from_entropy();
+        let detune = micro_detune_pair(&mut detune_rng);
+
         let body = Filter::new(
             sample_rate,
             FilterType::LowShelf,
             BODY_FREQ_HZ,
             BODY_Q,
             1.0, // factory default body_db
+            detune,
         );
         let presence = Filter::new(
             sample_rate,
@@ -170,6 +182,7 @@ impl SheenModule {
             PRESENCE_FREQ_HZ,
             PRESENCE_Q,
             0.0, // factory default presence_db (transparent)
+            detune,
         );
         let air = Filter::new(
             sample_rate,
@@ -177,6 +190,7 @@ impl SheenModule {
             AIR_FREQ_HZ,
             AIR_Q,
             1.8, // factory default air_db
+            detune,
         );
 
         let hpf_coeff =
@@ -198,6 +212,8 @@ impl SheenModule {
             body,
             presence,
             air,
+            detune_rng,
+            detune,
             width_hpf: TptSvf::new(hpf_coeff),
             width_shelf: TptSvf::new(shelf_coeff),
             warmth_os: [make_warmth_os(), make_warmth_os()],
@@ -364,6 +380,14 @@ impl SheenModule {
     /// anyway, so any residual filter energy decays within ~100 samples for
     /// our chosen Q values, and leaving it avoids a step at the reset point.
     pub fn reset(&mut self) {
+        // #17: redraw this instance's stereo micro-detune and force BODY /
+        // PRESENCE / AIR to regenerate coefficients with it on the very next
+        // `process()` call — the dirty flags otherwise only trip on a slider
+        // move, which could leave the old detune in effect indefinitely.
+        self.detune = micro_detune_pair(&mut self.detune_rng);
+        self.dirty_body = true;
+        self.dirty_presence = true;
+        self.dirty_air = true;
         for os in &mut self.warmth_os {
             os.reset();
         }
@@ -386,6 +410,7 @@ impl SheenModule {
                 BODY_FREQ_HZ,
                 BODY_Q,
                 self.body_db,
+                self.detune,
             );
             self.dirty_body = false;
         }
@@ -396,6 +421,7 @@ impl SheenModule {
                 PRESENCE_FREQ_HZ,
                 PRESENCE_Q,
                 self.presence_db,
+                self.detune,
             );
             self.dirty_presence = false;
         }
@@ -406,6 +432,7 @@ impl SheenModule {
                 AIR_FREQ_HZ,
                 AIR_Q,
                 self.air_db,
+                self.detune,
             );
             self.dirty_air = false;
         }
@@ -561,6 +588,48 @@ mod tests {
             assert_eq!(data_l[i], in_l[i], "L drifted at {i} under bypass");
             assert_eq!(data_r[i], in_r[i], "R drifted at {i} under bypass");
         }
+    }
+
+    /// #17: with a pinned asymmetric detune, BODY (the low shelf) should
+    /// measurably decorrelate an identical L/R input — proof the per-channel
+    /// `Filter` corners are actually diverging, not just plumbed through.
+    #[test]
+    fn detune_decorrelates_channels() {
+        let mut sheen = SheenModule::new(SR);
+        sheen.detune = [1.003, 0.997];
+        sheen.dirty_body = true;
+        sheen.update_parameters(
+            false, // sheen master ON
+            12.0, false, // body: heavy boost, engaged
+            0.0, true, // presence bypassed
+            0.0, true, // air bypassed
+            0.0, true, false, // warmth bypassed, tape mode off
+            0.0, true, // width bypassed
+        );
+
+        let n = 4096;
+        let omega = 2.0 * core::f32::consts::PI * BODY_FREQ_HZ / SR;
+        let mut data_l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
+        let mut data_r: Vec<f32> = data_l.clone();
+
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |slices| {
+                slices.clear();
+                slices.push(&mut data_l);
+                slices.push(&mut data_r);
+            });
+        }
+        sheen.process(&mut buffer);
+
+        let max_diff = data_l[n / 2..]
+            .iter()
+            .zip(data_r[n / 2..].iter())
+            .fold(0.0_f32, |acc, (&a, &b)| acc.max((a - b).abs()));
+        assert!(
+            max_diff > 1.0e-4,
+            "detuned L/R BODY corners should decorrelate the shelf response, got max_diff={max_diff:.6}"
+        );
     }
 
     /// All five per-stage bypasses on + master ON must also be bit-exact.

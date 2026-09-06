@@ -188,6 +188,22 @@ impl SvfCoefficients {
     pub fn magnitude_db(&self, w: f32) -> f32 {
         20.0 * self.response(w).norm().max(f32::MIN_POSITIVE).log10()
     }
+
+    /// Build both channels' coefficients at once, applying `detune[ch]` as a
+    /// frequency multiplier (#17 stereo micro-detuning). `detune` is
+    /// `[1.0, 1.0]` for a transparent (non-detuned) pair.
+    pub(crate) fn new_detuned_pair(
+        filter_type: SvfType,
+        sample_rate: f32,
+        freq_hz: f32,
+        q: f32,
+        detune: [f32; 2],
+    ) -> [Self; 2] {
+        [
+            Self::new(filter_type, sample_rate, freq_hz * detune[0], q),
+            Self::new(filter_type, sample_rate, freq_hz * detune[1], q),
+        ]
+    }
 }
 
 /// One channel of TPT state-variable filter. Stereo callers keep one per

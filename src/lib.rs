@@ -4,6 +4,7 @@ use std::sync::Arc;
 use vizia_plug::ViziaState;
 #[cfg(test)]
 mod biquad_sanity_test;
+mod detune;
 mod hysteresis;
 mod oversampler;
 #[cfg(test)]

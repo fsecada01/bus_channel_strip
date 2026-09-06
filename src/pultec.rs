@@ -1,3 +1,4 @@
+use crate::detune::{micro_detune_pair, DetuneRng};
 use crate::oversampler::Oversampler;
 use crate::svf::{SvfCoefficients, SvfType, TptSvf};
 use nice_plug::buffer::Buffer;
@@ -306,6 +307,11 @@ pub struct PultecEQ {
     hf_boost_filter: [TptSvf; 2],
     hf_cut_filter: [TptSvf; 2],
 
+    /// Per-instance stereo micro-detune (#17, TMT-style) applied to all five
+    /// stages above, redrawn on `reset()`. Not exposed as a parameter.
+    detune_rng: DetuneRng,
+    detune: [f32; 2],
+
     // Tube saturation state
     tube_drive: f32,
 
@@ -333,6 +339,9 @@ impl PultecEQ {
         let make_os = || Oversampler::new_at_factor(PULTEC_TUBE_OS_FACTOR, 1);
         let flat = || [TptSvf::flat(), TptSvf::flat()];
 
+        let mut detune_rng = DetuneRng::seed_from_entropy();
+        let detune = micro_detune_pair(&mut detune_rng);
+
         Self {
             sample_rate,
             lf_boost_filter: flat(),
@@ -340,6 +349,8 @@ impl PultecEQ {
             lf_cut_filter: flat(),
             hf_boost_filter: flat(),
             hf_cut_filter: flat(),
+            detune_rng,
+            detune,
             tube_drive: 0.0,
             tube_os_l: make_os(),
             tube_os_r: make_os(),
@@ -350,7 +361,14 @@ impl PultecEQ {
 
     /// Reset filter, convolver and saturation state. Call on sample-rate
     /// change or buffer discontinuity.
+    ///
+    /// Also redraws this instance's #17 stereo micro-detune —
+    /// `update_parameters` runs unconditionally every buffer and recomputes
+    /// coefficients from `self.detune` fresh each time, so the new value
+    /// takes effect (via `set_stage`'s own change detection) on the very
+    /// next call.
     pub fn reset(&mut self) {
+        self.detune = micro_detune_pair(&mut self.detune_rng);
         for f in self
             .lf_boost_filter
             .iter_mut()
@@ -396,8 +414,12 @@ impl PultecEQ {
         }
     }
 
-    /// Current coefficients of the five EQ stages (left channel; right is
-    /// identical), in processing order.
+    /// Current coefficients of the five EQ stages, left channel. Since #17
+    /// the right channel deviates by up to ±0.3% (stereo micro-detune) —
+    /// the linear-phase FIR kernel is a single shared filter for both
+    /// channels by design (doubling it would cost a second FFT/convolution
+    /// pass per buffer, contradicting #17's "CPU identical" trade-off), so
+    /// it approximates with the left channel's slightly-detuned corner.
     fn stage_coefficients(&self) -> [SvfCoefficients; EQ_STAGES] {
         [
             self.lf_boost_filter[0].coefficients(),
@@ -408,14 +430,16 @@ impl PultecEQ {
         ]
     }
 
-    /// Write `coeffs` to both channels of `pair` if they changed; flags the
-    /// linear-phase kernel for redesign when they did.
+    /// Write `coeffs[ch]` to `pair[ch]` (independently per channel, since
+    /// #17 gives them different frequencies) if it changed; flags the
+    /// linear-phase kernel for redesign when either did.
     #[inline]
-    fn set_stage(pair: &mut [TptSvf; 2], coeffs: SvfCoefficients, kernel_dirty: &mut bool) {
-        if pair[0].coefficients() != coeffs {
-            pair[0].update_coefficients(coeffs);
-            pair[1].update_coefficients(coeffs);
-            *kernel_dirty = true;
+    fn set_stage(pair: &mut [TptSvf; 2], coeffs: [SvfCoefficients; 2], kernel_dirty: &mut bool) {
+        for ch in 0..2 {
+            if pair[ch].coefficients() != coeffs[ch] {
+                pair[ch].update_coefficients(coeffs[ch]);
+                *kernel_dirty = true;
+            }
         }
     }
 
@@ -472,7 +496,13 @@ impl PultecEQ {
             + lf_boost_bandwidth.clamp(0.0, 1.0) * (LF_SHELF_Q_WIDE - LF_SHELF_Q_NARROW);
         Self::set_stage(
             &mut self.lf_boost_filter,
-            SvfCoefficients::new(SvfType::LowShelf(lf_boost_db), sr, safe_lf_freq, lf_boost_q),
+            SvfCoefficients::new_detuned_pair(
+                SvfType::LowShelf(lf_boost_db),
+                sr,
+                safe_lf_freq,
+                lf_boost_q,
+                self.detune,
+            ),
             &mut dirty,
         );
         // Resonant peak: 45% of shelf gain, Q=1.8, same center frequency.
@@ -480,7 +510,13 @@ impl PultecEQ {
         let resonant_db = lf_boost_db * LF_RESONANT_RATIO;
         Self::set_stage(
             &mut self.lf_resonant_filter,
-            SvfCoefficients::new(SvfType::Bell(resonant_db), sr, safe_lf_freq, LF_RESONANT_Q),
+            SvfCoefficients::new_detuned_pair(
+                SvfType::Bell(resonant_db),
+                sr,
+                safe_lf_freq,
+                LF_RESONANT_Q,
+                self.detune,
+            ),
             &mut dirty,
         );
 
@@ -494,7 +530,13 @@ impl PultecEQ {
             + lf_cut_bandwidth.clamp(0.0, 1.0) * (LF_SHELF_Q_WIDE - LF_SHELF_Q_NARROW);
         Self::set_stage(
             &mut self.lf_cut_filter,
-            SvfCoefficients::new(SvfType::LowShelf(lf_cut_db), sr, safe_lf_cut_freq, lf_cut_q),
+            SvfCoefficients::new_detuned_pair(
+                SvfType::LowShelf(lf_cut_db),
+                sr,
+                safe_lf_cut_freq,
+                lf_cut_q,
+                self.detune,
+            ),
             &mut dirty,
         );
 
@@ -505,7 +547,13 @@ impl PultecEQ {
         let safe_hf_freq = hf_boost_freq.clamp(3000.0, 20000.0);
         Self::set_stage(
             &mut self.hf_boost_filter,
-            SvfCoefficients::new(SvfType::Bell(hf_boost_db), sr, safe_hf_freq, hf_q),
+            SvfCoefficients::new_detuned_pair(
+                SvfType::Bell(hf_boost_db),
+                sr,
+                safe_hf_freq,
+                hf_q,
+                self.detune,
+            ),
             &mut dirty,
         );
 
@@ -515,11 +563,12 @@ impl PultecEQ {
         let safe_hf_cut_freq = hf_cut_freq.clamp(5000.0, 20000.0);
         Self::set_stage(
             &mut self.hf_cut_filter,
-            SvfCoefficients::new(
+            SvfCoefficients::new_detuned_pair(
                 SvfType::HighShelf(hf_cut_db),
                 sr,
                 safe_hf_cut_freq,
                 HF_CUT_Q,
+                self.detune,
             ),
             &mut dirty,
         );
@@ -839,6 +888,47 @@ mod tests {
         assert!(
             gain_db.abs() < 0.5,
             "flat Pultec should pass 30 Hz unchanged, got {gain_db:.2} dB"
+        );
+    }
+
+    #[test]
+    fn test_pultec_detune_decorrelates_channels() {
+        // #17: minimum-phase mode runs the SVF stages per-channel, so a
+        // pinned asymmetric detune should measurably decorrelate L/R when a
+        // band is engaged right at the shelf corner.
+        let sr = 48_000.0;
+        let mut eq = PultecEQ::new(sr);
+        eq.detune = [1.003, 0.997];
+        eq.update_parameters(
+            100.0, 15.0, 0.67, // LF boost: 100 Hz, +15 dB, default width
+            100.0, 0.0, 0.5, // LF cut disabled
+            10000.0, 0.0, 0.5, // HF boost disabled
+            10000.0, 0.0, // HF cut disabled
+            0.0, // tube off
+        );
+
+        use nice_plug::buffer::Buffer;
+        let n = 8192_usize;
+        let omega = 2.0 * core::f32::consts::PI * 100.0 / sr;
+        let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
+        let mut r: Vec<f32> = l.clone();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        eq.process(&mut buf);
+
+        let max_diff = l[n / 2..]
+            .iter()
+            .zip(r[n / 2..].iter())
+            .fold(0.0_f32, |acc, (&a, &b)| acc.max((a - b).abs()));
+        assert!(
+            max_diff > 1.0e-4,
+            "detuned L/R corners should decorrelate the shelf response, got max_diff={max_diff:.6}"
         );
     }
 

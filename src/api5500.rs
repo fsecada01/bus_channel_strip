@@ -1,3 +1,4 @@
+use crate::detune::{micro_detune_pair, DetuneRng};
 use crate::shaping::{Filter, FilterType};
 use biquad::Q_BUTTERWORTH_F32;
 use nice_plug::buffer::Buffer;
@@ -9,10 +10,17 @@ pub struct Api5500 {
     mf: Filter,
     hmf: Filter,
     hf: Filter,
+    /// Per-instance stereo micro-detune (#17, TMT-style): a fixed ±0.3%
+    /// per-channel frequency multiplier applied to every band, redrawn on
+    /// `reset()`. Not exposed as a parameter — see `docs/adr/0013-*.md`.
+    detune_rng: DetuneRng,
+    detune: [f32; 2],
 }
 
 impl Api5500 {
     pub fn new(sample_rate: f32) -> Self {
+        let mut detune_rng = DetuneRng::seed_from_entropy();
+        let detune = micro_detune_pair(&mut detune_rng);
         Self {
             sample_rate,
             lf: Filter::new(
@@ -21,6 +29,7 @@ impl Api5500 {
                 20000.0,
                 Q_BUTTERWORTH_F32,
                 0.0,
+                detune,
             ),
             lmf: Filter::new(
                 sample_rate,
@@ -28,6 +37,7 @@ impl Api5500 {
                 20000.0,
                 Q_BUTTERWORTH_F32,
                 0.0,
+                detune,
             ),
             mf: Filter::new(
                 sample_rate,
@@ -35,6 +45,7 @@ impl Api5500 {
                 20000.0,
                 Q_BUTTERWORTH_F32,
                 0.0,
+                detune,
             ),
             hmf: Filter::new(
                 sample_rate,
@@ -42,6 +53,7 @@ impl Api5500 {
                 20000.0,
                 Q_BUTTERWORTH_F32,
                 0.0,
+                detune,
             ),
             hf: Filter::new(
                 sample_rate,
@@ -49,7 +61,10 @@ impl Api5500 {
                 20000.0,
                 Q_BUTTERWORTH_F32,
                 0.0,
+                detune,
             ),
+            detune_rng,
+            detune,
         }
     }
 
@@ -83,6 +98,7 @@ impl Api5500 {
             lf_freq,
             Q_BUTTERWORTH_F32,
             safe_lf_gain,
+            self.detune,
         );
         self.lmf.update_parameters(
             self.sample_rate,
@@ -90,6 +106,7 @@ impl Api5500 {
             lmf_freq,
             lmf_q,
             safe_lmf_gain,
+            self.detune,
         );
         self.mf.update_parameters(
             self.sample_rate,
@@ -97,6 +114,7 @@ impl Api5500 {
             mf_freq,
             mf_q,
             safe_mf_gain,
+            self.detune,
         );
         self.hmf.update_parameters(
             self.sample_rate,
@@ -104,6 +122,7 @@ impl Api5500 {
             hmf_freq,
             hmf_q,
             safe_hmf_gain,
+            self.detune,
         );
         self.hf.update_parameters(
             self.sample_rate,
@@ -111,6 +130,7 @@ impl Api5500 {
             hf_freq,
             Q_BUTTERWORTH_F32,
             safe_hf_gain,
+            self.detune,
         );
     }
 
@@ -131,7 +151,13 @@ impl Api5500 {
 
     /// Zero every band's SVF integrator state on transport reset. See ADR-0011
     /// for why Sheen's EQ deliberately does not do the same.
+    ///
+    /// Also redraws this instance's #17 stereo micro-detune — `update_parameters`
+    /// runs unconditionally every buffer and reads `self.detune` fresh each
+    /// time, so the new value takes effect on the very next call, no extra
+    /// dirty flag needed (contrast Sheen's cached-parameter gating).
     pub fn reset(&mut self) {
+        self.detune = micro_detune_pair(&mut self.detune_rng);
         self.lf.reset();
         self.lmf.reset();
         self.mf.reset();
@@ -243,6 +269,11 @@ mod tests {
         ];
         for (name, freq, gain, q, bq_type) in cases {
             let mut eq = Api5500::new(sr);
+            // #17 introduces a per-instance ±0.3% stereo micro-detune, which
+            // would otherwise blow this test's 1e-3 tolerance against the
+            // exact analytic reference below. Pin it to identity so this
+            // null test keeps validating the TPT core itself.
+            eq.detune = crate::detune::IDENTITY_DETUNE;
             // Every band flat except the one under test.
             let (lf_g, mf_g, hf_g) = match name {
                 "lf shelf" => (gain, 0.0, 0.0),
@@ -292,5 +323,60 @@ mod tests {
                 200.0, 3.0, 500.0, 2.0, 0.7, 2000.0, -1.0, 1.0, 8000.0, 1.0, 1.0, 15000.0, -2.0,
             );
         }
+    }
+
+    // ── #17 stereo micro-detune ─────────────────────────────────────────────
+
+    /// With a fixed, deliberately asymmetric detune pair, feeding identical
+    /// L/R input through a sharply boosted band must produce different L/R
+    /// output — the whole point of #17.
+    #[test]
+    fn test_api5500_detune_decorrelates_channels() {
+        let sr = 48_000.0;
+        let mut eq = Api5500::new(sr);
+        eq.detune = [1.003, 0.997];
+        eq.update_parameters(
+            80.0, 0.0, 1000.0, 12.0, 3.0, 1000.0, 0.0, 1.0, 5000.0, 0.0, 1.0, 12000.0, 0.0,
+        );
+
+        let omega = core::f32::consts::TAU * 1000.0 / sr;
+        let n = 4096;
+        let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
+        let mut r = l.clone();
+        let mut buf = Buffer::default();
+        // SAFETY: `l`/`r` are length `n` and outlive this call.
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        eq.process(&mut buf);
+
+        let max_diff = l
+            .iter()
+            .zip(&r)
+            .fold(0.0_f32, |a, (x, y)| a.max((x - y).abs()));
+        assert!(
+            max_diff > 1.0e-4,
+            "L/R stayed identical under a boosted band with distinct detune (max diff {max_diff:e})"
+        );
+    }
+
+    /// "Re-seeds correctly on reset()" (#17 DoD): the detune pair must
+    /// actually change after `reset()`, not just be redrawn and ignored.
+    #[test]
+    fn test_api5500_reset_reseeds_detune() {
+        let mut eq = Api5500::new(44_100.0);
+        // Pin a known rng state so the reseed is deterministic here too.
+        eq.detune_rng = crate::detune::DetuneRng::from_seed(999);
+        eq.detune = crate::detune::micro_detune_pair(&mut eq.detune_rng);
+        let before = eq.detune;
+        eq.reset();
+        assert_ne!(
+            before, eq.detune,
+            "reset() did not redraw the stereo micro-detune"
+        );
     }
 }
