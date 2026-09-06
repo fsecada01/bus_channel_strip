@@ -28,16 +28,23 @@ impl DetuneRng {
     /// Seed from a nondeterministic source. Call only off the audio thread
     /// (plugin/module construction) — this reads the system clock.
     pub(crate) fn seed_from_entropy() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x9E37_79B9_7F4A_7C15);
-        // Mix in a stack address so instances constructed within the same
-        // clock tick (a host spinning up several plugins back-to-back)
-        // still diverge.
-        let addr = &nanos as *const u64 as u64;
-        Self(nanos ^ addr.rotate_left(17))
+        // Mix in a process-wide monotonic counter, not a stack address: a
+        // local variable's address is the same on every call to this
+        // function at the same call depth (no ASLR variance within one
+        // process), so it contributed nothing to differentiate the four
+        // back-to-back module constructors called from one plugin's init
+        // path. The counter guarantees each call draws a distinct seed even
+        // when SystemTime's resolution is coarser than the gap between
+        // those calls (review finding on PR #31).
+        static SEED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let sequence = SEED_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        Self(nanos ^ sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15))
     }
 
     /// Fixed, non-random seed — deterministic tests only.
@@ -140,6 +147,25 @@ mod tests {
         let pair = micro_detune_pair(&mut rng);
         for &m in &pair {
             assert!((1.0 - TMT_MAX_DEVIATION..=1.0 + TMT_MAX_DEVIATION).contains(&m));
+        }
+    }
+
+    /// Regression for a review finding on PR #31: back-to-back module
+    /// constructors (API5500, Pultec, Transformer, Sheen are all built from
+    /// the same call site during plugin init) must not draw correlated
+    /// seeds just because they land in the same clock tick and the same
+    /// stack slot. The process-wide sequence counter guarantees this
+    /// deterministically — not dependent on clock resolution — so this test
+    /// is not flaky despite exercising the real entropy path.
+    #[test]
+    fn seed_from_entropy_diverges_across_back_to_back_calls() {
+        let seeds: Vec<u64> = (0..8).map(|_| DetuneRng::seed_from_entropy().0).collect();
+        for i in 1..seeds.len() {
+            assert_ne!(
+                seeds[i - 1],
+                seeds[i],
+                "sequential seed_from_entropy() calls produced the same seed"
+            );
         }
     }
 }
