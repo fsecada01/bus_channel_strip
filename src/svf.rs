@@ -1,32 +1,14 @@
 //! Trapezoidal-integrated (TPT / ZDF) state-variable filter core.
 //!
-//! This is the v2.0 EQ filter topology (roadmap §3.2, tracked in #15). It
-//! replaces the RBJ-cookbook `biquad::DirectForm1` cores in every EQ stage:
-//! API5500, Pultec, DynamicEQ, and Sheen (BODY / PRESENCE / AIR / WIDTH).
+//! The v2.0 EQ filter topology (#15), replacing `biquad::DirectForm1` in
+//! every EQ stage (API5500, Pultec, DynamicEQ, Sheen). Rationale and null
+//! tests against the old cores: [ADR-0011](../../docs/adr/0011-tpt-svf-and-pultec-linear-phase.md).
 //!
 //! Reference: Andrew Simper (Cytomic), "Solving the continuous SVF equations
-//! using trapezoidal integration and equivalent currents" — the
-//! `SvfLinearTrapOptimised2` formulation. Every response type is built from
-//! the same two-integrator core plus a three-term output mix `(m0, m1, m2)`
-//! over `(input, band, low)`, so the per-sample cost is identical regardless
-//! of type and switching types never touches the state.
-//!
-//! Why TPT instead of direct-form biquads:
-//!
-//! - **Steady-state response is identical.** TPT is the bilinear transform
-//!   of the same RBJ analog prototype, so magnitude *and* phase null
-//!   against the old `DirectForm1` cores to f32 rounding. Sessions saved
-//!   under v1.0 keep their tonality (see `tests` below for the null proofs).
-//! - **Glitch-free modulation.** The state variables are the integrator
-//!   outputs (physical capacitor voltages), not delayed outputs, so a
-//!   coefficient change mid-stream produces the new filter's response
-//!   immediately with no transient burst — DirectForm1 state is a set of
-//!   delayed samples that only make sense for the *old* coefficients.
-//!   DynamicEQ recomputes coefficients every couple of samples under gain
-//!   reduction, which is exactly the case DF1 handles worst.
-//! - **Stable at extreme Q.** The trapezoidal integrator is unconditionally
-//!   stable for `g > 0`, `k >= 0`; the recursion never has coefficient
-//!   quantisation pushing a pole outside the unit circle.
+//! using trapezoidal integration and equivalent currents" —
+//! `SvfLinearTrapOptimised2`. Every response type shares the same
+//! two-integrator core plus an output mix `(m0, m1, m2)` over
+//! `(input, band, low)`.
 
 use realfft::num_complex::Complex;
 
@@ -51,9 +33,7 @@ const MIN_FREQ_HZ: f32 = 1.0;
 /// parameter mapping.
 const MIN_Q: f32 = 0.025;
 
-/// RBJ cookbook's sqrt-of-linear-gain convention: `A = 10^(dB/RBJ_GAIN_DIVISOR)`,
-/// so `A*A` (used directly in the shelf/bell mix terms) equals the linear gain
-/// `10^(dB/20)`.
+/// RBJ cookbook's sqrt-of-linear-gain convention: `A = 10^(dB/RBJ_GAIN_DIVISOR)`.
 const RBJ_GAIN_DIVISOR: f32 = 40.0;
 
 #[inline(always)]
@@ -122,26 +102,20 @@ impl SvfCoefficients {
     /// never fails and never produces NaN — callers pass parameter values
     /// straight through.
     pub fn new(filter_type: SvfType, sample_rate: f32, freq_hz: f32, q: f32) -> Self {
-        // `.max().min()` rather than `.clamp()` so a zero/negative sample
-        // rate can never make min > max and panic on the audio thread.
-        // Floored first so `freq_hz`'s clamp range and `g`'s prewarp below
-        // are derived from the same effective sample rate.
+        // `.max().min()`, not `.clamp()`: a degenerate sample rate must
+        // never invert the clamp bounds and panic on the audio thread.
         let sample_rate = sample_rate.max(2.0 * MIN_FREQ_HZ);
         let max_hz = (sample_rate * MAX_FREQ_RATIO).max(MIN_FREQ_HZ);
         let freq_hz = freq_hz.max(MIN_FREQ_HZ).min(max_hz);
         let q = q.max(MIN_Q);
 
-        // Prewarped integrator gain. tan() of the normalised corner maps the
-        // analog prototype's corner exactly onto the digital one (this is
-        // what makes the response identical to the bilinear-transformed RBJ
-        // biquad rather than merely similar).
+        // Prewarped integrator gain — tan() of the normalised corner maps
+        // the analog prototype's corner exactly onto the digital one.
         let mut g = (core::f32::consts::PI * freq_hz / sample_rate).tan();
         let mut k = 1.0 / q;
 
-        // Output mix over (input, band, low). Derivations: substituting
-        // lp = 1/D, bp = s/D with D = s² + k·s + 1 into m0 + m1·bp + m2·lp
-        // reproduces the RBJ cookbook prototypes term for term. A = 10^(dB/40)
-        // is the cookbook's sqrt-of-linear-gain convention.
+        // Output mix over (input, band, low); reproduces the RBJ cookbook
+        // prototypes term for term (substitute lp = 1/D, bp = s/D, D = s²+k·s+1).
         let (m0, m1, m2) = match filter_type {
             SvfType::LowPass => (0.0, 0.0, 1.0),
             SvfType::BandPass => (0.0, 1.0, 0.0),
@@ -273,12 +247,9 @@ impl TptSvf {
         // new response without a transient.
         self.ic1eq = flush_denormal(2.0 * v1 - self.ic1eq);
         self.ic2eq = flush_denormal(2.0 * v2 - self.ic2eq);
-        // Flushing only the state isn't enough: for filter types with a
-        // nonzero direct-path term (m0, e.g. HighPass/Notch/shelves), a
-        // subnormal `v0` arriving from an upstream stage's own decay tail
-        // reaches the output un-flushed even once this filter's own state
-        // has settled to exactly zero, re-triggering the FTZ-less x86
-        // subnormal stall one stage downstream.
+        // Flush the output too: types with a direct-path term (m0) can pass
+        // a subnormal `v0` straight through even once this filter's own
+        // state has settled to zero, re-triggering the stall downstream.
         flush_denormal(c.m0 * v0 + c.m1 * v1 + c.m2 * v2)
     }
 

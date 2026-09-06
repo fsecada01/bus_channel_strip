@@ -30,5 +30,6 @@ ADRs are numbered sequentially (`0001`, `0002`, …). Numbers are never reused. 
 | [0008](0008-buttercomp2-ffi-wrapper.md) | ButterComp2: FFI Wrapper over Airwindows C++, Not a Rust Port | Implemented |
 | [0009](0009-gui-framework-and-color-coding.md) | GUI Framework: vizia-plug, with Per-Module Color Coding | Implemented |
 | [0010](0010-mix-advisor-reascript-architecture.md) | Mix Advisor: Rust HTTP Broker + ReaScript/ReaImGui Client, Studio-Profile-v1 Schema | Implemented |
+| [0011](0011-tpt-svf-and-pultec-linear-phase.md) | TPT State-Variable Filter Core + Pultec Linear-Phase Mode | Implemented |
 
 `resources/` holds supporting data files referenced by an ADR (currently: `studio-profiles.json` for ADR-0010) that don't belong inline in the decision record itself.

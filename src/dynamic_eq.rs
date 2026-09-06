@@ -105,10 +105,7 @@ impl BandFilter {
 
     #[inline]
     fn design(filter_type: SvfType, freq_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
-        // `.max().min()` rather than `.clamp()` — a degenerate sample rate
-        // could otherwise make the upper bound fall below BAND_MIN_FREQ_HZ
-        // and panic on the audio thread (same reasoning as svf.rs's own
-        // coefficient clamp).
+        // `.max().min()`, not `.clamp()` — see svf.rs's identical guard.
         let max_hz = (sample_rate * BAND_MAX_FREQ_RATIO).max(BAND_MIN_FREQ_HZ);
         let freq_hz = freq_hz.max(BAND_MIN_FREQ_HZ).min(max_hz);
         SvfCoefficients::new(filter_type, sample_rate, freq_hz, q.max(BAND_MIN_Q))
@@ -146,11 +143,8 @@ impl BandFilter {
     }
 
     /// Update a stereo pair of peaking filters from one shared coefficient
-    /// computation. `l` and `r` always receive identical parameters — only
-    /// per-sample state diverges — so computing `SvfCoefficients::new` (a
-    /// `tan()`/`powf()` derivation) twice per update is pure waste. This is
-    /// the hot path: gain-reduction tracking recomputes on essentially every
-    /// sample pair during active compression.
+    /// computation — `l`/`r` always get identical parameters, so deriving
+    /// them once avoids a redundant `tan()`/`powf()` on this hot path.
     fn update_peaking_pair(
         l: &mut Self,
         r: &mut Self,

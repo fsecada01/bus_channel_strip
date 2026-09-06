@@ -129,10 +129,8 @@ impl Api5500 {
         }
     }
 
-    /// Zero every band's SVF integrator state. Call on transport reset — the
-    /// other four EQ modules already clear their filter state there, and
-    /// (unlike Sheen's deliberately-left-to-settle EQ, see its own `reset()`)
-    /// API5500 had no reset path at all before #15 added `Filter::reset()`.
+    /// Zero every band's SVF integrator state on transport reset. See ADR-0011
+    /// for why Sheen's EQ deliberately does not do the same.
     pub fn reset(&mut self) {
         self.lf.reset();
         self.lmf.reset();
@@ -202,9 +200,7 @@ mod tests {
         let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
         let mut r = l.clone();
         let mut buf = Buffer::default();
-        // SAFETY: `l` and `r` are each length `n` and live for the duration
-        // of this function, so the slices `set_slices` hands to `ss` are
-        // valid and correctly sized for the whole call.
+        // SAFETY: `l`/`r` are length `n` and outlive this call.
         unsafe {
             buf.set_slices(n, |ss| {
                 ss.clear();

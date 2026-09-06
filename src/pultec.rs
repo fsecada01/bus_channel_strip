@@ -51,14 +51,8 @@ const _: () = assert!(LP_DESIGN_FFT >= 2 * LINEAR_PHASE_TAPS);
 const _: () = assert!(LINEAR_PHASE_TAPS % 2 == 1);
 const _: () = assert!(LINEAR_PHASE_LATENCY == 512);
 
-/// Minimum samples between kernel redesigns. Pultec params carry no
-/// smoother, so automation or a dragged knob can flag a coefficient change
-/// on essentially every host block; without a floor, `design_kernel`'s
-/// 4096-point IFFT + 5-stage evaluation + 1024-point FFT would re-run that
-/// often, which is well outside a sane audio-thread CPU budget. Gating
-/// redesigns to once per hop keeps the amortised cost the same order as
-/// running the convolution itself, at the price of a bounded (<= one hop)
-/// delay before a coefficient change is reflected in the kernel.
+/// Minimum samples between kernel redesigns, bounding automation's worst-case
+/// hit on `design_kernel`'s cost to once per hop. See ADR-0011.
 const KERNEL_REDESIGN_MIN_INTERVAL: usize = LP_HOP;
 
 /// Overlap-save FFT convolver plus the zero-phase FIR designer that feeds it.
@@ -133,9 +127,7 @@ impl LinearPhaseEngine {
             kernel_time: fft_fwd.make_input_vec(),
             kernel_spec: fft_fwd.make_output_vec(),
             kernel_dirty: true,
-            // "Ready" from construction so the first real coefficient update
-            // (typically before any audio has flowed) redesigns immediately
-            // rather than waiting out the throttle window.
+            // "Ready" so the first coefficient update redesigns immediately.
             samples_since_redesign: KERNEL_REDESIGN_MIN_INTERVAL,
             hist: [vec![0.0; LP_FFT], vec![0.0; LP_FFT]],
             out_block: [vec![0.0; LP_HOP], vec![0.0; LP_HOP]],
@@ -162,12 +154,8 @@ impl LinearPhaseEngine {
     /// 3. Take the centre `LINEAR_PHASE_TAPS` samples, Hann-window them.
     /// 4. Forward FFT (zero-padded to `LP_FFT`) → kernel spectrum.
     fn design_kernel(&mut self, stages: &[SvfCoefficients; EQ_STAGES]) {
-        // A flat stage contributes exactly unity magnitude at every bin, so
-        // evaluating `response_from_tan` (a complex division) for it is pure
-        // waste. LF cut/HF boost/HF cut, and often LF boost too, sit at their
-        // flat default for most of a session, so this is a real cost cut on
-        // a function this throttled but still audio-thread-adjacent. A fixed
-        // stack array (not a `Vec`) keeps this allocation-free.
+        // Flat stages contribute unity magnitude everywhere; skip their
+        // `response_from_tan` call. Stack array, not `Vec` — stays allocation-free.
         let flat = SvfCoefficients::flat();
         let mut is_active = [false; EQ_STAGES];
         for (active, stage) in is_active.iter_mut().zip(stages) {
@@ -620,19 +608,14 @@ impl PultecEQ {
         }
     }
 
-    /// Bypass path. In minimum-phase mode this is a no-op (zero latency,
-    /// nothing to keep aligned). In linear-phase mode the module still owes
-    /// the host `LINEAR_PHASE_LATENCY` samples of delay, so the dry signal is
-    /// delayed by exactly that amount — and the convolver keeps running on
-    /// the input so un-bypassing resumes with a warm history instead of a
-    /// 512-sample fade-in.
+    /// Bypass path. In minimum-phase mode this is a no-op. In linear-phase
+    /// mode the module still owes the host `LINEAR_PHASE_LATENCY` samples of
+    /// delay, so the dry signal is delayed by exactly that amount while the
+    /// convolver keeps running, ready to un-bypass with a warm history.
     ///
-    /// The caller also uses this when Pultec isn't an active chain slot at
-    /// all (not just module-bypassed) while linear-phase mode is engaged —
-    /// see `sync_pultec_latency` in `lib.rs`. Since latency is reported from
-    /// the toggle alone, not chain membership, this keeps the FIR draining
-    /// and the promised delay actually applied to the signal regardless of
-    /// why the module isn't running its full EQ chain this block.
+    /// Also called (see `sync_pultec_latency` in `lib.rs`) when Pultec isn't
+    /// an active chain slot at all — ADR-0011. Keeps the FIR draining so the
+    /// signal always carries the delay the plugin reported to the host.
     pub fn process_bypassed(&mut self, buffer: &mut Buffer) {
         if !self.linear_phase {
             return;
@@ -869,9 +852,7 @@ mod tests {
         let mut l = input.to_vec();
         let mut r = input.to_vec();
         let mut buf = Buffer::default();
-        // SAFETY: `l` and `r` are each length `n` and live for the duration
-        // of this function, so the slices `set_slices` hands to `ss` are
-        // valid and correctly sized for the whole call.
+        // SAFETY: `l`/`r` are length `n` and outlive this call.
         unsafe {
             buf.set_slices(n, |ss| {
                 ss.clear();

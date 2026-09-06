@@ -1947,20 +1947,9 @@ impl BusChannelStrip {
     }
 
     /// Sync the Pultec linear-phase mode with its param and report latency
-    /// to the host when it changes.
-    ///
-    /// Latency tracks the `pultec_linear_phase` param alone, not module-order
-    /// membership. An earlier version also required Pultec to be in the
-    /// active chain, on the reasoning that a Pultec sitting unused shouldn't
-    /// cost the track any latency — but that meant dragging Pultec out of
-    /// the rack mid-playback while linear-phase was engaged dropped the
-    /// reported latency to 0 on the same block the FIR's buffered 512
-    /// samples were discarded, producing an audible glitch. Tying latency to
-    /// the toggle alone means engaging Linear Phase costs 512 samples until
-    /// you turn it back off, regardless of chain reordering — simpler, and
-    /// `process()` keeps the FIR draining via `process_bypassed` whenever
-    /// Pultec isn't an active chain slot, so the delay this promises the
-    /// host is always actually applied to the signal.
+    /// to the host when it changes. Tracks the param alone, not module-order
+    /// membership — see ADR-0011 for why, and `process()`'s fallback drain
+    /// via `process_bypassed` that this decision depends on.
     #[cfg(feature = "pultec")]
     fn sync_pultec_latency(&mut self, set_latency: &mut dyn FnMut(u32)) {
         self.pultec
@@ -2565,13 +2554,8 @@ impl Plugin for BusChannelStrip {
             self.dispatch_module(mt, buffer, aux);
         }
 
-        // If Pultec isn't an active chain slot this block but linear-phase
-        // mode is engaged, the plugin has still promised the host a
-        // 512-sample delay (see `sync_pultec_latency`) — keep applying it as
-        // a pure passthrough so the signal actually carries the latency
-        // being claimed, instead of silently dropping the FIR's buffered
-        // audio and leaving the track undelayed relative to what the host
-        // compensates for. A no-op when linear-phase mode is off.
+        // Pultec dropped from the chain but still owes its reported latency
+        // (ADR-0011) — keep the FIR draining. No-op if linear-phase is off.
         #[cfg(feature = "pultec")]
         if !seen[module_type_index(ModuleType::PultecEQ)] {
             self.pultec.process_bypassed(buffer);
