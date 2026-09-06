@@ -128,6 +128,16 @@ impl Api5500 {
             }
         }
     }
+
+    /// Zero every band's SVF integrator state on transport reset. See ADR-0011
+    /// for why Sheen's EQ deliberately does not do the same.
+    pub fn reset(&mut self) {
+        self.lf.reset();
+        self.lmf.reset();
+        self.mf.reset();
+        self.hmf.reset();
+        self.hf.reset();
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +191,97 @@ mod tests {
             100.0, -100.0, 300.0, -100.0, 0.7, 1000.0, -100.0, 1.0, 5000.0, -100.0, 1.2, 12000.0,
             -100.0,
         );
+    }
+
+    /// Run a stereo sine through `Api5500::process` and return the left
+    /// channel output.
+    fn process_sine(eq: &mut Api5500, freq_hz: f32, sr: f32, n: usize) -> Vec<f32> {
+        let omega = core::f32::consts::TAU * freq_hz / sr;
+        let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
+        let mut r = l.clone();
+        let mut buf = Buffer::default();
+        // SAFETY: `l`/`r` are length `n` and outlive this call.
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        eq.process(&mut buf);
+        l
+    }
+
+    /// Checklist item 2 (#15): API5500 is the first module validated on the
+    /// TPT core. With one band boosted and the other four flat, the module
+    /// output must null against a single RBJ biquad of the same design —
+    /// proving both that the TPT core matches the old topology and that the
+    /// flat stages are transparent.
+    #[test]
+    fn test_api5500_tpt_core_nulls_against_biquad_reference() {
+        use crate::shaping::biquad_coeffs;
+        use biquad::{Biquad, DirectForm1, Type};
+
+        let sr = 48_000.0;
+        let n = 8192;
+        let cases: [(&str, f32, f32, f32, Type<f32>); 3] = [
+            ("mf bell", 1000.0, 6.0, 1.0, Type::PeakingEQ(6.0)),
+            (
+                "lf shelf",
+                100.0,
+                4.0,
+                Q_BUTTERWORTH_F32,
+                Type::LowShelf(4.0),
+            ),
+            (
+                "hf shelf",
+                10000.0,
+                -5.0,
+                Q_BUTTERWORTH_F32,
+                Type::HighShelf(-5.0),
+            ),
+        ];
+        for (name, freq, gain, q, bq_type) in cases {
+            let mut eq = Api5500::new(sr);
+            // Every band flat except the one under test.
+            let (lf_g, mf_g, hf_g) = match name {
+                "lf shelf" => (gain, 0.0, 0.0),
+                "mf bell" => (0.0, gain, 0.0),
+                _ => (0.0, 0.0, gain),
+            };
+            eq.update_parameters(
+                if name == "lf shelf" { freq } else { 80.0 },
+                lf_g,
+                300.0,
+                0.0,
+                0.7,
+                if name == "mf bell" { freq } else { 1000.0 },
+                mf_g,
+                q,
+                5000.0,
+                0.0,
+                1.0,
+                if name == "hf shelf" { freq } else { 12000.0 },
+                hf_g,
+            );
+            let out = process_sine(&mut eq, freq, sr, n);
+
+            let mut reference =
+                DirectForm1::<f32>::new(biquad_coeffs(bq_type, sr, freq, q).unwrap());
+            let omega = core::f32::consts::TAU * freq / sr;
+            let expected: Vec<f32> = (0..n)
+                .map(|i| reference.run((omega * i as f32).sin()))
+                .collect();
+
+            let diff = out
+                .iter()
+                .zip(&expected)
+                .fold(0.0_f32, |a, (x, y)| a.max((x - y).abs()));
+            assert!(
+                diff < 1.0e-3,
+                "{name}: API5500 output differs from biquad reference by {diff:e}"
+            );
+        }
     }
 
     #[test]

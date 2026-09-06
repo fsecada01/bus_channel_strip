@@ -17,8 +17,8 @@
 //! Stage rationale and citations live in `docs/adr/0006-sheen-pinned-master-end-polish.md`.
 
 use crate::oversampler::Oversampler;
-use crate::shaping::{biquad_coeffs, Filter, FilterType};
-use biquad::{Biquad, DirectForm1, Type};
+use crate::shaping::{Filter, FilterType};
+use crate::svf::{SvfCoefficients, SvfType, TptSvf};
 use nih_plug::buffer::Buffer;
 
 // ============================================================================
@@ -98,9 +98,9 @@ pub struct SheenModule {
     air: Filter,
 
     // WIDTH side-channel filters. These see ONE signal (the M/S-derived
-    // side), so a single DirectForm1 — not a `Filter` — is correct.
-    width_hpf: DirectForm1<f32>,
-    width_shelf: DirectForm1<f32>,
+    // side), so a single TPT SVF — not a stereo `Filter` — is correct.
+    width_hpf: TptSvf,
+    width_shelf: TptSvf,
 
     // WARMTH oversamplers — one halfband-FIR Oversampler per channel, run
     // inline (one sample in → OS_FACTOR samples out) like Pultec's tube
@@ -114,7 +114,8 @@ pub struct SheenModule {
 
     // Cached parameter values. Compared against incoming params each buffer
     // so coefficients only regenerate when a slider actually moves —
-    // sin/cos in `biquad_coeffs` is the most expensive op in this module.
+    // tan/powf in the SVF coefficient design is the most expensive op in
+    // this module.
     body_db: f32,
     presence_db: f32,
     air_db: f32,
@@ -170,15 +171,14 @@ impl SheenModule {
             1.8, // factory default air_db
         );
 
-        let hpf_coeff = biquad_coeffs(Type::HighPass, sample_rate, WIDTH_HPF_HZ, WIDTH_HPF_Q)
-            .expect("Sheen width HPF coefficient build failed at construction");
-        let shelf_coeff = biquad_coeffs(
-            Type::HighShelf(width_shelf_db_for(0.5)), // factory default width=0.5
+        let hpf_coeff =
+            SvfCoefficients::new(SvfType::HighPass, sample_rate, WIDTH_HPF_HZ, WIDTH_HPF_Q);
+        let shelf_coeff = SvfCoefficients::new(
+            SvfType::HighShelf(width_shelf_db_for(0.5)), // factory default width=0.5
             sample_rate,
             WIDTH_SHELF_HZ,
             WIDTH_SHELF_Q,
-        )
-        .expect("Sheen width shelf coefficient build failed at construction");
+        );
 
         // Oversamplers are used inline (one sample in → OS_FACTOR samples
         // out), so `max_block_size = 1` keeps their scratch buffers minimal
@@ -190,8 +190,8 @@ impl SheenModule {
             body,
             presence,
             air,
-            width_hpf: DirectForm1::<f32>::new(hpf_coeff),
-            width_shelf: DirectForm1::<f32>::new(shelf_coeff),
+            width_hpf: TptSvf::new(hpf_coeff),
+            width_shelf: TptSvf::new(shelf_coeff),
             warmth_os: [make_warmth_os(), make_warmth_os()],
             warmth_was_active: false,
             body_db: 1.0,
@@ -252,7 +252,7 @@ impl SheenModule {
             self.width_param = width_param;
             self.dirty_width = true;
         }
-        // Warmth Effect doesn't drive a biquad; clamp and stash directly.
+        // Warmth Effect doesn't drive a filter; clamp and stash directly.
         self.warmth_effect = warmth_effect.clamp(0.0, 1.0);
 
         self.body_bypass = body_bypass;
@@ -343,13 +343,11 @@ impl SheenModule {
         }
     }
 
-    /// Reset the warmth oversamplers' halfband-FIR delay lines. Biquad
-    /// state is left to settle naturally with silence input — DirectForm1
-    /// has no public reset and rebuilding the filters mid-process would
-    /// require re-running `biquad_coeffs` (sin/cos), which we'd rather
-    /// avoid. In practice the host calls `reset()` on transport start
-    /// where the buffer leading edge is silence anyway, so any residual
-    /// filter energy decays within ~100 samples for our chosen Q values.
+    /// Reset the warmth oversamplers' halfband-FIR delay lines. EQ filter
+    /// state is left to settle naturally with silence input: the host calls
+    /// `reset()` on transport start where the buffer leading edge is silence
+    /// anyway, so any residual filter energy decays within ~100 samples for
+    /// our chosen Q values, and leaving it avoids a step at the reset point.
     pub fn reset(&mut self) {
         for os in &mut self.warmth_os {
             os.reset();
@@ -395,14 +393,12 @@ impl SheenModule {
         }
         if self.dirty_width {
             let shelf_db = width_shelf_db_for(self.width_param);
-            if let Ok(coeff) = biquad_coeffs(
-                Type::HighShelf(shelf_db),
+            self.width_shelf.update_coefficients(SvfCoefficients::new(
+                SvfType::HighShelf(shelf_db),
                 self.sample_rate,
                 WIDTH_SHELF_HZ,
                 WIDTH_SHELF_Q,
-            ) {
-                self.width_shelf.update_coefficients(coeff);
-            }
+            ));
             self.dirty_width = false;
         }
     }

@@ -7,6 +7,26 @@ For full release notes, binaries, and platform-specific archives, see the [GitHu
 
 ---
 
+## v2.0.0 — Unreleased
+
+### EQ filter topology: TPT state-variable filters (breaking *sound* change)
+
+Every EQ stage in the plugin now runs on a trapezoidal-integrated (TPT / zero-delay-feedback) state-variable filter core instead of the RBJ-cookbook direct-form biquads used in v1.0. This covers **API5500** (all five bands and the HPF/LPF), **Pultec** (all five sections), **Dynamic EQ** (all four bands plus the sidechain and solo filters), and **Sheen** (BODY, PRESENCE, AIR and both WIDTH filters). Tracked in [#15](https://github.com/fsecada01/bus_channel_strip/issues/15); rationale in [`docs/V2_ROADMAP.md` §3.2](https://github.com/fsecada01/bus_channel_strip/blob/main/docs/V2_ROADMAP.md).
+
+**What changes for existing sessions.** Parameter IDs are unchanged, so v1.0 sessions load and play without any relinking or missing-parameter warnings. What you hear is *slightly* different:
+
+- **Static curves are the same.** The TPT core is the bilinear transform of the same analog prototype the biquads used, so at fixed settings the new filters null against the old ones to floating-point precision at every frequency, gain and Q the modules expose. A session that was not automating EQ parameters will sound identical.
+- **Moving parameters behave differently, for the better.** Direct-form biquad state is a set of delayed output samples that only make sense for the *old* coefficients, so sweeping a frequency or Q (or the Dynamic EQ's gain-reduction path recomputing coefficients every couple of samples) produced small transient bursts. The SVF state variables are the integrators' outputs, so a coefficient change lands on the new response immediately. Automated EQ moves, Dynamic EQ under heavy gain reduction, and high-Q settings are the places you may hear a cleaner result.
+- **No biquad fallback.** The migration is hard: there is no "v1.0 filter" toggle. This is the same compatibility stance taken for Sheen in v1.0.
+
+### Pultec: Linear Phase mode
+
+A new **Linear Phase** switch on the Pultec (parameter `pultec_linear_phase`, off by default). When engaged, the five EQ sections are replaced by a single zero-phase FIR whose magnitude is designed from the very same filter coefficients the minimum-phase chain uses, so the two modes measure the same and differ only in phase. The tube stage still runs after the FIR.
+
+- **Latency: 512 samples** at any sample rate (10.7 ms at 48 kHz), reported to the host for delay compensation. Latency is reported only while the switch is on *and* the Pultec is in the module chain; the module's bypass and the global bypass both preserve the delay so toggling never shifts the track against its neighbours.
+- **Low-frequency resolution.** The 513-tap kernel resolves roughly fs/513 (≈ 94 Hz at 48 kHz). HF sections reproduce within a fraction of a dB; the LF boost shelf and its resonant bump are delivered but with a softer corner than minimum-phase mode below ~200 Hz. A longer-kernel "high resolution" option is a planned follow-up.
+- Defaults off, so v1.0 sessions keep their zero-latency behaviour on load.
+
 ## v1.0.0 — 2026-04
 
 Two major workstreams shipped together: **Sheen** (a hidden master-end polish coat) and a **full multi-fx rack UX redesign** that finally makes module reordering feel native.
