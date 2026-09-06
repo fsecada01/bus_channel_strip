@@ -1,9 +1,13 @@
 // src/dynamic_eq.rs — 4-band dynamic equalizer
 //
 // Key design decisions:
-//   - BiquadPeak replaces biquad::DirectForm1 everywhere so filter state
-//     is never reset when coefficients change (DirectForm1::new() zeroed state).
-//   - The sidechain detection filter is a BiquadPeak running in
+//   - BandFilter wraps the TPT state-variable core (`crate::svf`, #15) so
+//     filter state is never reset when coefficients change, and — unlike the
+//     direct-form biquad it replaced — a coefficient swap lands on the new
+//     response with no transient. The gain-reduction path recomputes
+//     coefficients every couple of samples, which is exactly the case the
+//     SVF topology exists for.
+//   - The sidechain detection filter is a BandFilter running in
 //     constant-0-dB-peak bandpass mode so out-of-band energy is rejected
 //     rather than leaking through at unity gain (a +6 dB peaking EQ used
 //     previously passed all out-of-band content, biasing detection toward
@@ -13,15 +17,9 @@
 //   - Solo mode routes only the soloed band(s) through a RBJ bandpass filter
 //     so the user can isolate exactly the frequency range being processed.
 
+use crate::svf::{flush_denormal, SvfCoefficients, SvfType, TptSvf};
 use nice_plug::buffer::Buffer;
 use nice_plug::prelude::Enum;
-
-// Denormal flush threshold. IIR filters and envelope followers asymptote to
-// zero through the subnormal range (|x| < ~1.18e-38 on f32), which on x86
-// without FTZ costs ~100x the normal multiply latency. Flushing any state
-// below this threshold to zero eliminates the stall while introducing an
-// error well below any audible level.
-const DENORMAL_FLUSH: f32 = 1.0e-20;
 
 // RMS integration window for sidechain detection. 10 ms is a conventional
 // trade-off: long enough to smooth out transient spikes that would cause
@@ -80,120 +78,102 @@ fn compute_gain_change_db(over_db: f32, mode: DynamicMode, ratio: f32) -> f32 {
     }
 }
 
-#[inline(always)]
-fn flush_denormal(x: f32) -> f32 {
-    if x.abs() < DENORMAL_FLUSH {
-        0.0
-    } else {
-        x
-    }
-}
-
-// ── Stateful biquad ──────────────────────────────────────────────────────────
+// ── Stateful band filter ─────────────────────────────────────────────────────
 //
-// Both the EQ and sidechain filters use this struct. Coefficient fields
-// (b0‥a2) are updated in-place without touching the state fields (x1,x2,y1,y2).
+// Both the EQ and sidechain filters use this struct. Coefficients are
+// swapped in-place on the TPT SVF core; the integrator state is untouched.
 
-struct BiquadPeak {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-    x1: f32,
-    x2: f32,
-    y1: f32,
-    y2: f32,
+/// Lowest centre frequency the module designs for. Matches the parameter
+/// ranges; anything below is a mapping bug and gets pinned here rather than
+/// producing a sub-audio filter.
+const BAND_MIN_FREQ_HZ: f32 = 20.0;
+/// Highest centre frequency as a fraction of the sample rate.
+const BAND_MAX_FREQ_RATIO: f32 = 0.49;
+/// Lowest Q accepted by the band filters.
+const BAND_MIN_Q: f32 = 0.1;
+
+struct BandFilter {
+    svf: TptSvf,
 }
 
-impl BiquadPeak {
+impl BandFilter {
     fn new() -> Self {
-        // Identity (flat): b0=1, all others 0.
         Self {
-            b0: 1.0,
-            b1: 0.0,
-            b2: 0.0,
-            a1: 0.0,
-            a2: 0.0,
-            x1: 0.0,
-            x2: 0.0,
-            y1: 0.0,
-            y2: 0.0,
+            svf: TptSvf::flat(),
         }
     }
 
-    /// RBJ Cookbook peaking EQ — updates coefficients, preserves state.
-    fn update_peaking(&mut self, freq_hz: f32, q: f32, gain_db: f32, sample_rate: f32) {
-        let freq_hz = freq_hz.clamp(20.0, sample_rate * 0.49);
-        let q = q.max(0.1);
-        let a = 10.0f32.powf(gain_db / 40.0); // sqrt of linear gain
-        let w0 = std::f32::consts::TAU * freq_hz / sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-        let inv_a0 = 1.0 / (1.0 + alpha / a);
-        self.b0 = (1.0 + alpha * a) * inv_a0;
-        self.b1 = (-2.0 * cos_w0) * inv_a0;
-        self.b2 = (1.0 - alpha * a) * inv_a0;
-        self.a1 = (-2.0 * cos_w0) * inv_a0;
-        self.a2 = (1.0 - alpha / a) * inv_a0;
+    #[inline]
+    fn design(filter_type: SvfType, freq_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
+        // `.max().min()`, not `.clamp()` — see svf.rs's identical guard.
+        let max_hz = (sample_rate * BAND_MAX_FREQ_RATIO).max(BAND_MIN_FREQ_HZ);
+        let freq_hz = freq_hz.max(BAND_MIN_FREQ_HZ).min(max_hz);
+        SvfCoefficients::new(filter_type, sample_rate, freq_hz, q.max(BAND_MIN_Q))
     }
 
-    /// RBJ Cookbook constant-0-dB-peak bandpass — updates coefficients, preserves state.
+    /// Peaking EQ (RBJ prototype) — updates coefficients, preserves state.
+    fn update_peaking(&mut self, freq_hz: f32, q: f32, gain_db: f32, sample_rate: f32) {
+        self.svf.update_coefficients(Self::design(
+            SvfType::Bell(gain_db),
+            freq_hz,
+            q,
+            sample_rate,
+        ));
+    }
+
+    /// Constant-0-dB-peak bandpass — updates coefficients, preserves state.
     /// Peak gain is exactly 1.0 at `freq_hz` regardless of Q, so the detected level
     /// equals the actual signal energy in the band. Out-of-band content falls off
     /// at ~6 dB/octave * Q. Used for sidechain detection so the envelope follower
     /// is not contaminated by broadband low-frequency energy.
     fn update_bandpass_unity(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
-        let freq_hz = freq_hz.clamp(20.0, sample_rate * 0.49);
-        let q = q.max(0.1);
-        let w0 = std::f32::consts::TAU * freq_hz / sample_rate;
-        let cos_w0 = w0.cos();
-        let sin_w0 = w0.sin();
-        let alpha = sin_w0 / (2.0 * q);
-        let inv_a0 = 1.0 / (1.0 + alpha);
-        self.b0 = alpha * inv_a0;
-        self.b1 = 0.0;
-        self.b2 = -alpha * inv_a0;
-        self.a1 = (-2.0 * cos_w0) * inv_a0;
-        self.a2 = (1.0 - alpha) * inv_a0;
+        self.svf.update_coefficients(Self::design(
+            SvfType::BandPassUnity,
+            freq_hz,
+            q,
+            sample_rate,
+        ));
     }
 
-    /// RBJ Cookbook constant-skirt-gain bandpass — updates coefficients, preserves state.
+    /// Constant-skirt-gain bandpass — updates coefficients, preserves state.
     /// Used for solo band-isolation mode.
     fn update_bandpass(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
-        let freq_hz = freq_hz.clamp(20.0, sample_rate * 0.49);
-        let q = q.max(0.1);
-        let w0 = std::f32::consts::TAU * freq_hz / sample_rate;
-        let cos_w0 = w0.cos();
-        let sin_w0 = w0.sin();
-        let alpha = sin_w0 / (2.0 * q);
-        let inv_a0 = 1.0 / (1.0 + alpha);
-        self.b0 = (sin_w0 / 2.0) * inv_a0;
-        self.b1 = 0.0;
-        self.b2 = -(sin_w0 / 2.0) * inv_a0;
-        self.a1 = (-2.0 * cos_w0) * inv_a0;
-        self.a2 = (1.0 - alpha) * inv_a0;
+        self.svf
+            .update_coefficients(Self::design(SvfType::BandPass, freq_hz, q, sample_rate));
     }
 
-    /// Direct Form 1 — processes one sample.
+    /// Update a stereo pair of peaking filters from one shared coefficient
+    /// computation — `l`/`r` always get identical parameters, so deriving
+    /// them once avoids a redundant `tan()`/`powf()` on this hot path.
+    fn update_peaking_pair(
+        l: &mut Self,
+        r: &mut Self,
+        freq_hz: f32,
+        q: f32,
+        gain_db: f32,
+        sample_rate: f32,
+    ) {
+        let coeffs = Self::design(SvfType::Bell(gain_db), freq_hz, q, sample_rate);
+        l.svf.update_coefficients(coeffs);
+        r.svf.update_coefficients(coeffs);
+    }
+
+    /// Update a stereo pair of constant-skirt-gain bandpass filters from one
+    /// shared coefficient computation. See [`Self::update_peaking_pair`].
+    fn update_bandpass_pair(l: &mut Self, r: &mut Self, freq_hz: f32, q: f32, sample_rate: f32) {
+        let coeffs = Self::design(SvfType::BandPass, freq_hz, q, sample_rate);
+        l.svf.update_coefficients(coeffs);
+        r.svf.update_coefficients(coeffs);
+    }
+
+    /// Processes one sample.
     #[inline]
     fn process(&mut self, x0: f32) -> f32 {
-        let mut y0 = self.b0 * x0 + self.b1 * self.x1 + self.b2 * self.x2
-            - self.a1 * self.y1
-            - self.a2 * self.y2;
-        y0 = flush_denormal(y0);
-        self.x2 = self.x1;
-        self.x1 = x0;
-        self.y2 = self.y1;
-        self.y1 = y0;
-        y0
+        self.svf.run(x0)
     }
 
     fn reset(&mut self) {
-        self.x1 = 0.0;
-        self.x2 = 0.0;
-        self.y1 = 0.0;
-        self.y2 = 0.0;
+        self.svf.reset();
     }
 }
 
@@ -233,17 +213,17 @@ impl Default for DynamicMode {
 // ── DynamicBand ───────────────────────────────────────────────────────────────
 
 struct DynamicBand {
-    // Filters (all BiquadPeak — state persists across buffer boundaries).
+    // Filters (all BandFilter — state persists across buffer boundaries).
     // Detection is mono (one BPF fed a linked-from-stereo signal); EQ and solo
     // filters are duplicated per channel so left and right maintain independent
     // biquad state while receiving identical coefficients. Without the per-
     // channel split the same struct would see interleaved L/R samples and its
     // state would corrupt both channels' outputs.
-    sidechain_filter: BiquadPeak, // mono detection: unity-peak BPF
-    eq_filter_l: BiquadPeak,
-    eq_filter_r: BiquadPeak,
-    solo_filter_l: BiquadPeak,
-    solo_filter_r: BiquadPeak,
+    sidechain_filter: BandFilter, // mono detection: unity-peak BPF
+    eq_filter_l: BandFilter,
+    eq_filter_r: BandFilter,
+    solo_filter_l: BandFilter,
+    solo_filter_r: BandFilter,
 
     // Detection (mono, shared across channels for linked GR)
     rms_state: f32, // one-pole lowpass state on squared bandpass output
@@ -269,11 +249,11 @@ struct DynamicBand {
 
 impl DynamicBand {
     fn new(sample_rate: f32) -> Self {
-        let mut sidechain_filter = BiquadPeak::new();
+        let mut sidechain_filter = BandFilter::new();
         sidechain_filter.update_bandpass_unity(1000.0, 1.0, sample_rate);
 
-        let mut solo_filter_l = BiquadPeak::new();
-        let mut solo_filter_r = BiquadPeak::new();
+        let mut solo_filter_l = BandFilter::new();
+        let mut solo_filter_r = BandFilter::new();
         solo_filter_l.update_bandpass(1000.0, 1.0, sample_rate);
         solo_filter_r.update_bandpass(1000.0, 1.0, sample_rate);
 
@@ -281,8 +261,8 @@ impl DynamicBand {
 
         Self {
             sidechain_filter,
-            eq_filter_l: BiquadPeak::new(),
-            eq_filter_r: BiquadPeak::new(),
+            eq_filter_l: BandFilter::new(),
+            eq_filter_r: BandFilter::new(),
             solo_filter_l,
             solo_filter_r,
             rms_state: 0.0,
@@ -345,8 +325,13 @@ impl DynamicBand {
         // Update solo bandpass filters (L and R) for this band's center
         // frequency. Both channels receive identical coefficients — only state
         // diverges with input.
-        self.solo_filter_l.update_bandpass(frequency, q, sr);
-        self.solo_filter_r.update_bandpass(frequency, q, sr);
+        BandFilter::update_bandpass_pair(
+            &mut self.solo_filter_l,
+            &mut self.solo_filter_r,
+            frequency,
+            q,
+            sr,
+        );
     }
 
     /// Update the sidechain envelope from a detection input. This is called
@@ -405,13 +390,9 @@ impl DynamicBand {
         // with at most 0.05 dB of GR tracking error (inaudible).
         const GR_HYSTERESIS_DB: f32 = 0.05;
         if (gain_change_db - self.last_gain_change_db).abs() > GR_HYSTERESIS_DB {
-            self.eq_filter_l.update_peaking(
-                self.frequency,
-                self.q,
-                gain_change_db,
-                self.sample_rate,
-            );
-            self.eq_filter_r.update_peaking(
+            BandFilter::update_peaking_pair(
+                &mut self.eq_filter_l,
+                &mut self.eq_filter_r,
                 self.frequency,
                 self.q,
                 gain_change_db,
@@ -599,12 +580,12 @@ impl DynamicEQ {
 mod tests {
     use super::*;
 
-    // ── BiquadPeak ────────────────────────────────────────────────────────────
+    // ── BandFilter ────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_biquad_peak_identity_passthrough() {
-        let mut bq = BiquadPeak::new();
-        // Identity filter (b0=1, all others 0) should pass signal unchanged
+    fn test_band_filter_identity_passthrough() {
+        let mut bq = BandFilter::new();
+        // Flat filter should pass signal unchanged
         for &input in &[0.0, 0.5, -0.5, 1.0, -1.0] {
             let out = bq.process(input);
             assert!(
@@ -615,72 +596,76 @@ mod tests {
     }
 
     #[test]
-    fn test_biquad_peak_reset_clears_state() {
-        let mut bq = BiquadPeak::new();
+    fn test_band_filter_reset_clears_state() {
+        let mut bq = BandFilter::new();
         bq.update_peaking(1000.0, 1.0, 6.0, 44100.0);
         for _ in 0..100 {
             bq.process(1.0);
         }
         bq.reset();
-        assert!((bq.x1 - 0.0).abs() < 1e-9);
-        assert!((bq.x2 - 0.0).abs() < 1e-9);
-        assert!((bq.y1 - 0.0).abs() < 1e-9);
-        assert!((bq.y2 - 0.0).abs() < 1e-9);
+        assert_eq!(bq.svf.state(), (0.0, 0.0));
     }
 
     #[test]
-    fn test_biquad_peak_update_peaking_does_not_clear_state() {
-        // State fields must survive a coefficient update (key design invariant)
-        let mut bq = BiquadPeak::new();
+    fn test_band_filter_update_peaking_does_not_clear_state() {
+        // State must survive a coefficient update (key design invariant)
+        let mut bq = BandFilter::new();
         bq.update_peaking(1000.0, 1.0, 6.0, 44100.0);
         for _ in 0..100 {
             bq.process(0.7);
         }
-        let y1_before = bq.y1;
+        let before = bq.svf.state();
+        assert!(before != (0.0, 0.0), "state should be non-zero after DC");
         bq.update_peaking(2000.0, 1.5, -3.0, 44100.0);
-        assert!(
-            (bq.y1 - y1_before).abs() < 1e-9,
-            "y1 state should survive coeff update"
-        );
+        assert_eq!(bq.svf.state(), before, "state should survive coeff update");
     }
 
     #[test]
-    fn test_biquad_peak_nonzero_gain_changes_amplitude() {
-        let mut flat = BiquadPeak::new();
+    fn test_band_filter_nonzero_gain_changes_amplitude() {
+        let mut flat = BandFilter::new();
         flat.update_peaking(1000.0, 1.0, 0.0, 44100.0);
 
-        let mut boosted = BiquadPeak::new();
+        let mut boosted = BandFilter::new();
         boosted.update_peaking(1000.0, 1.0, 6.0, 44100.0);
 
-        // Warm up both with a DC signal
-        for _ in 0..1000 {
-            flat.process(0.5);
-            boosted.process(0.5);
+        // Drive both with a sine at the bell's centre frequency. (A bell is
+        // unity at DC by construction, so DC cannot reveal the boost.)
+        let sr = 44100.0_f32;
+        let w = core::f32::consts::TAU * 1000.0 / sr;
+        let n = 8192;
+        let (mut flat_ms, mut boosted_ms) = (0.0_f32, 0.0_f32);
+        for i in 0..n {
+            let x = (w * i as f32).sin();
+            let f = flat.process(x);
+            let b = boosted.process(x);
+            if i >= n / 2 {
+                flat_ms += f * f;
+                boosted_ms += b * b;
+            }
         }
-        let flat_out = flat.process(0.5);
-        let boosted_out = boosted.process(0.5);
-        // 6 dB boost at center freq — boosted should produce higher output
+        // 6 dB boost at centre freq — boosted RMS should be ~2× the flat RMS.
+        let ratio = (boosted_ms / flat_ms).sqrt();
         assert!(
-            boosted_out.abs() > flat_out.abs(),
-            "6 dB boost should increase amplitude"
+            (ratio - 2.0).abs() < 0.05,
+            "6 dB boost should double amplitude at fc, got ratio {ratio:.3}"
         );
     }
 
     #[test]
-    fn test_biquad_peak_produces_finite_output() {
-        let mut bq = BiquadPeak::new();
+    fn test_band_filter_produces_finite_output() {
+        let mut bq = BandFilter::new();
         bq.update_peaking(20.0, 0.1, -60.0, 44100.0); // extreme params
         for i in 0..200 {
             let out = bq.process(if i % 2 == 0 { 1.0 } else { -1.0 });
             assert!(
                 out.is_finite(),
-                "BiquadPeak output must be finite at sample {i}: {out}"
+                "BandFilter output must be finite at sample {i}: {out}"
             );
         }
     }
 
     #[test]
-    fn test_biquad_bandpass_unity_rejects_out_of_band() {
+    fn test_band_filter_bandpass_unity_rejects_out_of_band() {
         // Verifies the detector shape fix: out-of-band content must be
         // significantly attenuated relative to in-band content. The old
         // +6 dB peaking detector passed out-of-band energy at 0 dB, which
@@ -688,7 +673,7 @@ mod tests {
         let sr = 44100.0;
         let detector_fc = 4000.0_f32;
 
-        let mut bp = BiquadPeak::new();
+        let mut bp = BandFilter::new();
         bp.update_bandpass_unity(detector_fc, 1.5, sr);
 
         // Measure energy of a 100 Hz sine (8 kHz away from center) after detector
@@ -702,7 +687,7 @@ mod tests {
         }
 
         // Measure energy of a 4 kHz sine (at center) after detector
-        let mut bp2 = BiquadPeak::new();
+        let mut bp2 = BandFilter::new();
         bp2.update_bandpass_unity(detector_fc, 1.5, sr);
         let mut center_peak = 0.0_f32;
         for n in 0..8192 {
@@ -725,17 +710,64 @@ mod tests {
     }
 
     #[test]
-    fn test_biquad_bandpass_update_does_not_panic() {
-        let mut bq = BiquadPeak::new();
+    fn test_band_filter_bandpass_update_does_not_panic() {
+        let mut bq = BandFilter::new();
         bq.update_bandpass(1000.0, 1.0, 44100.0);
         bq.update_bandpass(500.0, 2.0, 48000.0);
     }
 
+    /// #15: the band filters run on the TPT core and must null against the
+    /// RBJ biquad reference for every response the module uses — peaking
+    /// (EQ), unity-peak bandpass (detector), constant-skirt bandpass (solo).
     #[test]
-    fn test_biquad_freq_clamping_to_nyquist() {
+    fn test_band_filter_nulls_against_biquad_reference() {
+        use crate::shaping::biquad_coeffs;
+        use biquad::{Biquad, DirectForm1, Type};
+
+        let sr = 48_000.0;
+        let n = 8192;
+
+        let mut peak = BandFilter::new();
+        peak.update_peaking(1000.0, 1.5, -6.0, sr);
+        let mut skirt = BandFilter::new();
+        skirt.update_bandpass(2000.0, 1.0, sr);
+        let mut unity = BandFilter::new();
+        unity.update_bandpass_unity(4000.0, 1.5, sr);
+
+        let mut peak_ref =
+            DirectForm1::<f32>::new(biquad_coeffs(Type::PeakingEQ(-6.0), sr, 1000.0, 1.5).unwrap());
+        let mut skirt_ref =
+            DirectForm1::<f32>::new(biquad_coeffs(Type::BandPass, sr, 2000.0, 1.0).unwrap());
+        // biquad 0.5.0's BandPass is the constant-skirt form; the unity-peak
+        // form is skirt × (1/Q).
+        let mut unity_ref =
+            DirectForm1::<f32>::new(biquad_coeffs(Type::BandPass, sr, 4000.0, 1.5).unwrap());
+
+        let mut d_peak = 0.0_f32;
+        let mut d_skirt = 0.0_f32;
+        let mut d_unity = 0.0_f32;
+        for i in 0..n {
+            let x = if i == 0 { 1.0 } else { 0.0 };
+            d_peak = d_peak.max((peak.process(x) - peak_ref.run(x)).abs());
+            d_skirt = d_skirt.max((skirt.process(x) - skirt_ref.run(x)).abs());
+            d_unity = d_unity.max((unity.process(x) - unity_ref.run(x) / 1.5).abs());
+        }
+        assert!(d_peak < 1.0e-4, "peaking differs from biquad by {d_peak:e}");
+        assert!(
+            d_skirt < 1.0e-4,
+            "bandpass differs from biquad by {d_skirt:e}"
+        );
+        assert!(
+            d_unity < 1.0e-4,
+            "unity bandpass differs from biquad by {d_unity:e}"
+        );
+    }
+
+    #[test]
+    fn test_band_filter_freq_clamping_to_nyquist() {
         let sr = 44100.0;
         let nyquist = sr * 0.49;
-        let mut bq = BiquadPeak::new();
+        let mut bq = BandFilter::new();
         // freq above Nyquist should be clamped — should not panic or produce NaN
         bq.update_peaking(nyquist + 10000.0, 1.0, 3.0, sr);
         let out = bq.process(0.5);

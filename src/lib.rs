@@ -9,6 +9,7 @@ mod oversampler;
 mod plugin_integration_tests;
 mod shaping;
 mod spectral;
+mod svf;
 // Only consumed from `editor.rs` (gui-gated); kept testable in non-gui
 // builds too so `cargo test` always exercises the zoom/window-size math.
 #[cfg(any(feature = "gui", test))]
@@ -144,6 +145,11 @@ struct BusChannelStrip {
     /// Pultec-style EQ module
     #[cfg(feature = "pultec")]
     pultec: PultecEQ,
+    /// Latency (samples) most recently reported to the host for the Pultec
+    /// linear-phase mode. `set_latency_samples` is only called when this
+    /// changes, since a report can trigger a host-side graph rebuild.
+    #[cfg(feature = "pultec")]
+    pultec_reported_latency: u32,
     /// Dynamic EQ module
     #[cfg(feature = "dynamic_eq")]
     dynamic_eq: DynamicEQ,
@@ -363,6 +369,10 @@ pub struct BusChannelStripParams {
     pub pultec_hf_cut_gain: FloatParam,
     #[id = "pultec_tube_drive"]
     pub pultec_tube_drive: FloatParam,
+    /// Linear-phase Pultec (v2.0, #15). Off by default so v1.0 sessions keep
+    /// their zero-latency minimum-phase behaviour on load.
+    #[id = "pultec_linear_phase"]
+    pub pultec_linear_phase: BoolParam,
 
     #[cfg(feature = "dynamic_eq")]
     // Dynamic EQ Parameters
@@ -702,6 +712,8 @@ impl Default for BusChannelStrip {
             optical_compressor: OpticalCompressor::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "pultec")]
             pultec: PultecEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
+            #[cfg(feature = "pultec")]
+            pultec_reported_latency: 0,
             #[cfg(feature = "dynamic_eq")]
             dynamic_eq: DynamicEQ::new(44100.0), // default sample rate; will be overwritten in initialize()
             #[cfg(feature = "transformer")]
@@ -1215,6 +1227,8 @@ impl Default for BusChannelStripParams {
             )
             .with_unit("")
             .with_step_size(0.01),
+
+            pultec_linear_phase: BoolParam::new("Linear Phase", false),
 
             #[cfg(feature = "dynamic_eq")]
             // Dynamic EQ Parameters
@@ -1918,6 +1932,39 @@ impl BusChannelStrip {
         );
         if !self.params.pultec_bypass.value() {
             self.pultec.process(buffer);
+        } else {
+            // In linear-phase mode bypass is a pure 512-sample delay so the
+            // module's reported latency stays honest; in minimum-phase mode
+            // this is a no-op.
+            self.pultec.process_bypassed(buffer);
+        }
+    }
+
+    /// Snapshot of the seven slot params, in slot order.
+    fn module_order(&self) -> [ModuleType; 7] {
+        [
+            self.params.module_order_1.value(),
+            self.params.module_order_2.value(),
+            self.params.module_order_3.value(),
+            self.params.module_order_4.value(),
+            self.params.module_order_5.value(),
+            self.params.module_order_6.value(),
+            self.params.module_order_7.value(),
+        ]
+    }
+
+    /// Sync the Pultec linear-phase mode with its param and report latency
+    /// to the host when it changes. Tracks the param alone, not module-order
+    /// membership — see ADR-0011 for why, and `process()`'s fallback drain
+    /// via `process_bypassed` that this decision depends on.
+    #[cfg(feature = "pultec")]
+    fn sync_pultec_latency(&mut self, set_latency: &mut dyn FnMut(u32)) {
+        self.pultec
+            .set_linear_phase(self.params.pultec_linear_phase.value());
+        let latency = self.pultec.latency_samples();
+        if latency != self.pultec_reported_latency {
+            self.pultec_reported_latency = latency;
+            set_latency(latency);
         }
     }
 
@@ -2349,6 +2396,12 @@ impl Plugin for BusChannelStrip {
         #[cfg(feature = "pultec")]
         {
             self.pultec = PultecEQ::new(sr);
+            // Report linear-phase latency up front so the host's PDC is
+            // right from the first block rather than one block late.
+            self.pultec_reported_latency = u32::MAX; // force a report
+            self.sync_pultec_latency(&mut |latency| {
+                _context.set_latency_samples(latency);
+            });
         }
         #[cfg(feature = "dynamic_eq")]
         {
@@ -2396,14 +2449,7 @@ impl Plugin for BusChannelStrip {
             self.sc_ring = vec![0.0_f32; spectral::FFT_SIZE];
             self.sc_ring_pos = 0;
             self.sample_rate = sr;
-            // Hann window: w[n] = 0.5 * (1 - cos(2π*n / (N-1)))
-            self.fft_window = (0..spectral::FFT_SIZE)
-                .map(|n| {
-                    0.5 * (1.0
-                        - (std::f32::consts::TAU * n as f32 / (spectral::FFT_SIZE - 1) as f32)
-                            .cos())
-                })
-                .collect();
+            self.fft_window = shaping::hann_window(spectral::FFT_SIZE);
             self.fft_magnitude_smooth = vec![0.0_f32; spectral::SPECTRUM_BINS];
         }
 
@@ -2413,6 +2459,10 @@ impl Plugin for BusChannelStrip {
     fn reset(&mut self) {
         // Reset buffers and envelopes here. This can be called from the audio thread and may not
         // allocate. You can remove this function if you do not need it.
+        #[cfg(feature = "api5500")]
+        {
+            self.eq_api5500.reset();
+        }
         #[cfg(feature = "buttercomp2")]
         {
             self.compressor.reset();
@@ -2461,8 +2511,25 @@ impl Plugin for BusChannelStrip {
         aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        // Global bypass — pass audio through untouched.
+        // Each of the seven module_order_N params selects which module lands
+        // in slot N. Read once up front for dispatch.
+        let order = self.module_order();
+
+        // Pultec linear-phase mode owes the host a fixed 512-sample delay.
+        // Keep the report in sync with the param every block (a no-op unless
+        // it changed), and keep the delay in place through both module and
+        // global bypass so toggling never shifts the track against its
+        // neighbours.
+        #[cfg(feature = "pultec")]
+        self.sync_pultec_latency(&mut |latency| {
+            _context.set_latency_samples(latency);
+        });
+
+        // Global bypass — pass audio through untouched (bar the latency the
+        // host has already been told about).
         if self.params.global_bypass.value() {
+            #[cfg(feature = "pultec")]
+            self.pultec.process_bypassed(buffer);
             return ProcessStatus::Normal;
         }
 
@@ -2475,19 +2542,9 @@ impl Plugin for BusChannelStrip {
         };
 
         // Dispatch modules in user-chosen order.
-        // Each of the seven module_order_N params selects which module lands
-        // in slot N. Duplicates are deduplicated: if the user puts API5500
+        // Duplicates are deduplicated: if the user puts API5500
         // in two slots, the module only runs once. Any slot whose feature
         // is disabled at build time becomes a no-op inside dispatch_module.
-        let order = [
-            self.params.module_order_1.value(),
-            self.params.module_order_2.value(),
-            self.params.module_order_3.value(),
-            self.params.module_order_4.value(),
-            self.params.module_order_5.value(),
-            self.params.module_order_6.value(),
-            self.params.module_order_7.value(),
-        ];
         // Sized to 8: indices 0..6 are real modules, index 7 is Empty.
         // Empties are skipped before the dedup check so the slot can be
         // unoccupied in any number of positions without losing pass-through.
@@ -2502,6 +2559,13 @@ impl Plugin for BusChannelStrip {
             }
             seen[idx] = true;
             self.dispatch_module(mt, buffer, aux);
+        }
+
+        // Pultec dropped from the chain but still owes its reported latency
+        // (ADR-0011) — keep the FIR draining. No-op if linear-phase is off.
+        #[cfg(feature = "pultec")]
+        if !seen[module_type_index(ModuleType::PultecEQ)] {
+            self.pultec.process_bypassed(buffer);
         }
 
         // 6.5) Sheen — pinned master-end polish coat. Always last in the
