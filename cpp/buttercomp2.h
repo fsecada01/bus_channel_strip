@@ -18,6 +18,10 @@ void buttercomp2_set_compress(ButterComp2State* state, double compress);
 void buttercomp2_set_output(ButterComp2State* state, double output);
 void buttercomp2_set_dry_wet(ButterComp2State* state, double dry_wet);
 
+// #18: true disables the program-dependent release adaptation, restoring
+// the original fixed-shape envelope follower exactly.
+void buttercomp2_set_adaptive_envelope_bypass(ButterComp2State* state, bool bypass);
+
 // Process stereo audio (in-place)
 void buttercomp2_process_stereo(ButterComp2State* state, 
                                 float* left_channel, 
