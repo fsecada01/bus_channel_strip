@@ -718,6 +718,13 @@ impl BusChannelStrip {
         );
         if !self.params.punch.punch_bypass.value() {
             self.punch.process(buffer);
+        } else {
+            // Keep the true-peak meter decaying to the floor while bypassed
+            // instead of freezing on the last pre-bypass reading (review
+            // finding on issue #19). Narrow reset — leaves the clipper's
+            // oversampler/transient-detector state untouched so there's no
+            // discontinuity when bypass is turned back off.
+            self.punch.reset_true_peak_meter();
         }
 
         // Publish the true-peak meter reading to the GUI (Relaxed — display only).

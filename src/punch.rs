@@ -17,6 +17,9 @@
 
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
+// Reused as the true-peak detector's floor (see `TruePeakDetector`) so it
+// can never drift from `TruePeakData`'s own GUI-facing floor.
+use crate::spectral::TRUE_PEAK_FLOOR_DB;
 use biquad::{Biquad, DirectForm1, Type};
 use nice_plug::buffer::Buffer;
 use nice_plug::prelude::Enum;
@@ -314,9 +317,6 @@ const TRUE_PEAK_HOLD_MS: f32 = 300.0;
 /// Decay rate once the hold period elapses, in dB/s — a standard PPM-style
 /// ballistic (fast enough to track program material, slow enough to read).
 const TRUE_PEAK_DECAY_DB_PER_S: f32 = 20.0;
-
-/// Floor value (dBTP) reported before any audio has driven the detector.
-const TRUE_PEAK_FLOOR_DB: f32 = -120.0;
 
 /// ITU-R BS.1770-4 true-peak (intersample-peak) detector for a single
 /// channel.
@@ -690,6 +690,17 @@ impl PunchModule {
         self.true_peak_r.reset();
     }
 
+    /// Reset only the true-peak meter, leaving the clipper's oversampler and
+    /// transient-detector state untouched. Called every buffer while Punch
+    /// is bypassed (issue #19 review finding) so the GUI meter decays to the
+    /// floor instead of freezing on the last pre-bypass reading — a full
+    /// `reset()` would also flush the clipper's filter state, causing a
+    /// discontinuity/click when bypass is turned back off.
+    pub fn reset_true_peak_meter(&mut self) {
+        self.true_peak_l.reset();
+        self.true_peak_r.reset();
+    }
+
     /// Get current gain reduction (0.0 - 1.0) for metering.
     /// Reserved for future clipper GR visualization.
     #[allow(dead_code)]
@@ -1001,6 +1012,61 @@ mod tests {
             peak_l > -6.0 && peak_r > -6.0,
             "a near-full-scale sine driven through the clipper should report a \
              true-peak reading close to its ceiling, got L={peak_l} R={peak_r}"
+        );
+    }
+
+    /// Regression test for a review finding on issue #19: while Punch is
+    /// bypassed, `process()` never runs, so without an explicit reset the
+    /// true-peak meter would freeze on its last pre-bypass reading forever.
+    /// `reset_true_peak_meter()` (called every buffer from `lib.rs` while
+    /// bypassed) must bring the reading back to the floor.
+    #[test]
+    fn test_reset_true_peak_meter_returns_to_floor_without_disturbing_clipper() {
+        let sr = 44_100.0_f32;
+        let mut punch = PunchModule::new(sr);
+        punch.update_parameters(
+            -1.0,
+            ClipMode::Hard,
+            0.0,
+            OversamplingFactor::X4,
+            0.0,
+            0.0,
+            5.0,
+            100.0,
+            0.5,
+            0.0,
+            0.0,
+            1.0,
+            20.0,
+        );
+
+        let n = 256;
+        let mut l: Vec<f32> = (0..n)
+            .map(|i| 0.95 * (core::f32::consts::TAU * 3.0 * i as f32 / n as f32).sin())
+            .collect();
+        let mut r = l.clone();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        punch.process(&mut buf);
+        let (peak_l, _) = punch.get_true_peak_db();
+        assert!(
+            peak_l > TRUE_PEAK_FLOOR_DB + 1.0,
+            "sanity: hot signal should register above the floor before reset"
+        );
+
+        punch.reset_true_peak_meter();
+        let (peak_l, peak_r) = punch.get_true_peak_db();
+        assert!(
+            (peak_l - TRUE_PEAK_FLOOR_DB).abs() < 0.01
+                && (peak_r - TRUE_PEAK_FLOOR_DB).abs() < 0.01,
+            "reset_true_peak_meter() should bring both channels back to the floor, \
+             got L={peak_l} R={peak_r}"
         );
     }
 
