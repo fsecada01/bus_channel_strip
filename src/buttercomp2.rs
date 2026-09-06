@@ -840,6 +840,8 @@ extern "C" {
     fn buttercomp2_set_compress(state: *mut ButterComp2State, compress: f64);
     fn buttercomp2_set_output(state: *mut ButterComp2State, output: f64);
     fn buttercomp2_set_dry_wet(state: *mut ButterComp2State, dry_wet: f64);
+    /// #18: true restores the original fixed-shape envelope follower exactly.
+    fn buttercomp2_set_adaptive_envelope_bypass(state: *mut ButterComp2State, bypass: bool);
     fn buttercomp2_process_stereo(
         state: *mut ButterComp2State,
         left_channel: *mut f32,
@@ -871,7 +873,16 @@ impl ButterComp2 {
     /// * `compress` - Compression amount (0.0 to 1.0, maps to 0-14dB)
     /// * `output` - Output gain (0.0 to 1.0, maps to 0-2x gain)
     /// * `dry_wet` - Dry/wet mix (0.0 = dry, 1.0 = wet)
-    pub fn update_parameters(&mut self, compress: f32, output: f32, dry_wet: f32) {
+    /// * `adaptive_envelope_bypass` - #18: true disables the program-dependent
+    ///   release adaptation, restoring the original fixed-shape envelope
+    ///   follower exactly.
+    pub fn update_parameters(
+        &mut self,
+        compress: f32,
+        output: f32,
+        dry_wet: f32,
+        adaptive_envelope_bypass: bool,
+    ) {
         // Scale parameters to prevent over-compression and distortion
         let safe_compress = (compress * 0.5).clamp(0.0, 0.5); // Reduce max compression
         let safe_output = (output * 0.8 + 0.2).clamp(0.2, 1.0); // Keep output in reasonable range
@@ -881,6 +892,7 @@ impl ButterComp2 {
             buttercomp2_set_compress(self.state, safe_compress as f64);
             buttercomp2_set_output(self.state, safe_output as f64);
             buttercomp2_set_dry_wet(self.state, safe_dry_wet as f64);
+            buttercomp2_set_adaptive_envelope_bypass(self.state, adaptive_envelope_bypass);
         }
     }
 
@@ -943,6 +955,132 @@ unsafe impl Sync for ButterComp2 {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ButterComp2 (FFI-wrapped Classic model) ─────────────────────────────────
+
+    /// Feed `n` samples of `signal` through a stereo `ButterComp2`, returning the
+    /// processed L channel (R is identical since the input is mono-sourced).
+    fn run_buttercomp2(
+        comp: &mut ButterComp2,
+        compress: f32,
+        adaptive_env_bypass: bool,
+        signal: &[f32],
+    ) -> Vec<f32> {
+        comp.update_parameters(compress, 0.5, 1.0, adaptive_env_bypass);
+        let n = signal.len();
+        let mut l: Vec<f32> = signal.to_vec();
+        let mut r: Vec<f32> = signal.to_vec();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        comp.process(&mut buf);
+        l
+    }
+
+    /// Feeds a long sustained-DC probe tone through `comp` in a single call and
+    /// returns the magnitude of the final sample. This algorithm's gain
+    /// reduction is purely multiplicative on the input (silence always
+    /// outputs silence regardless of internal state), so release-time
+    /// differences can't be observed by watching recovery-to-silence — they
+    /// only show up as how far gain reduction has *converged* by a given
+    /// sample count while the input stays non-zero. A larger magnitude here
+    /// means less gain reduction had accumulated, i.e. slower convergence.
+    fn probe_convergence(comp: &mut ButterComp2, adaptive_env_bypass: bool) -> f32 {
+        let n = 2_000_000;
+        let probe = vec![0.9_f32; n];
+        let out = run_buttercomp2(comp, 1.0, adaptive_env_bypass, &probe);
+        out[n - 1].abs()
+    }
+
+    #[test]
+    fn test_buttercomp2_adaptive_env_softens_convergence_after_transient_material() {
+        let sr = 44_100.0_f32;
+        // Bursty warm-up material: loud spikes separated by silence, driving a
+        // high crest factor (well above the 9 dB neutral reference) so the
+        // smoothed release-scale settles at the 0.6x floor (softer/slower
+        // response to the probe that follows).
+        let burst_len = 512;
+        let mut warmup = Vec::new();
+        for _ in 0..40 {
+            warmup.push(1.0_f32);
+            warmup.extend(std::iter::repeat(0.0_f32).take(burst_len - 1));
+        }
+
+        let mut adaptive = ButterComp2::new(sr);
+        run_buttercomp2(&mut adaptive, 1.0, false, &warmup);
+        let adaptive_probe = probe_convergence(&mut adaptive, false);
+
+        // Baseline: identical warm-up and probe, but bypassed throughout, so
+        // release-scale stays pinned at the fixed 1.0x baseline.
+        let mut bypass = ButterComp2::new(sr);
+        run_buttercomp2(&mut bypass, 1.0, true, &warmup);
+        let bypass_probe = probe_convergence(&mut bypass, true);
+
+        assert!(
+            adaptive_probe > bypass_probe,
+            "transient-warmed adaptive response should have accumulated less gain \
+             reduction (softer/slower) than the fixed baseline over the same probe \
+             window: adaptive={adaptive_probe:.6}, bypass={bypass_probe:.6}"
+        );
+    }
+
+    #[test]
+    fn test_buttercomp2_adaptive_env_tightens_convergence_after_sustained_material() {
+        let sr = 44_100.0_f32;
+        // Sustained low-crest warm-up: a full-scale sine (~3 dB crest, well
+        // below the 9 dB neutral reference) so the smoothed release-scale
+        // settles above 1.0x (tighter/faster response to the probe).
+        let omega = 2.0 * core::f32::consts::PI * 220.0 / sr;
+        let warmup: Vec<f32> = (0..20_000).map(|i| 0.9 * (omega * i as f32).sin()).collect();
+
+        let mut adaptive = ButterComp2::new(sr);
+        run_buttercomp2(&mut adaptive, 1.0, false, &warmup);
+        let adaptive_probe = probe_convergence(&mut adaptive, false);
+
+        let mut bypass = ButterComp2::new(sr);
+        run_buttercomp2(&mut bypass, 1.0, true, &warmup);
+        let bypass_probe = probe_convergence(&mut bypass, true);
+
+        assert!(
+            adaptive_probe < bypass_probe,
+            "sustained-warmed adaptive response should have accumulated more gain \
+             reduction (tighter/faster) than the fixed baseline over the same probe \
+             window: adaptive={adaptive_probe:.6}, bypass={bypass_probe:.6}"
+        );
+    }
+
+    #[test]
+    fn test_buttercomp2_reset_clears_crest_scale_state() {
+        // After a bursty warm-up (which pulls crest_scale_smoothed away from
+        // 1.0), reset() should restore the neutral baseline exactly, so a
+        // post-reset probe converges identically to a never-warmed-up instance.
+        let sr = 44_100.0_f32;
+        let burst_len = 512;
+        let mut warmup = Vec::new();
+        for _ in 0..40 {
+            warmup.push(1.0_f32);
+            warmup.extend(std::iter::repeat(0.0_f32).take(burst_len - 1));
+        }
+
+        let mut comp = ButterComp2::new(sr);
+        run_buttercomp2(&mut comp, 1.0, false, &warmup);
+        comp.reset();
+        let post_reset_probe = probe_convergence(&mut comp, false);
+
+        let mut fresh = ButterComp2::new(sr);
+        let fresh_probe = probe_convergence(&mut fresh, false);
+
+        assert!(
+            (post_reset_probe - fresh_probe).abs() < 1e-6,
+            "reset() should clear crest_scale_smoothed back to neutral: \
+             post_reset={post_reset_probe:.8}, fresh={fresh_probe:.8}"
+        );
+    }
 
     // ── FetRatio ──────────────────────────────────────────────────────────────
 

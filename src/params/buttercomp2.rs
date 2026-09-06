@@ -15,6 +15,13 @@ pub struct ButterComp2Params {
     #[id = "comp_dry_wet"]
     pub comp_dry_wet: FloatParam,
 
+    /// #18: true restores the original fixed-shape envelope follower exactly
+    /// (bypasses the program-dependent release-time adaptation). Only
+    /// affects the FFI-wrapped Classic model.
+    #[cfg(feature = "buttercomp2")]
+    #[id = "comp_adaptive_env_bypass"]
+    pub comp_adaptive_env_bypass: BoolParam,
+
     /// Model selector — always visible; switches the active control surface.
     #[cfg(feature = "buttercomp2")]
     #[id = "comp_model"]
@@ -100,6 +107,11 @@ impl Default for ButterComp2Params {
             )
             .with_unit("")
             .with_step_size(0.01),
+
+            // false = adaptive release-time scaling on by default, matching
+            // #16's default-ON-with-bypass precedent.
+            #[cfg(feature = "buttercomp2")]
+            comp_adaptive_env_bypass: BoolParam::new("Comp Adaptive Env Bypass", false),
 
             #[cfg(feature = "buttercomp2")]
             comp_model: EnumParam::<ButterComp2Model>::new("Model", ButterComp2Model::default()),

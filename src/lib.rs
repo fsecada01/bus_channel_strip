@@ -354,6 +354,7 @@ impl BusChannelStrip {
                     self.params.buttercomp2.comp_compress.value(),
                     self.params.buttercomp2.comp_output.value(),
                     self.params.buttercomp2.comp_dry_wet.value(),
+                    self.params.buttercomp2.comp_adaptive_env_bypass.value(),
                 );
                 self.compressor.process(buffer);
             }
