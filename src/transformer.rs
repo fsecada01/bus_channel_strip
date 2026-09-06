@@ -1,3 +1,4 @@
+use crate::detune::{micro_detune_pair, DetuneRng};
 use crate::hysteresis::HysteresisCell;
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
@@ -26,9 +27,11 @@ pub struct TransformerModule {
     // Output transformer stage
     output_transformer: TransformerStage,
 
-    // Frequency response filters — updated via update_coefficients(), never recreated.
-    low_shelf: DirectForm1<f32>,
-    high_shelf: DirectForm1<f32>,
+    // Frequency response filters — updated via update_coefficients(), never
+    // recreated. Per-channel (#17) so each channel's shelf corner can carry
+    // an independent stereo micro-detune.
+    low_shelf: [DirectForm1<f32>; 2],
+    high_shelf: [DirectForm1<f32>; 2],
 
     // Per-channel oversamplers for anti-aliased nonlinear saturation. Input
     // and output stages need independent oversamplers because their filter
@@ -51,6 +54,11 @@ pub struct TransformerModule {
     /// pre-#16 v1.0 saturation path is bit-identical. Default is `false`
     /// (hysteresis on) — see ADR-0012.
     hysteresis_bypass: bool,
+
+    /// Per-instance stereo micro-detune (#17, TMT-style) applied to the
+    /// low/high shelf corners. See ADR-0013.
+    detune_rng: DetuneRng,
+    detune: [f32; 2],
 }
 
 /// Individual transformer stage (input or output)
@@ -188,12 +196,21 @@ impl TransformerModule {
         // writes into buffer[0..TRANSFORMER_OS_FACTOR].
         let make_os = || Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
 
+        let mut detune_rng = DetuneRng::seed_from_entropy();
+        let detune = micro_detune_pair(&mut detune_rng);
+
         Self {
             sample_rate,
             input_transformer: TransformerStage::new(),
             output_transformer: TransformerStage::new(),
-            low_shelf: DirectForm1::<f32>::new(flat_coeff),
-            high_shelf: DirectForm1::<f32>::new(flat_coeff),
+            low_shelf: [
+                DirectForm1::<f32>::new(flat_coeff),
+                DirectForm1::<f32>::new(flat_coeff),
+            ],
+            high_shelf: [
+                DirectForm1::<f32>::new(flat_coeff),
+                DirectForm1::<f32>::new(flat_coeff),
+            ],
             input_os_l: make_os(),
             input_os_r: make_os(),
             output_os_l: make_os(),
@@ -203,6 +220,8 @@ impl TransformerModule {
             cached_low_response: f32::NAN, // NAN forces recompute on first call
             cached_high_response: f32::NAN,
             hysteresis_bypass: false,
+            detune_rng,
+            detune,
         }
     }
 
@@ -252,7 +271,8 @@ impl TransformerModule {
     ///
     /// Uses `update_coefficients()` on existing filter objects — no state reset,
     /// no heap allocation. Called only when model or response values change
-    /// (guarded in `update_parameters()`).
+    /// (guarded in `update_parameters()`), and directly from `reset()` when
+    /// only the stereo micro-detune (#17) has been redrawn.
     fn update_frequency_response(&mut self, low_response: f32, high_response: f32) {
         let low_freq = match self.model {
             TransformerModel::Vintage => 80.0,
@@ -262,10 +282,15 @@ impl TransformerModule {
         };
         // Always update (even at 0 dB) so that model changes take effect immediately.
         let low_gain = low_response * 3.0; // ±3 dB
-        if let Ok(coeff) =
-            biquad_coeffs(Type::LowShelf(low_gain), self.sample_rate, low_freq, 0.707)
-        {
-            self.low_shelf.update_coefficients(coeff);
+        for ch in 0..2 {
+            if let Ok(coeff) = biquad_coeffs(
+                Type::LowShelf(low_gain),
+                self.sample_rate,
+                low_freq * self.detune[ch],
+                0.707,
+            ) {
+                self.low_shelf[ch].update_coefficients(coeff);
+            }
         }
 
         let high_freq = match self.model {
@@ -275,13 +300,15 @@ impl TransformerModule {
             TransformerModel::American => 10000.0,
         };
         let high_gain = high_response * 2.0; // ±2 dB
-        if let Ok(coeff) = biquad_coeffs(
-            Type::HighShelf(high_gain),
-            self.sample_rate,
-            high_freq,
-            0.707,
-        ) {
-            self.high_shelf.update_coefficients(coeff);
+        for ch in 0..2 {
+            if let Ok(coeff) = biquad_coeffs(
+                Type::HighShelf(high_gain),
+                self.sample_rate,
+                high_freq * self.detune[ch],
+                0.707,
+            ) {
+                self.high_shelf[ch].update_coefficients(coeff);
+            }
         }
     }
 
@@ -312,8 +339,8 @@ impl TransformerModule {
                 );
 
                 // 2. Frequency response modeling (native rate)
-                s = self.low_shelf.run(s);
-                s = self.high_shelf.run(s);
+                s = self.low_shelf[ch].run(s);
+                s = self.high_shelf[ch].run(s);
 
                 // 3. Output transformer stage (oversampled saturation)
                 let out_os = if ch == 0 {
@@ -337,6 +364,17 @@ impl TransformerModule {
 
     /// Reset transformer state
     pub fn reset(&mut self) {
+        // #17: redraw this instance's stereo micro-detune. `update_parameters`
+        // only recomputes the shelf coefficients when model/response values
+        // change, so a fresh detune wouldn't otherwise take effect — force a
+        // recompute here using the last-known response values (skipped
+        // before the very first `update_parameters` call, when they're
+        // still the NaN sentinel).
+        self.detune = micro_detune_pair(&mut self.detune_rng);
+        if !self.cached_low_response.is_nan() && !self.cached_high_response.is_nan() {
+            self.update_frequency_response(self.cached_low_response, self.cached_high_response);
+        }
+
         self.input_transformer.envelope = 0.0;
         self.input_transformer.harmonic_state = 0.0;
         for h in &mut self.input_transformer.hysteresis {
@@ -906,6 +944,49 @@ mod tests {
             false,
         );
         assert!(!t.hysteresis_bypass);
+    }
+
+    /// #17: with saturation disabled (isolating the low/high shelf filters),
+    /// a pinned asymmetric detune should measurably decorrelate L/R.
+    #[test]
+    fn test_transformer_detune_decorrelates_channels() {
+        let sr = 48_000.0;
+        let mut t = TransformerModule::new(sr);
+        t.detune = [1.003, 0.997];
+        t.update_parameters(
+            TransformerModel::Vintage,
+            0.0,
+            0.0, // input saturation off
+            0.0,
+            0.0, // output saturation off
+            1.0,
+            1.0, // full low/high shelf boost
+            0.0,
+            false,
+        );
+
+        let n = 4096_usize;
+        let omega = 2.0 * core::f32::consts::PI * 80.0 / sr; // near the Vintage low-shelf corner
+        let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
+        let mut r: Vec<f32> = l.clone();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        t.process(&mut buf);
+
+        let max_diff = l[n / 2..]
+            .iter()
+            .zip(r[n / 2..].iter())
+            .fold(0.0_f32, |acc, (&a, &b)| acc.max((a - b).abs()));
+        assert!(
+            max_diff > 1.0e-4,
+            "detuned L/R shelf corners should decorrelate the response, got max_diff={max_diff:.6}"
+        );
     }
 
     #[test]

@@ -60,17 +60,33 @@ pub struct Filter {
 }
 
 impl Filter {
-    /// Create a new filter with the given parameters.
-    pub fn new(sample_rate: f32, filter_type: FilterType, freq: f32, q: f32, gain: f32) -> Self {
-        let coeffs = SvfCoefficients::new(filter_type.to_svf(gain), sample_rate, freq, q);
+    /// Create a new filter with the given parameters. `detune` is the #17
+    /// per-channel frequency multiplier pair — pass `[1.0, 1.0]` for a
+    /// transparent (non-detuned) filter.
+    pub fn new(
+        sample_rate: f32,
+        filter_type: FilterType,
+        freq: f32,
+        q: f32,
+        gain: f32,
+        detune: [f32; 2],
+    ) -> Self {
+        let [c0, c1] = SvfCoefficients::new_detuned_pair(
+            filter_type.to_svf(gain),
+            sample_rate,
+            freq,
+            q,
+            detune,
+        );
         Self {
-            filter: [TptSvf::new(coeffs), TptSvf::new(coeffs)],
+            filter: [TptSvf::new(c0), TptSvf::new(c1)],
         }
     }
 
     /// Update filter parameters without recreating the filter structure.
     /// State is preserved across the update — the SVF topology guarantees
-    /// the new response takes effect without a transient.
+    /// the new response takes effect without a transient. `detune` is the
+    /// #17 per-channel frequency multiplier pair.
     pub fn update_parameters(
         &mut self,
         sample_rate: f32,
@@ -78,10 +94,17 @@ impl Filter {
         freq: f32,
         q: f32,
         gain: f32,
+        detune: [f32; 2],
     ) {
-        let coeffs = SvfCoefficients::new(filter_type.to_svf(gain), sample_rate, freq, q);
-        self.filter[0].update_coefficients(coeffs);
-        self.filter[1].update_coefficients(coeffs);
+        let [c0, c1] = SvfCoefficients::new_detuned_pair(
+            filter_type.to_svf(gain),
+            sample_rate,
+            freq,
+            q,
+            detune,
+        );
+        self.filter[0].update_coefficients(c0);
+        self.filter[1].update_coefficients(c1);
     }
 
     /// Process a single sample through a specific channel's state. Callers
@@ -337,25 +360,55 @@ mod tests {
 
     // ── Filter ────────────────────────────────────────────────────────────────
 
+    use crate::detune::IDENTITY_DETUNE;
+
     #[test]
     fn test_filter_bell_creation_does_not_panic() {
-        let _f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 0.0);
+        let _f = Filter::new(
+            44100.0,
+            FilterType::Bell,
+            1000.0,
+            0.707,
+            0.0,
+            IDENTITY_DETUNE,
+        );
     }
 
     #[test]
     fn test_filter_low_shelf_creation_does_not_panic() {
-        let _f = Filter::new(44100.0, FilterType::LowShelf, 200.0, 0.707, 0.0);
+        let _f = Filter::new(
+            44100.0,
+            FilterType::LowShelf,
+            200.0,
+            0.707,
+            0.0,
+            IDENTITY_DETUNE,
+        );
     }
 
     #[test]
     fn test_filter_high_shelf_creation_does_not_panic() {
-        let _f = Filter::new(44100.0, FilterType::HighShelf, 8000.0, 0.707, 0.0);
+        let _f = Filter::new(
+            44100.0,
+            FilterType::HighShelf,
+            8000.0,
+            0.707,
+            0.0,
+            IDENTITY_DETUNE,
+        );
     }
 
     #[test]
     fn test_filter_zero_gain_steady_state() {
         // A 0 dB filter should reach steady-state output equal to its DC input
-        let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 0.0);
+        let mut f = Filter::new(
+            44100.0,
+            FilterType::Bell,
+            1000.0,
+            0.707,
+            0.0,
+            IDENTITY_DETUNE,
+        );
         // Warm up with DC
         for _ in 0..2000 {
             f.run_ch(0.5, 0);
@@ -366,17 +419,45 @@ mod tests {
 
     #[test]
     fn test_filter_update_parameters_does_not_panic() {
-        let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 0.0);
-        f.update_parameters(44100.0, FilterType::Bell, 2000.0, 1.0, 6.0);
-        f.update_parameters(48000.0, FilterType::LowShelf, 200.0, 0.707, -3.0);
+        let mut f = Filter::new(
+            44100.0,
+            FilterType::Bell,
+            1000.0,
+            0.707,
+            0.0,
+            IDENTITY_DETUNE,
+        );
+        f.update_parameters(44100.0, FilterType::Bell, 2000.0, 1.0, 6.0, IDENTITY_DETUNE);
+        f.update_parameters(
+            48000.0,
+            FilterType::LowShelf,
+            200.0,
+            0.707,
+            -3.0,
+            IDENTITY_DETUNE,
+        );
     }
 
     #[test]
     fn test_filter_is_linear_no_inline_clip() {
         // Filter::run must be LTI — output scales linearly with input.
         // Doubling the input must double the steady-state output.
-        let mut f1 = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 6.0);
-        let mut f2 = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 6.0);
+        let mut f1 = Filter::new(
+            44100.0,
+            FilterType::Bell,
+            1000.0,
+            0.707,
+            6.0,
+            IDENTITY_DETUNE,
+        );
+        let mut f2 = Filter::new(
+            44100.0,
+            FilterType::Bell,
+            1000.0,
+            0.707,
+            6.0,
+            IDENTITY_DETUNE,
+        );
         // Warm up both filters
         for _ in 0..2000 {
             f1.run_ch(0.1, 0);
@@ -394,10 +475,40 @@ mod tests {
     #[test]
     fn test_filter_output_finite_at_high_gain() {
         // Even at +18 dB bell, output stays finite (no denormals or NaN).
-        let mut f = Filter::new(44100.0, FilterType::Bell, 1000.0, 0.707, 18.0);
+        let mut f = Filter::new(
+            44100.0,
+            FilterType::Bell,
+            1000.0,
+            0.707,
+            18.0,
+            IDENTITY_DETUNE,
+        );
         for _ in 0..2000 {
             let out = f.run_ch(0.5, 0);
             assert!(out.is_finite(), "Filter output must stay finite");
         }
+    }
+
+    /// #17: with distinct per-channel detune, the two channels of the same
+    /// `Filter` must diverge in output for identical input, and each must
+    /// still match `SvfCoefficients::new` at its own detuned frequency.
+    #[test]
+    fn test_filter_detune_decorrelates_channels() {
+        let detune = [1.003, 0.997];
+        let mut f = Filter::new(48_000.0, FilterType::Bell, 1000.0, 2.0, 12.0, detune);
+        let n = 4096;
+        let sr = 48_000.0;
+        let omega = core::f32::consts::TAU * 1000.0 / sr;
+        let mut max_diff = 0.0_f32;
+        for i in 0..n {
+            let x = (omega * i as f32).sin();
+            let l = f.run_ch(x, 0);
+            let r = f.run_ch(x, 1);
+            max_diff = max_diff.max((l - r).abs());
+        }
+        assert!(
+            max_diff > 1.0e-4,
+            "detuned channels produced near-identical output (max diff {max_diff:e})"
+        );
     }
 }
