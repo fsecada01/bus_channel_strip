@@ -113,13 +113,16 @@ pub fn create_param_slider<'c, 'p, P, F>(
 // Removed problematic raw param slider function for now
 
 // Reusable bypass button component
-pub fn create_bypass_button<F>(cx: &mut Context, _label: &str, param_map: F)
-where
+pub fn create_bypass_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    _label: &str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    let params = cx.data::<crate::editor::Data>().params.clone();
-    // Create the button with proper param binding
-    ParamButton::new(cx, param_map(&params))
+    ParamButton::new(cx, param_map(params))
         .class("bypass-button")
         .height(Pixels(28.0))
         .width(Stretch(1.0))
@@ -132,12 +135,15 @@ where
 /// is lit green; when BYPASSED (bypass=true, i.e. ParamButton :checked) it
 /// appears dark/off. Label reads "ACTIVE" in both states — users read the
 /// color, not the text, matching how outboard gear works.
-pub fn create_active_led_button<F>(cx: &mut Context, param_map: F)
-where
+pub fn create_active_led_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    let params = cx.data::<crate::editor::Data>().params.clone();
-    ParamButton::new(cx, param_map(&params))
+    ParamButton::new(cx, param_map(params))
         .with_label("ACTIVE")
         .class("active-led-button")
         .height(Pixels(28.0))
@@ -150,12 +156,15 @@ where
 /// convention: the checked/lit state (param=true = enabled) appears DARK like
 /// normal operation, while the unchecked state (disabled) appears lit/red.
 /// This matches the bypass button convention where dark = normal/processing.
-pub fn create_on_button<F>(cx: &mut Context, param_map: F)
-where
+pub fn create_on_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    let params = cx.data::<crate::editor::Data>().params.clone();
-    ParamButton::new(cx, param_map(&params))
+    ParamButton::new(cx, param_map(params))
         .class("on-button")
         .height(Pixels(28.0))
         .width(Stretch(1.0))

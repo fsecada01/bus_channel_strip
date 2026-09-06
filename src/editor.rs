@@ -1301,13 +1301,40 @@ pub(crate) fn create(
         .toggle_class("zoom-200", zoom_level_signal.map(|z| *z == 200))
         .width(Stretch(1.0))
         .height(Stretch(1.0))
-        .padding(zoom_level_signal.map(|z| Pixels(14.0 * (*z as f32) / 100.0)));
-        // vizia-plug doesn't support runtime host-window resize
-        // (set_user_scale_factor / WindowEvent::SetSize aren't wired into
-        // baseview). Zoom rescales content within the fixed window: slot
-        // widths scale via reactive lens, fonts scale via CSS zoom-N rules,
-        // and the strip ScrollView reveals off-screen slots when content
-        // grows past the window width.
+        .padding(
+            zoom_level_signal
+                .map(|z| Pixels(14.0 * crate::window_sizing::scale_factor_for_zoom(*z) as f32)),
+        );
+        // Real host-window resize (issue #20, see `AppEvent::SetZoom`): the
+        // window itself is resized to `scale_factor_for_zoom(level)` — the
+        // *clamped* scale, which only differs from `level/100` at the 75%
+        // and 200% presets (see `window_sizing`'s min/max scale bounds).
+        // This layout must scale by that same clamped factor, not the raw
+        // `level/100`, or the two would compound and content would drift out
+        // of sync with the window at the two extreme presets. Fonts still
+        // scale via CSS zoom-N rules (toggled above), and the strip
+        // ScrollView reveals off-screen slots when content grows past the
+        // window width.
+    })
+}
+
+/// Builds a `Memo` that re-derives `derive(&params)` whenever `params_gen`
+/// bumps (on every `RawParamEvent::ParametersChanged`). `params` itself never
+/// changes identity — only the atomics inside it mutate via host automation
+/// or GUI writes — so every param-derived Memo in this file needs the same
+/// `params_gen.get()` tracking read to know when to re-derive; centralizing
+/// it here means a future param-derived Memo can't compile while silently
+/// omitting that read (and going stale on automation).
+fn param_memo<T, F>(cx: &mut Context, derive: F) -> Memo<T>
+where
+    T: Clone + PartialEq + 'static,
+    F: Fn(&Arc<BusChannelStripParams>) -> T + 'static,
+{
+    let params_gen = cx.data::<Data>().params_gen;
+    let params = cx.data::<Data>().params.clone();
+    Memo::new(move |_| {
+        params_gen.get();
+        derive(&params)
     })
 }
 
@@ -1326,17 +1353,11 @@ fn build_library_sidebar(cx: &mut Context) {
         Label::new(cx, "LIBRARY").class("library-sidebar-header");
 
         // Reactive bitset of which module types are currently in the rack.
-        // Rebuilds the row list whenever any slot's contents change. `params`
-        // itself never changes identity, so the Memo depends on `params_gen`
-        // (bumped on every `RawParamEvent::ParametersChanged`) to know when
-        // to re-derive from the live param values.
-        let params_gen = cx.data::<Data>().params_gen;
-        let params = cx.data::<Data>().params.clone();
-        let in_rack_memo = Memo::new(move |_| {
-            params_gen.get();
+        // Rebuilds the row list whenever any slot's contents change.
+        let in_rack_memo = param_memo(cx, |params| {
             let mut bits: u8 = 0;
             for s in 0..7 {
-                let mt = slot_module_type(&params, s);
+                let mt = slot_module_type(params, s);
                 if mt != ModuleType::Empty {
                     bits |= 1u8 << module_type_to_usize(mt);
                 }
@@ -1478,7 +1499,8 @@ fn create_master_section(cx: &mut Context) {
                 .class("param-label")
                 .height(Pixels(16.0))
                 .width(Stretch(1.0));
-            components::create_bypass_button(cx, "BYPASS", |p| &p.global_bypass);
+            let params = cx.data::<Data>().params.clone();
+            components::create_bypass_button(cx, "BYPASS", &params, |p| &p.global_bypass);
         })
         .height(Auto)
         .width(Pixels(80.0))
@@ -1519,17 +1541,12 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
         let this_focused = focus == Some(slot_idx);
         let any_focused = focus.is_some();
 
-        // `params` never changes identity, so this Memo (like every other
-        // param-derived one in this file) depends on `params_gen` to know
-        // when to re-derive. usize is used as the Binding target because
-        // vizia requires `T: Clone + PartialEq`, which our ModuleType enum
-        // itself also satisfies, but staying consistent with the original
-        // encoding avoids touching call sites below.
-        let params_gen = cx.data::<Data>().params_gen;
-        let params = cx.data::<Data>().params.clone();
-        let module_type_memo = Memo::new(move |_| {
-            params_gen.get();
-            module_type_to_usize(slot_module_type(&params, slot_idx))
+        // usize is used as the Binding target because vizia requires
+        // `T: Clone + PartialEq`, which our ModuleType enum itself also
+        // satisfies, but staying consistent with the original encoding
+        // avoids touching call sites below.
+        let module_type_memo = param_memo(cx, move |params| {
+            module_type_to_usize(slot_module_type(params, slot_idx))
         });
 
         Binding::new(cx, module_type_memo, move |cx| {
@@ -1552,12 +1569,7 @@ fn create_dynamic_module_slot(cx: &mut Context, slot_idx: usize) {
                 return;
             }
 
-            let params_gen = cx.data::<Data>().params_gen;
-            let params = cx.data::<Data>().params.clone();
-            let hide_memo = Memo::new(move |_| {
-                params_gen.get();
-                is_module_hidden(&params, mt)
-            });
+            let hide_memo = param_memo(cx, move |params| is_module_hidden(params, mt));
             Binding::new(cx, hide_memo, move |cx| {
                 let hidden = hide_memo.get();
                 let render_full = if this_focused {
@@ -1682,7 +1694,9 @@ fn build_full_slot(cx: &mut Context, slot_idx: usize, mt: ModuleType, theme: Mod
         ex.emit(WindowEvent::SetCursor(CursorIcon::Default));
     })
     .border_color(theme.accent_color())
-    .width(zoom_level_signal.map(|z| Pixels(BASE_SLOT_WIDTH_PX * (*z as f32) / 100.0)))
+    .width(zoom_level_signal.map(|z| {
+        Pixels(BASE_SLOT_WIDTH_PX * crate::window_sizing::scale_factor_for_zoom(*z) as f32)
+    }))
     .height(Stretch(1.0))
     .border_width(Pixels(3.0))
     .background_color(Color::rgb(42, 42, 42))
@@ -1823,30 +1837,31 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
 }
 
 fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
+    let params = cx.data::<Data>().params.clone();
     match mt {
         ModuleType::Api5500EQ => {
-            components::create_active_led_button(cx, |p| &p.eq_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.eq_bypass);
         }
         ModuleType::ButterComp2 => {
-            components::create_active_led_button(cx, |p| &p.comp_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.comp_bypass);
         }
         ModuleType::PultecEQ => {
-            components::create_active_led_button(cx, |p| &p.pultec_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.pultec_bypass);
         }
         ModuleType::DynamicEQ => {
             #[cfg(feature = "dynamic_eq")]
-            components::create_active_led_button(cx, |p| &p.dyneq_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.dyneq_bypass);
         }
         ModuleType::Transformer => {
-            components::create_active_led_button(cx, |p| &p.transformer_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.transformer_bypass);
         }
         ModuleType::Punch => {
             #[cfg(feature = "punch")]
-            components::create_active_led_button(cx, |p| &p.punch_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.punch_bypass);
         }
         ModuleType::Haas => {
             #[cfg(feature = "haas")]
-            components::create_active_led_button(cx, |p| &p.haas_bypass);
+            components::create_active_led_button(cx, &params, |p| &p.haas_bypass);
         }
         // No bypass for empty slots — pass-through is unconditional.
         ModuleType::Empty => {}
@@ -2057,12 +2072,7 @@ fn build_buttercomp2_controls(cx: &mut Context) {
         // Map the EnumParam value to usize so Binding gets a `Clone + PartialEq` target.
         #[cfg(feature = "buttercomp2")]
         {
-            let params_gen = cx.data::<Data>().params_gen;
-            let params = cx.data::<Data>().params.clone();
-            let model_memo = Memo::new(move |_| {
-                params_gen.get();
-                params.comp_model.value() as usize
-            });
+            let model_memo = param_memo(cx, |params| params.comp_model.value() as usize);
             Binding::new(cx, model_memo, move |cx| {
                 let model_idx = model_memo.get();
                 match model_idx {
@@ -2704,8 +2714,9 @@ macro_rules! dyneq_band_col {
                     .width(Stretch(1.0))
                     .top(Pixels(0.0))
                     .bottom(Pixels(0.0));
-                components::create_on_button(cx, |p| &p.$enabled);
-                components::create_bypass_button(cx, "SOLO", |p| &p.$solo);
+                let params = cx.data::<Data>().params.clone();
+                components::create_on_button(cx, &params, |p| &p.$enabled);
+                components::create_bypass_button(cx, "SOLO", &params, |p| &p.$solo);
                 // Chevron toggle button — reactive label via dyneq_expand_gen signal
                 {
                     let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
@@ -2811,7 +2822,10 @@ fn build_dyneq_back_view(
                 .bottom(Pixels(0.0));
 
             #[cfg(feature = "dynamic_eq")]
-            components::create_bypass_button(cx, "BYPASS", |p| &p.dyneq_bypass);
+            {
+                let params = cx.data::<Data>().params.clone();
+                components::create_bypass_button(cx, "BYPASS", &params, |p| &p.dyneq_bypass);
+            }
 
             // ── Sidechain masking analysis controls ──────────────────────────
             // ANALYZE: arms the audio thread to run one analysis on the next FFT frame.
