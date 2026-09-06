@@ -4,6 +4,7 @@ use std::sync::Arc;
 use vizia_plug::ViziaState;
 #[cfg(test)]
 mod biquad_sanity_test;
+mod hysteresis;
 mod oversampler;
 #[cfg(test)]
 mod plugin_integration_tests;
@@ -538,6 +539,9 @@ pub struct BusChannelStripParams {
     pub transformer_high_response: FloatParam,
     #[id = "transformer_compression"]
     pub transformer_compression: FloatParam,
+    /// #16: true restores bit-identical v1.0 saturation (no hysteresis).
+    #[id = "transformer_hysteresis_bypass"]
+    pub transformer_hysteresis_bypass: BoolParam,
 
     // Punch Module Parameters (Clipper + Transient Shaper)
     #[cfg(feature = "punch")]
@@ -647,6 +651,10 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "sheen")]
     #[id = "sheen_warmth_bypass"]
     pub sheen_warmth_bypass: BoolParam,
+    /// #16: opt-in "tape" hysteresis sub-mode for WARMTH.
+    #[cfg(feature = "sheen")]
+    #[id = "sheen_warmth_tape_mode"]
+    pub sheen_warmth_tape_mode: BoolParam,
 
     #[cfg(feature = "sheen")]
     #[id = "sheen_width"]
@@ -1540,6 +1548,11 @@ impl Default for BusChannelStripParams {
             .with_unit("")
             .with_step_size(0.01),
 
+            transformer_hysteresis_bypass: BoolParam::new(
+                "Transformer Hysteresis Bypass",
+                false,
+            ),
+
             // Punch Module Parameters (Clipper + Transient Shaper)
             // Default: BYPASSED - user must enable intentionally
             #[cfg(feature = "punch")]
@@ -1775,6 +1788,9 @@ impl Default for BusChannelStripParams {
             .with_step_size(0.01),
             #[cfg(feature = "sheen")]
             sheen_warmth_bypass: BoolParam::new("Sheen Warmth Bypass", false),
+            // #16: opt-in "tape" sub-mode — off by default, no migration note needed.
+            #[cfg(feature = "sheen")]
+            sheen_warmth_tape_mode: BoolParam::new("Sheen Warmth Tape Mode", false),
 
             #[cfg(feature = "sheen")]
             sheen_width: FloatParam::new(
@@ -1979,6 +1995,7 @@ impl BusChannelStrip {
             self.params.transformer_low_response.value(),
             self.params.transformer_high_response.value(),
             self.params.transformer_compression.value(),
+            self.params.transformer_hysteresis_bypass.value(),
         );
         if !self.params.transformer_bypass.value() {
             self.transformer.process(buffer);
@@ -2593,6 +2610,7 @@ impl Plugin for BusChannelStrip {
                 self.params.sheen_air_bypass.value(),
                 self.params.sheen_warmth.value(),
                 self.params.sheen_warmth_bypass.value(),
+                self.params.sheen_warmth_tape_mode.value(),
                 self.params.sheen_width.value(),
                 self.params.sheen_width_bypass.value(),
             );
