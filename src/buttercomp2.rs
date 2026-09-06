@@ -1,8 +1,8 @@
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
 use biquad::{Biquad, DirectForm1, Type};
-use nih_plug::buffer::Buffer;
-use nih_plug::prelude::Enum;
+use nice_plug::buffer::Buffer;
+use nice_plug::prelude::Enum;
 
 /// Oversampling factor for the FET All-Buttons second-harmonic saturation.
 /// 4× is enough to keep 2nd/3rd-harmonic of full-bandwidth content out of the

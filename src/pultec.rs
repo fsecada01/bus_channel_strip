@@ -1,6 +1,6 @@
 use crate::oversampler::Oversampler;
 use crate::svf::{SvfCoefficients, SvfType, TptSvf};
-use nih_plug::buffer::Buffer;
+use nice_plug::buffer::Buffer;
 use realfft::num_complex::Complex;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
@@ -747,11 +747,11 @@ mod tests {
     }
 
     /// Measure the actual steady-state gain PultecEQ applies through
-    /// `process()`, using a real nih_plug `Buffer`. This is the end-to-end
+    /// `process()`, using a real nice_plug `Buffer`. This is the end-to-end
     /// check the user-facing issue needs: "when I crank LF BOOST, do I
     /// actually get ~+15 dB of boost below the shelf corner?"
     fn measure_gain_db(eq: &mut PultecEQ, freq_hz: f32, sr: f32) -> f32 {
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
         let n = 8192_usize;
         let omega = 2.0 * core::f32::consts::PI * freq_hz / sr;
         let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin()).collect();
@@ -847,7 +847,7 @@ mod tests {
     /// Run an arbitrary stereo signal through `process` (or `process_bypassed`)
     /// and return the left channel.
     fn run_stereo(eq: &mut PultecEQ, input: &[f32], bypassed: bool) -> Vec<f32> {
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
         let n = input.len();
         let mut l = input.to_vec();
         let mut r = input.to_vec();

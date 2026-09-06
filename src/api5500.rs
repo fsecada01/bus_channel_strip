@@ -1,6 +1,6 @@
 use crate::shaping::{Filter, FilterType};
 use biquad::Q_BUTTERWORTH_F32;
-use nih_plug::buffer::Buffer;
+use nice_plug::buffer::Buffer;
 
 pub struct Api5500 {
     sample_rate: f32,

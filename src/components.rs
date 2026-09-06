@@ -1,7 +1,7 @@
 // src/components.rs
 // Reusable UI components for the Bus Channel Strip editor
 
-use nih_plug::prelude::*;
+use nice_plug::prelude::*;
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
 use vizia_plug::widgets::*;
@@ -27,7 +27,7 @@ pub fn module_row(cx: &mut Context, builder: impl FnOnce(&mut Context)) -> Handl
 
 /// Titled section group: renders a section-label + vertical stack of controls.
 /// Single point of failure for all labeled sections across all modules.
-pub fn module_section(cx: &mut Context, title: &str, builder: impl FnOnce(&mut Context)) {
+pub fn module_section(cx: &mut Context, title: &'static str, builder: impl FnOnce(&mut Context)) {
     VStack::new(cx, |cx| {
         Label::new(cx, title)
             .class("section-label")
@@ -83,10 +83,14 @@ impl ModuleTheme {
 }
 
 // Enhanced parameter slider with consistent styling
-pub fn create_param_slider<P, L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
-where
+pub fn create_param_slider<'c, 'p, P, F>(
+    cx: &'c mut Context,
+    label: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     P: Param + 'static,
-    L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &P,
 {
     VStack::new(cx, |cx| {
@@ -95,7 +99,7 @@ where
             .height(Pixels(PARAM_LABEL_H))
             .width(Stretch(1.0));
 
-        ParamSlider::new(cx, lens, param_map)
+        ParamSlider::new(cx, param_map(params))
             .height(Pixels(20.0))
             .width(Stretch(1.0));
     })
@@ -109,12 +113,16 @@ where
 // Removed problematic raw param slider function for now
 
 // Reusable bypass button component
-pub fn create_bypass_button<F>(cx: &mut Context, _label: &str, param_map: F)
-where
+pub fn create_bypass_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    _label: &str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    // Create the button with proper lens binding
-    ParamButton::new(cx, crate::editor::Data::params, param_map)
+    ParamButton::new(cx, param_map(params))
         .class("bypass-button")
         .height(Pixels(28.0))
         .width(Stretch(1.0))
@@ -127,11 +135,15 @@ where
 /// is lit green; when BYPASSED (bypass=true, i.e. ParamButton :checked) it
 /// appears dark/off. Label reads "ACTIVE" in both states — users read the
 /// color, not the text, matching how outboard gear works.
-pub fn create_active_led_button<F>(cx: &mut Context, param_map: F)
-where
+pub fn create_active_led_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    ParamButton::new(cx, crate::editor::Data::params, param_map)
+    ParamButton::new(cx, param_map(params))
         .with_label("ACTIVE")
         .class("active-led-button")
         .height(Pixels(28.0))
@@ -144,11 +156,15 @@ where
 /// convention: the checked/lit state (param=true = enabled) appears DARK like
 /// normal operation, while the unchecked state (disabled) appears lit/red.
 /// This matches the bypass button convention where dark = normal/processing.
-pub fn create_on_button<F>(cx: &mut Context, param_map: F)
-where
+pub fn create_on_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    ParamButton::new(cx, crate::editor::Data::params, param_map)
+    ParamButton::new(cx, param_map(params))
         .class("on-button")
         .height(Pixels(28.0))
         .width(Stretch(1.0))
@@ -159,9 +175,13 @@ where
 /// Inline labeled toggle button for BoolParam controls inside a module's control surface.
 /// Renders a label above a full-width button, matching the slider layout so heights
 /// stay consistent when mixed with param sliders in the same row.
-pub fn create_bool_button<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
-where
-    L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
+pub fn create_bool_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    label: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
     VStack::new(cx, |cx| {
@@ -169,7 +189,7 @@ where
             .class("param-label")
             .height(Pixels(PARAM_LABEL_H))
             .width(Stretch(1.0));
-        ParamButton::new(cx, lens, param_map)
+        ParamButton::new(cx, param_map(params))
             .class("bool-button")
             .height(Pixels(20.0))
             .width(Stretch(1.0));
@@ -183,9 +203,13 @@ where
 
 // Specialized components for common parameter types
 
-pub fn create_frequency_slider<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
-where
-    L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
+pub fn create_frequency_slider<'c, 'p, F>(
+    cx: &'c mut Context,
+    label: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
     VStack::new(cx, |cx| {
@@ -194,7 +218,7 @@ where
             .height(Pixels(PARAM_LABEL_H))
             .width(Stretch(1.0));
 
-        ParamSlider::new(cx, lens, param_map)
+        ParamSlider::new(cx, param_map(params))
             .height(Pixels(20.0))
             .width(Stretch(1.0))
             .class("frequency-slider");
@@ -207,9 +231,13 @@ where
     .bottom(Pixels(0.0));
 }
 
-pub fn create_gain_slider<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
-where
-    L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
+pub fn create_gain_slider<'c, 'p, F>(
+    cx: &'c mut Context,
+    label: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
     VStack::new(cx, |cx| {
@@ -218,7 +246,7 @@ where
             .height(Pixels(PARAM_LABEL_H))
             .width(Stretch(1.0));
 
-        ParamSlider::new(cx, lens, param_map)
+        ParamSlider::new(cx, param_map(params))
             .height(Pixels(20.0))
             .width(Stretch(1.0))
             .class("gain-slider");
@@ -231,9 +259,13 @@ where
     .bottom(Pixels(0.0));
 }
 
-pub fn create_ratio_slider<L, F>(cx: &mut Context, label: &str, lens: L, param_map: F)
-where
-    L: Lens<Target = Arc<BusChannelStripParams>> + Clone + 'static,
+pub fn create_ratio_slider<'c, 'p, F>(
+    cx: &'c mut Context,
+    label: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
     VStack::new(cx, |cx| {
@@ -242,7 +274,7 @@ where
             .height(Pixels(PARAM_LABEL_H))
             .width(Stretch(1.0));
 
-        ParamSlider::new(cx, lens, param_map)
+        ParamSlider::new(cx, param_map(params))
             .height(Pixels(20.0))
             .width(Stretch(1.0))
             .class("ratio-slider");

@@ -18,8 +18,8 @@
 //     so the user can isolate exactly the frequency range being processed.
 
 use crate::svf::{flush_denormal, SvfCoefficients, SvfType, TptSvf};
-use nih_plug::buffer::Buffer;
-use nih_plug::prelude::Enum;
+use nice_plug::buffer::Buffer;
+use nice_plug::prelude::Enum;
 
 // RMS integration window for sidechain detection. 10 ms is a conventional
 // trade-off: long enough to smooth out transient spikes that would cause
@@ -1179,7 +1179,7 @@ mod tests {
         // band 2's detected level should be independent of whether band 1 is
         // heavily cutting or not. Verifies the invariant.
         let sr = 44100.0_f32;
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
 
         let make_sine = |n: usize| {
             let l: Vec<f32> = (0..n)
@@ -1296,7 +1296,7 @@ mod tests {
         // same coefficient trajectory over time. We verify this by running two
         // buffers side by side and comparing band GR + per-sample ratios.
         let sr = 44100.0_f32;
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
 
         let n = 1024_usize;
         // L channel gets a 1 kHz sine at -6 dBFS; R channel is silent.
@@ -1428,7 +1428,7 @@ mod tests {
         // corrupt each other's state. With eq_filter_l / eq_filter_r split,
         // the channels are effectively two independent filter chains.
         let sr = 44100.0_f32;
-        use nih_plug::buffer::Buffer;
+        use nice_plug::buffer::Buffer;
 
         let n = 256_usize;
         // L: 500 Hz sine at 0.25 amplitude. R: 2 kHz sine at 0.25 amplitude.

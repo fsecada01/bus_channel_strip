@@ -64,7 +64,7 @@ fn main() {
     if let Ok(clang_args) = env::var("BINDGEN_EXTRA_CLANG_ARGS") {
         let parts: Vec<&str> = clang_args.split(" -I").collect();
 
-        if let Some(first_part) = parts.get(0) {
+        if let Some(first_part) = parts.first() {
             for flag in first_part.split_whitespace() {
                 build.flag(flag);
             }

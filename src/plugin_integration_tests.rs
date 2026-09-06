@@ -15,8 +15,8 @@
 #[cfg(test)]
 mod plugin_integration_tests {
     use crate::BusChannelStrip;
-    use nih_plug::buffer::Buffer;
-    use nih_plug::prelude::Params;
+    use nice_plug::buffer::Buffer;
+    use nice_plug::prelude::Params;
 
     fn make_sine_buffer(freq_hz: f32, sr: f32, n: usize) -> (Vec<f32>, Vec<f32>) {
         let omega = 2.0 * core::f32::consts::PI * freq_hz / sr;

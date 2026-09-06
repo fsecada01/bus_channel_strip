@@ -19,7 +19,7 @@
 use crate::oversampler::Oversampler;
 use crate::shaping::{Filter, FilterType};
 use crate::svf::{SvfCoefficients, SvfType, TptSvf};
-use nih_plug::buffer::Buffer;
+use nice_plug::buffer::Buffer;
 
 // ============================================================================
 // Stage constants — fixed frequencies / Qs from the spec

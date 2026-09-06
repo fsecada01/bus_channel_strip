@@ -1,4 +1,4 @@
-use nih_plug::prelude::*;
+use nice_plug::prelude::*;
 use std::sync::Arc;
 #[cfg(feature = "gui")]
 use vizia_plug::ViziaState;
@@ -10,6 +10,10 @@ mod plugin_integration_tests;
 mod shaping;
 mod spectral;
 mod svf;
+// Only consumed from `editor.rs` (gui-gated); kept testable in non-gui
+// builds too so `cargo test` always exercises the zoom/window-size math.
+#[cfg(any(feature = "gui", test))]
+mod window_sizing;
 
 #[cfg(feature = "api5500")]
 mod api5500;
@@ -214,10 +218,6 @@ struct BusChannelStrip {
     /// Smoothed auto-gain correction factor (linear, 1.0 = unity).
     /// Updated per buffer; reset to 1.0 when auto-gain is disabled.
     auto_gain_correction: f32,
-
-    /// GUI state
-    #[cfg(feature = "gui")]
-    editor_state: Arc<ViziaState>,
 }
 
 #[derive(Params)]
@@ -688,6 +688,12 @@ pub struct BusChannelStripParams {
     pub hide_punch: BoolParam,
     #[id = "hide_haas"]
     pub hide_haas: BoolParam,
+
+    /// GUI window size / HiDPI zoom state. Persisted so the plugin reopens at
+    /// the same zoom level across DAW sessions (issue #20).
+    #[cfg(feature = "gui")]
+    #[persist = "editor-state"]
+    pub editor_state: Arc<ViziaState>,
 }
 
 impl Default for BusChannelStrip {
@@ -751,8 +757,6 @@ impl Default for BusChannelStrip {
             analysis_result: Arc::new(spectral::AnalysisResult::new()),
             gr_data: Arc::new(spectral::GainReductionData::new()),
             auto_gain_correction: 1.0,
-            #[cfg(feature = "gui")]
-            editor_state: editor::default_state(),
         }
     }
 }
@@ -1807,6 +1811,9 @@ impl Default for BusChannelStripParams {
             hide_transformer: BoolParam::new("Hide Transformer", false).non_automatable(),
             hide_punch: BoolParam::new("Hide Punch", false).non_automatable(),
             hide_haas: BoolParam::new("Hide Haas", false).non_automatable(),
+
+            #[cfg(feature = "gui")]
+            editor_state: editor::default_state(),
         }
     }
 }
@@ -2348,7 +2355,7 @@ impl Plugin for BusChannelStrip {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         editor::create(
             self.params.clone(),
-            self.editor_state.clone(),
+            self.params.editor_state.clone(),
             self.spectrum_data.clone(),
             self.analysis_requested.clone(),
             self.analysis_result.clone(),
@@ -2641,5 +2648,5 @@ impl Vst3Plugin for BusChannelStrip {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
 }
 
-nih_export_clap!(BusChannelStrip);
-nih_export_vst3!(BusChannelStrip);
+nice_export_clap!(BusChannelStrip);
+nice_export_vst3!(BusChannelStrip);
