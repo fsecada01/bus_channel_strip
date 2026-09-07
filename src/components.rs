@@ -4,8 +4,10 @@
 use nice_plug::prelude::*;
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
+use vizia_plug::vizia::vg;
 use vizia_plug::widgets::*;
 
+use crate::icons::{Icon, IconKind};
 use crate::BusChannelStripParams;
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -82,6 +84,71 @@ impl ModuleTheme {
     }
 }
 
+/// Upper-bound estimate of `.param-drag-tooltip`'s rendered width (padding +
+/// ~5 chars at 11px bold), used to clamp its position against the slider's
+/// right edge in `param_slider_with_tooltip`.
+const TOOLTIP_WIDTH_ESTIMATE_PX: f32 = 60.0;
+
+/// Wraps a `ParamSlider` with a floating value tooltip that follows the
+/// cursor during drag (roadmap v2.0 §4.4 "Knob micro-interactions"). This is
+/// distinct from [`attach_tooltip`]'s hover-delay help text (#25) — the two
+/// compose (see `create_param_slider` et al.): `attach_tooltip` wraps the
+/// whole labeled control with a static hover explainer, while this wraps
+/// just the slider with a tooltip that only appears, and only shows the
+/// live value, while actively dragging.
+/// `ParamSlider` is a sealed external widget (vizia_plug) with no override
+/// hooks, so this observes `MouseMove` bubbling out of it rather than
+/// hooking into its internal drag state — its own `WindowEvent::MouseMove`
+/// handler never calls `meta.consume()`. Drag-vs-hover is inferred from the
+/// left mouse button being held, since `ParamSlider` exposes no drag-state
+/// API to read directly.
+pub(crate) fn param_slider_with_tooltip<'c, 'p, P, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) -> Handle<'c, ZStack>
+where
+    'p: 'c,
+    P: Param + 'static,
+    F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &P,
+{
+    let tooltip_visible = SyncSignal::new(false);
+    let tooltip_text: SyncSignal<String> = SyncSignal::new(String::new());
+    let tooltip_x = SyncSignal::new(0.0_f32);
+    let params_owned = params.clone();
+
+    ZStack::new(cx, |cx| {
+        ParamSlider::new(cx, param_map(params))
+            .height(Stretch(1.0))
+            .width(Stretch(1.0));
+        Label::new(cx, tooltip_text)
+            .class("param-drag-tooltip")
+            .position_type(PositionType::Absolute)
+            .display(tooltip_visible.map(|v| if *v { Display::Flex } else { Display::None }))
+            .left(tooltip_x.map(|x| Pixels(*x)))
+            .hoverable(false);
+    })
+    .on_mouse_move(move |cx, x, _y| {
+        if cx.mouse().left.state == MouseButtonState::Pressed {
+            let bounds = cx.bounds();
+            let p = param_map(&params_owned);
+            let value_text = p.normalized_value_to_string(p.unmodulated_normalized_value(), true);
+            tooltip_text.set(value_text);
+            // Clamp against both edges so the tooltip never overflows past the
+            // slider it's attached to; TOOLTIP_WIDTH_ESTIMATE_PX is a fixed
+            // upper-bound estimate since the label's actual rendered width
+            // isn't known from this event handler.
+            let max_x = (bounds.w - TOOLTIP_WIDTH_ESTIMATE_PX).max(0.0);
+            tooltip_x.set((x - bounds.x - 20.0).clamp(0.0, max_x));
+            tooltip_visible.set(true);
+        } else if tooltip_visible.get() {
+            tooltip_visible.set(false);
+        }
+    })
+    .height(Pixels(20.0))
+    .width(Stretch(1.0))
+}
+
 /// Attaches the #25 hover-delay tooltip to `handle` when `tooltip_id` has a
 /// matching entry in [`crate::tooltips`]. No-op (no tooltip rendered) for
 /// [`crate::tooltips::NO_TOOLTIP`] or any ID outside the 7-module + Sheen
@@ -110,7 +177,7 @@ pub fn create_param_slider<'c, 'p, P, F>(
 ) where
     'p: 'c,
     P: Param + 'static,
-    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &P,
+    F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &P,
 {
     attach_tooltip(
         VStack::new(cx, |cx| {
@@ -119,9 +186,7 @@ pub fn create_param_slider<'c, 'p, P, F>(
                 .height(Pixels(PARAM_LABEL_H))
                 .width(Stretch(1.0));
 
-            ParamSlider::new(cx, param_map(params))
-                .height(Pixels(20.0))
-                .width(Stretch(1.0));
+            param_slider_with_tooltip(cx, params, param_map);
         })
         .class("param-control")
         .width(Stretch(1.0))
@@ -239,6 +304,35 @@ pub fn create_bool_button<'c, 'p, F>(
     );
 }
 
+/// Collapsed-tab expand button: a full-size clickable `ParamButton` (empty
+/// label) with a `ChevronRight` [`Icon`] overlaid on top. Replaces the
+/// previous `"\u{25B6}"` glyph label — see `docs/adr` and roadmap v2.0 §4.4.
+pub fn create_expand_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
+    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
+{
+    ZStack::new(cx, |cx| {
+        ParamButton::new(cx, param_map(params))
+            .with_label("")
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+        Icon::new(
+            cx,
+            IconKind::ChevronRight,
+            vg::Color::from_argb(255, 224, 224, 224),
+        )
+        .hoverable(false)
+        .width(Pixels(12.0))
+        .height(Pixels(12.0));
+    })
+    .class("expand-btn")
+    .alignment(Alignment::Center);
+}
+
 // Specialized components for common parameter types
 
 pub fn create_frequency_slider<'c, 'p, F>(
@@ -249,7 +343,7 @@ pub fn create_frequency_slider<'c, 'p, F>(
     param_map: F,
 ) where
     'p: 'c,
-    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
+    F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
     attach_tooltip(
         VStack::new(cx, |cx| {
@@ -258,10 +352,7 @@ pub fn create_frequency_slider<'c, 'p, F>(
                 .height(Pixels(PARAM_LABEL_H))
                 .width(Stretch(1.0));
 
-            ParamSlider::new(cx, param_map(params))
-                .height(Pixels(20.0))
-                .width(Stretch(1.0))
-                .class("frequency-slider");
+            param_slider_with_tooltip(cx, params, param_map).class("frequency-slider");
         })
         .class("param-control")
         .class("frequency-control")
@@ -281,7 +372,7 @@ pub fn create_gain_slider<'c, 'p, F>(
     param_map: F,
 ) where
     'p: 'c,
-    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
+    F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
     attach_tooltip(
         VStack::new(cx, |cx| {
@@ -290,10 +381,7 @@ pub fn create_gain_slider<'c, 'p, F>(
                 .height(Pixels(PARAM_LABEL_H))
                 .width(Stretch(1.0));
 
-            ParamSlider::new(cx, param_map(params))
-                .height(Pixels(20.0))
-                .width(Stretch(1.0))
-                .class("gain-slider");
+            param_slider_with_tooltip(cx, params, param_map).class("gain-slider");
         })
         .class("param-control")
         .class("gain-control")
@@ -313,7 +401,7 @@ pub fn create_ratio_slider<'c, 'p, F>(
     param_map: F,
 ) where
     'p: 'c,
-    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
+    F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
     attach_tooltip(
         VStack::new(cx, |cx| {
@@ -322,10 +410,7 @@ pub fn create_ratio_slider<'c, 'p, F>(
                 .height(Pixels(PARAM_LABEL_H))
                 .width(Stretch(1.0));
 
-            ParamSlider::new(cx, param_map(params))
-                .height(Pixels(20.0))
-                .width(Stretch(1.0))
-                .class("ratio-slider");
+            param_slider_with_tooltip(cx, params, param_map).class("ratio-slider");
         })
         .class("param-control")
         .class("ratio-control")

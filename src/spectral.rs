@@ -175,6 +175,32 @@ impl Default for TruePeakData {
     }
 }
 
+/// One-pole envelope-follower step for meter display ballistics (roadmap
+/// v2.0 §4.4 "smooth needle ballistics"). Applied purely at the display
+/// layer — decouples visible meter motion from per-frame data jitter,
+/// independent of any ballistics already implemented by the underlying DSP
+/// detector (e.g. Punch's true-peak hold/decay). Uses a fast time constant
+/// while rising toward `target` (attack) and a slower one while falling
+/// (release), matching standard VU/PPM meter behavior.
+pub fn meter_ballistics_step(
+    displayed: f32,
+    target: f32,
+    dt_seconds: f32,
+    attack_tc_seconds: f32,
+    release_tc_seconds: f32,
+) -> f32 {
+    let tc = if target > displayed {
+        attack_tc_seconds
+    } else {
+        release_tc_seconds
+    };
+    if tc <= 0.0 {
+        return target;
+    }
+    let coeff = (-dt_seconds / tc).exp();
+    target + (displayed - target) * coeff
+}
+
 // ── LevelMeterData ────────────────────────────────────────────────────────────
 //
 // Generic lock-free scalar meter reading written by the audio thread and read
@@ -387,6 +413,61 @@ mod tests {
         assert!(
             (recovered - test_db).abs() < 1e-6,
             "True-peak write/read: expected {test_db}, got {recovered}"
+        );
+    }
+
+    // ── meter_ballistics_step ────────────────────────────────────────────────
+
+    #[test]
+    fn test_meter_ballistics_rises_toward_target_on_attack() {
+        let next = meter_ballistics_step(-60.0, 0.0, 0.02, 0.02, 0.3);
+        assert!(
+            next > -60.0 && next < 0.0,
+            "A rising target should move the displayed value partway toward it, got {next}"
+        );
+    }
+
+    #[test]
+    fn test_meter_ballistics_falls_toward_target_on_release() {
+        let next = meter_ballistics_step(0.0, -60.0, 0.02, 0.02, 0.3);
+        assert!(
+            next < 0.0 && next > -60.0,
+            "A falling target should move the displayed value partway toward it, got {next}"
+        );
+    }
+
+    #[test]
+    fn test_meter_ballistics_attack_is_faster_than_release() {
+        let dt = 0.02;
+        let attack_step = meter_ballistics_step(-60.0, 0.0, dt, 0.02, 0.3);
+        let release_step = meter_ballistics_step(0.0, -60.0, dt, 0.02, 0.3);
+        let attack_progress = attack_step - (-60.0);
+        let release_progress = 0.0 - release_step;
+        assert!(
+            attack_progress > release_progress,
+            "Attack (tc=0.02s) should close more distance per step than release (tc=0.3s): \
+             attack_progress={attack_progress}, release_progress={release_progress}"
+        );
+    }
+
+    #[test]
+    fn test_meter_ballistics_converges_to_target_over_many_steps() {
+        let mut displayed = -60.0_f32;
+        for _ in 0..500 {
+            displayed = meter_ballistics_step(displayed, 0.0, 0.02, 0.02, 0.3);
+        }
+        assert!(
+            (displayed - 0.0).abs() < 0.01,
+            "Repeated steps should converge to the target, got {displayed}"
+        );
+    }
+
+    #[test]
+    fn test_meter_ballistics_zero_dt_holds_displayed_value() {
+        let next = meter_ballistics_step(-12.0, 0.0, 0.0, 0.02, 0.3);
+        assert!(
+            (next - -12.0).abs() < 1e-6,
+            "Zero elapsed time should not move the displayed value, got {next}"
         );
     }
 

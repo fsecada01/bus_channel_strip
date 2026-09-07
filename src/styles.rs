@@ -1,5 +1,14 @@
 // src/styles.rs
 // CSS styling for reusable components
+//
+// Type scale (roadmap v2.0 §4.4): headline/label roles use the primary
+// scale `12 / 14 / 16 / 20 / 24px`; compact, information-dense roles (DynEQ
+// band columns, sidebar rows, badges) use the micro scale `9 / 10 / 11px`
+// where dropping below 12px is necessary to avoid overflow. Letter-spacing
+// follows `0.5 / 0.8 / 1 / 1.5 / 2px`. The spacing grid is
+// `4 / 8 / 12 / 16 / 24px`. `style_scale_tests` below enforces all three
+// against every non-zoom-tier rule. The `.zoom-*` overrides are a separate,
+// already-tuned display-scaling system and are intentionally exempt.
 
 pub const COMPONENT_STYLES: &str = r#"
 
@@ -34,9 +43,9 @@ pub const COMPONENT_STYLES: &str = r#"
     background: linear-gradient(180deg, #2d323c 0%, #24282f 35%, #1b1f27 75%, #151922 100%);
     border-bottom: 2px solid #373c46;
     border-top: 1px solid #4a5162;
-    padding: 10px 18px;
+    padding: 12px 16px;
     border-radius: 8px 8px 0 0;
-    gap: 14px;
+    gap: 16px;
     alignment: center;
 }
 
@@ -51,7 +60,7 @@ pub const COMPONENT_STYLES: &str = r#"
     background-color: #c8a04a;
     border: 2px solid #806020;
     border-radius: 4px;
-    padding: 6px 14px;
+    padding: 8px 16px;
 }
 
 .brand-plate-brass:hover {
@@ -75,15 +84,15 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .chassis-title {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
     color: #1a1004;
-    margin-left: 20px;
+    margin-left: 24px;
 }
 
 .master-controls {
     background: linear-gradient(180deg, rgba(20, 24, 32, 0.55), rgba(14, 17, 22, 0.6));
-    padding: 6px 12px;
+    padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.04);
     alignment: center;
@@ -134,7 +143,7 @@ pub const COMPONENT_STYLES: &str = r#"
      • darker control-backing wells inside controls read as inset. */
 .module-slot {
     border-radius: 8px;
-    margin: 2px;
+    margin: 4px;
 }
 
 .module-header {
@@ -144,7 +153,7 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .module-name {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     color: #e0e0e0;
     letter-spacing: 1px;
@@ -152,12 +161,12 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .module-type {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: #b8b8b8;
     letter-spacing: 0.5px;
     text-transform: uppercase;
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 .section-label {
@@ -198,7 +207,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.8px;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
 /* ── Module themes ─────────────────────────────────────────────────────────
@@ -268,7 +277,7 @@ pub const COMPONENT_STYLES: &str = r#"
 /* Signal flow indicator — subtle pill that blends into the chassis header
    gradient instead of reading as a separate framed block. */
 .signal-flow-section {
-    padding: 6px 14px;
+    padding: 8px 16px;
     background: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.03);
@@ -279,7 +288,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-weight: 700;
     color: #8c98a8;
     text-transform: uppercase;
-    letter-spacing: 1.2px;
+    letter-spacing: 1px;
 }
 
 /* ── Chain preset selector ─────────────────────────────────────────────────
@@ -294,7 +303,7 @@ pub const COMPONENT_STYLES: &str = r#"
     border-radius: 4px;
     cursor: pointer;
     alignment: center;
-    padding: 2px 4px;
+    padding: 4px;
     gap: 1px;
 }
 
@@ -317,7 +326,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 9px;
     font-weight: 600;
     color: #8a929e;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.5px;
     text-transform: uppercase;
     text-align: center;
     width: 1s;
@@ -338,7 +347,7 @@ pub const COMPONENT_STYLES: &str = r#"
    communicates "this one is the active focus". */
 
 .module-name-target {
-    padding: 2px 4px;
+    padding: 4px;
     border-radius: 3px;
     border: 1px solid transparent;
 }
@@ -360,7 +369,7 @@ pub const COMPONENT_STYLES: &str = r#"
     background: linear-gradient(180deg, #4a2018, #381610);
     border: 1px solid rgba(255, 140, 100, 0.4);
     border-radius: 4px;
-    padding: 4px 10px;
+    padding: 4px 12px;
     alignment: center;
 }
 .exit-focus-btn:hover {
@@ -389,14 +398,14 @@ pub const COMPONENT_STYLES: &str = r#"
     background: linear-gradient(180deg, rgba(20, 23, 30, 0.6), rgba(14, 16, 22, 0.7));
     border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 6px;
-    padding: 6px 4px;
+    padding: 8px 4px;
 }
 
 .library-sidebar-header {
     font-size: 9px;
     font-weight: 800;
     color: #8c98a8;
-    letter-spacing: 1.4px;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
     text-align: center;
     height: 14px;
@@ -404,7 +413,7 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .library-row {
-    padding: 2px 4px;
+    padding: 4px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 3px;
@@ -429,7 +438,7 @@ pub const COMPONENT_STYLES: &str = r#"
 .library-row-tag {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.5px;
     height: 14px;
     width: 1s;
 }
@@ -443,7 +452,7 @@ pub const COMPONENT_STYLES: &str = r#"
     background: linear-gradient(180deg, #222730, #1b1f27);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
-    padding: 4px 10px;
+    padding: 4px 12px;
     alignment: center;
 }
 .preset-header-btn:hover {
@@ -454,7 +463,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 11px;
     font-weight: 700;
     color: #c0c8d4;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.5px;
     height: 14px;
     width: Auto;
 }
@@ -476,7 +485,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 10px;
     font-weight: 800;
     color: #8c98a8;
-    letter-spacing: 1.4px;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
     height: 14px;
     width: 1s;
@@ -493,7 +502,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 10px;
     font-weight: 700;
     color: #c0c8d4;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.5px;
 }
 .preset-save-btn:hover {
     background: rgba(255, 255, 255, 0.12);
@@ -511,7 +520,7 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .preset-row {
-    padding: 2px 6px;
+    padding: 4px 8px;
     font-size: 11px;
     color: #c8d0dc;
     background: transparent;
@@ -615,7 +624,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 1.5px;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.18);
     pointer-events: none;
@@ -638,7 +647,7 @@ pub const COMPONENT_STYLES: &str = r#"
     font-weight: 700;
     color: #8c98a8;
     text-transform: uppercase;
-    letter-spacing: 1.2px;
+    letter-spacing: 1px;
     text-align: center;
 }
 
@@ -683,7 +692,7 @@ pub const COMPONENT_STYLES: &str = r#"
 
 /* Parameter control components */
 .param-group {
-    margin: 4px 2px;
+    margin: 4px;
     padding: 8px;
     background-color: rgba(255, 255, 255, 0.02);
     border-radius: 4px;
@@ -754,7 +763,7 @@ pub const COMPONENT_STYLES: &str = r#"
     border: 1px solid #3a4050;
     border-radius: 4px;
     color: #e0e6ee;
-    padding: 6px 12px;
+    padding: 8px 12px;
     font-size: 12px;
     font-weight: 600;
     text-align: center;
@@ -793,7 +802,7 @@ pub const COMPONENT_STYLES: &str = r#"
     border: 1px solid #4dbd4d;
     border-radius: 4px;
     color: #f5fff5;
-    padding: 6px 12px;
+    padding: 8px 12px;
     font-size: 12px;
     font-weight: 700;
     text-align: center;
@@ -879,7 +888,7 @@ pub const COMPONENT_STYLES: &str = r#"
 .eject-btn {
     height: 20px;
     min-height: 20px;
-    padding: 0 6px;
+    padding: 0 8px;
     gap: 4px;
     background: rgba(60, 30, 30, 0.45);
     border: 1px solid #5a3030;
@@ -973,7 +982,7 @@ pub const COMPONENT_STYLES: &str = r#"
     padding: 8px 4px;
 }
 .collapsed-name {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 800;
     letter-spacing: 1.5px;
     color: inherit;
@@ -1007,7 +1016,7 @@ pub const COMPONENT_STYLES: &str = r#"
     border: 1px solid #666666;
     border-radius: 4px;
     color: #aaaaaa;
-    padding: 6px 12px;
+    padding: 8px 12px;
     font-size: 12px;
     font-weight: 600;
     text-align: center;
@@ -1035,7 +1044,7 @@ slider {
     height: 20px;
     background: linear-gradient(145deg, #404040, #353535);
     border-radius: 10px;
-    margin: 2px 0px;
+    margin: 4px 0px;
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
     transition: all 0.15s ease;
 }
@@ -1070,6 +1079,43 @@ slider .thumb:hover {
     background: linear-gradient(145deg, #ffffff, #f0f0f0);
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
     transform: scale(1.1);
+}
+
+/* ── ParamSlider micro-interactions (roadmap v2.0 §4.4) ──────────────────
+   ParamSlider (vizia_plug) is a sealed external widget — these rules target
+   its own internal `.fill`/`.value` elements and `:active` pseudo-class
+   (set by ParamSlider itself via cx.set_active() during drag) rather than
+   any Rust-side override. Spring-back: an overshoot easing curve on the
+   fill bar's left/width so it settles into place with a subtle bounce on
+   every value change. Fade: the value label sits at reduced opacity at
+   rest and eases to full opacity while the slider is being dragged. */
+param-slider .fill {
+    transition:
+        left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+        width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+param-slider .value {
+    opacity: 0.8;
+    transition: opacity 0.15s ease;
+}
+
+param-slider:active .value {
+    opacity: 1;
+}
+
+/* Floating value tooltip that follows the cursor during a ParamSlider
+   drag — see `components::param_slider_with_tooltip`. */
+.param-drag-tooltip {
+    background: linear-gradient(145deg, #262a32, #1a1d24);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    top: -20px;
 }
 
 /* Specialized slider themes */
@@ -1133,7 +1179,7 @@ scrollbar .thumb:hover {
     background-color: #2a2a2a;
     border-radius: 6px;
     padding: 12px;
-    margin: 6px;
+    margin: 8px;
     border: 1px solid #3a3a3a;
     transition: border-color 0.2s ease;
     min-height: 160px;
@@ -1163,7 +1209,7 @@ scrollbar .thumb:hover {
 
 /* Compact card shown inside the strip slot */
 .dyneq-card-hint {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #66cc66;
     text-transform: uppercase;
@@ -1193,7 +1239,7 @@ scrollbar .thumb:hover {
 }
 
 .dyneq-open-label {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #66cc66;
     text-align: center;
@@ -1293,7 +1339,7 @@ scrollbar .thumb:hover {
     font-weight: 800;
     color: #e8c878;
     text-transform: uppercase;
-    letter-spacing: 4px;
+    letter-spacing: 2px;
     text-shadow: 0 0 12px rgba(232, 200, 120, 0.4);
 }
 
@@ -1317,16 +1363,22 @@ scrollbar .thumb:hover {
     background: linear-gradient(145deg, #2a2218, #1d1610);
     border: 1px solid #806020;
     border-radius: 4px;
-    color: #c8a04a;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.2px;
-    text-align: center;
-    padding: 6px 10px;
+    padding: 8px 12px;
 }
 
 .sheen-restore-btn:hover {
     background: linear-gradient(145deg, #36281c, #463420);
+}
+
+.sheen-restore-label {
+    color: #c8a04a;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-align: center;
+}
+
+.sheen-restore-btn:hover .sheen-restore-label {
     color: #ffd870;
 }
 
@@ -1403,7 +1455,7 @@ scrollbar .thumb:hover {
     background: rgba(102, 204, 102, 0.04);
     border: 1px solid rgba(102, 204, 102, 0.15);
     border-radius: 6px;
-    padding: 6px;
+    padding: 8px;
 }
 
 .dyneq-band-title {
@@ -1441,7 +1493,7 @@ scrollbar .thumb:hover {
 @media (max-width: 800px) {
     .module-section {
         padding: 8px;
-        margin: 2px;
+        margin: 4px;
     }
 
     .param-control {
@@ -1491,3 +1543,128 @@ scrollbar .thumb:hover {
 .zoom-200 .chassis-title     { font-size: 25px; }
 
 "#;
+
+#[cfg(test)]
+mod style_scale_tests {
+    use super::COMPONENT_STYLES;
+
+    const TYPE_SCALE_PRIMARY: [u32; 5] = [12, 14, 16, 20, 24];
+    const TYPE_SCALE_MICRO: [u32; 3] = [9, 10, 11];
+    const LETTER_SPACING_SCALE: [&str; 5] = ["0.5px", "0.8px", "1px", "1.5px", "2px"];
+    const SPACING_GRID: [u32; 5] = [4, 8, 12, 16, 24];
+
+    /// Selectors with a documented, deliberate exception (hidden-label hacks,
+    /// a single hairline gap) rather than an unaudited outlier.
+    const SCALE_EXEMPT_SELECTORS: &[&str] = &[".module-led-indicator", ".chain-preset-btn"];
+
+    /// Line-based (not a full CSS parser) selector/declaration walker tailored
+    /// to this hand-authored file's formatting: a selector either opens a
+    /// multi-line block (`.foo {` alone on a line, declarations follow on
+    /// their own lines until `}`) or is a single-line rule
+    /// (`.foo { prop: val; }`, used by the `.zoom-*` overrides).
+    fn for_each_declaration(css: &str, mut visit: impl FnMut(&str, &str)) {
+        let mut current_selector = String::new();
+        for line in css.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_suffix('{') {
+                if !rest.trim().is_empty() {
+                    current_selector = rest.trim().to_string();
+                }
+                continue;
+            }
+            if let Some(brace_pos) = line.find('{') {
+                if line.trim_end().ends_with('}') {
+                    let selector = line[..brace_pos].trim();
+                    let body = &line[brace_pos + 1..line.rfind('}').unwrap()];
+                    visit(selector, body);
+                    continue;
+                }
+            }
+            if line == "}" {
+                continue;
+            }
+            if !current_selector.is_empty() {
+                visit(&current_selector, line);
+            }
+        }
+    }
+
+    fn is_exempt(selector: &str) -> bool {
+        selector.contains(".zoom-")
+            || SCALE_EXEMPT_SELECTORS
+                .iter()
+                .any(|exempt| selector.contains(exempt))
+    }
+
+    fn extract_px_values(body: &str, property: &str) -> Vec<u32> {
+        let prefix = format!("{property}-");
+        body.split(';')
+            .filter_map(|decl| {
+                let decl = decl.trim();
+                let (name, value) = decl.split_once(':')?;
+                let name = name.trim();
+                (name == property || name.starts_with(&prefix)).then(|| value.trim())
+            })
+            .flat_map(|value| value.split_whitespace())
+            .filter_map(|token| token.strip_suffix("px").and_then(|n| n.parse::<u32>().ok()))
+            .collect()
+    }
+
+    #[test]
+    fn base_font_sizes_conform_to_type_scale() {
+        for_each_declaration(COMPONENT_STYLES, |selector, body| {
+            if is_exempt(selector) {
+                return;
+            }
+            for px in extract_px_values(body, "font-size") {
+                assert!(
+                    TYPE_SCALE_PRIMARY.contains(&px) || TYPE_SCALE_MICRO.contains(&px),
+                    "selector `{selector}` uses off-scale font-size {px}px \
+                     (expected one of {TYPE_SCALE_PRIMARY:?} or {TYPE_SCALE_MICRO:?})"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn base_letter_spacing_conforms_to_scale() {
+        for_each_declaration(COMPONENT_STYLES, |selector, body| {
+            if is_exempt(selector) {
+                return;
+            }
+            for decl in body.split(';') {
+                let decl = decl.trim();
+                let Some((name, value)) = decl.split_once(':') else {
+                    continue;
+                };
+                if name.trim() != "letter-spacing" {
+                    continue;
+                }
+                let value = value.trim();
+                assert!(
+                    LETTER_SPACING_SCALE.contains(&value),
+                    "selector `{selector}` uses off-scale letter-spacing {value} \
+                     (expected one of {LETTER_SPACING_SCALE:?})"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn base_spacing_conforms_to_grid() {
+        for_each_declaration(COMPONENT_STYLES, |selector, body| {
+            if is_exempt(selector) {
+                return;
+            }
+            for property in ["padding", "margin", "gap"] {
+                for px in extract_px_values(body, property) {
+                    assert!(
+                        px == 0 || SPACING_GRID.contains(&px),
+                        "selector `{selector}` uses off-grid {property} {px}px \
+                         (expected 0 or one of {SPACING_GRID:?})"
+                    );
+                }
+            }
+        });
+    }
+}

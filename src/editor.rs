@@ -7,12 +7,15 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use vizia_plug::vizia::prelude::*;
-use vizia_plug::widgets::{ParamButton, ParamButtonExt, ParamSlider, RawParamEvent};
+use vizia_plug::vizia::vg;
+use vizia_plug::widgets::{ParamButton, ParamButtonExt, RawParamEvent};
 use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
 use crate::api5500::Api5500;
 use crate::components::{self, ModuleTheme};
+use crate::icons::{Icon, IconKind};
 use crate::presets::{self, Preset};
 use crate::pultec::PultecEQ;
 use crate::sheen::SheenModule;
@@ -979,45 +982,31 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_api5500)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_api5500);
         }
         ModuleType::ButterComp2 => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_buttercomp2)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_buttercomp2);
         }
         ModuleType::PultecEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_pultec)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_pultec);
         }
         ModuleType::DynamicEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_dynamic_eq)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_dynamic_eq);
         }
         ModuleType::Transformer => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_transformer)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_transformer);
         }
         ModuleType::Punch => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_punch)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_punch);
         }
         ModuleType::Haas => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_haas)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_haas);
         }
         // Empty slots are never collapsed (is_module_hidden returns false).
         ModuleType::Empty => {}
@@ -1035,7 +1024,14 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
 /// parent, which would cause clicks to fall back to the drag handle row.
 fn build_eject_button(cx: &mut Context, slot_idx: usize) {
     HStack::new(cx, |cx| {
-        Label::new(cx, "\u{2715}").class("eject-btn-glyph"); // ✕
+        Icon::new(
+            cx,
+            IconKind::Close,
+            vg::Color::from_argb(255, 216, 144, 144),
+        )
+        .class("eject-btn-glyph")
+        .width(Pixels(11.0))
+        .height(Pixels(11.0));
         Label::new(cx, "REMOVE").class("eject-btn-label");
     })
     .class("eject-btn")
@@ -1276,7 +1272,14 @@ pub(crate) fn create(
                 // next to the brand so users always know where to look.
                 let focused_slot_signal = cx.data::<Data>().focused_slot;
                 HStack::new(cx, |cx| {
-                    Label::new(cx, "\u{2715} EXIT FOCUS").class("exit-focus-label");
+                    Icon::new(
+                        cx,
+                        IconKind::Close,
+                        vg::Color::from_argb(255, 255, 176, 152),
+                    )
+                    .width(Pixels(10.0))
+                    .height(Pixels(10.0));
+                    Label::new(cx, "EXIT FOCUS").class("exit-focus-label");
                 })
                 .class("exit-focus-btn")
                 .display(focused_slot_signal.map(|f| {
@@ -2827,11 +2830,20 @@ fn build_dynamic_eq_controls(cx: &mut Context) {
         // Uses Button::new (not VStack) so the full 40px hit area is reliably clickable;
         // VStack + on_press can have dead zones where child labels shadow parent events.
         Button::new(cx, |cx| {
-            Label::new(cx, "OPEN EDITOR  \u{25B6}")
-                .class("dyneq-open-label")
-                .width(Stretch(1.0))
-                .top(Pixels(0.0))
-                .bottom(Pixels(0.0))
+            HStack::new(cx, |cx| {
+                Label::new(cx, "OPEN EDITOR").class("dyneq-open-label");
+                Icon::new(
+                    cx,
+                    IconKind::ChevronRight,
+                    vg::Color::from_argb(255, 102, 204, 102),
+                )
+                .width(Pixels(12.0))
+                .height(Pixels(12.0));
+            })
+            .alignment(Alignment::Center)
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0))
         })
         .class("dyneq-open-btn")
         .on_press(|cx| cx.emit(AppEvent::OpenDynEq))
@@ -2887,8 +2899,6 @@ impl View for SpectrumCanvas {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        use vizia_plug::vizia::vg;
-
         // Early-out when the canvas is hidden (display:none gives zero bounds).
         // Without this guard, cx.needs_redraw() at the end would spin the render loop
         // at 60 fps even when the DynEQ view is closed, competing with event processing
@@ -3111,15 +3121,39 @@ const TRUE_PEAK_METER_FLOOR_DB: f32 = -24.0;
 const TRUE_PEAK_METER_CEILING_DB: f32 = 3.0;
 const TRUE_PEAK_WARN_DB: f32 = -1.0;
 
+/// Attack/release time constants for the true-peak meter's display-layer
+/// ballistics (roadmap v2.0 §4.4 "smooth needle ballistics") — see
+/// `spectral::meter_ballistics_step`. Fast attack so real peaks are still
+/// caught promptly; slower release for a readable, non-flickering meter.
+const TRUE_PEAK_METER_ATTACK_TC_S: f32 = 0.02;
+const TRUE_PEAK_METER_RELEASE_TC_S: f32 = 0.3;
+
 /// Horizontal-bar meter for Punch's ITU-R BS.1770-4 true-peak reading;
 /// follows `SpectrumCanvas`'s lock-free-atomic draw() pattern.
 struct PunchTruePeakMeter {
     true_peak_data: Arc<spectral::TruePeakData>,
+    /// Display-layer ballistics state — smooths the raw per-frame reading
+    /// independent of whatever hold/decay the DSP detector already applies.
+    displayed_db: RefCell<[f32; 2]>,
+    last_frame: RefCell<Instant>,
+    /// Cached gradient shader, keyed on `(bounds.x, bounds.w)`. Colors and
+    /// stops are fixed, so the shader only needs rebuilding when the
+    /// meter's horizontal bounds change (e.g. a window resize) — a linear
+    /// gradient's color mapping along its axis doesn't depend on the
+    /// y-coordinate of its defining points, so one shader serves both
+    /// channel bars.
+    cached_gradient: RefCell<Option<((f32, f32), vg::Shader)>>,
 }
 
 impl PunchTruePeakMeter {
     fn new(cx: &mut Context, true_peak_data: Arc<spectral::TruePeakData>) -> Handle<'_, Self> {
-        Self { true_peak_data }.build(cx, |_cx| {})
+        Self {
+            true_peak_data,
+            displayed_db: RefCell::new([spectral::TRUE_PEAK_FLOOR_DB; 2]),
+            last_frame: RefCell::new(Instant::now()),
+            cached_gradient: RefCell::new(None),
+        }
+        .build(cx, |_cx| {})
     }
 }
 
@@ -3129,17 +3163,36 @@ impl View for PunchTruePeakMeter {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        use vizia_plug::vizia::vg;
-
         let bounds = cx.bounds();
         if bounds.w < 1.0 || bounds.h < 1.0 {
             return;
         }
 
-        let db = [
+        let target_db = [
             f32::from_bits(self.true_peak_data.channels[0].load(Ordering::Relaxed)),
             f32::from_bits(self.true_peak_data.channels[1].load(Ordering::Relaxed)),
         ];
+
+        let now = Instant::now();
+        let dt = now
+            .duration_since(*self.last_frame.borrow())
+            .as_secs_f32()
+            .min(0.1);
+        *self.last_frame.borrow_mut() = now;
+
+        let db = {
+            let mut displayed = self.displayed_db.borrow_mut();
+            for (d, &target) in displayed.iter_mut().zip(target_db.iter()) {
+                *d = spectral::meter_ballistics_step(
+                    *d,
+                    target,
+                    dt,
+                    TRUE_PEAK_METER_ATTACK_TC_S,
+                    TRUE_PEAK_METER_RELEASE_TC_S,
+                );
+            }
+            *displayed
+        };
 
         let mut bg_paint = vg::Paint::default();
         bg_paint.set_color(vg::Color::from_argb(255, 18, 25, 31));
@@ -3148,6 +3201,50 @@ impl View for PunchTruePeakMeter {
             vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h),
             &bg_paint,
         );
+
+        // Fixed green→amber→red gradient spanning the meter's full width —
+        // the filled bar is a window into it, so a bar's own color shifts
+        // as it grows, rather than snapping between two flat colors at the
+        // warn threshold.
+        const BOUNDS_EPSILON: f32 = 0.5;
+        let gradient_key = (bounds.x, bounds.w);
+        let shader = {
+            let mut cache = self.cached_gradient.borrow_mut();
+            let stale = match &*cache {
+                Some((key, _)) => {
+                    (key.0 - gradient_key.0).abs() > BOUNDS_EPSILON
+                        || (key.1 - gradient_key.1).abs() > BOUNDS_EPSILON
+                }
+                None => true,
+            };
+            if stale {
+                let warn_frac = ((TRUE_PEAK_WARN_DB - TRUE_PEAK_METER_FLOOR_DB)
+                    / (TRUE_PEAK_METER_CEILING_DB - TRUE_PEAK_METER_FLOOR_DB))
+                    .clamp(0.0, 1.0);
+                let gradient_colors: [vg::Color4f; 3] = [
+                    vg::Color::from_argb(220, 90, 200, 160).into(),
+                    vg::Color::from_argb(220, 230, 190, 60).into(),
+                    vg::Color::from_argb(220, 230, 60, 60).into(),
+                ];
+                let gradient_stops = [0.0_f32, warn_frac, 1.0_f32];
+                let gradient_spec = vg::gradient::Gradient::new(
+                    vg::gradient::Colors::new(
+                        &gradient_colors,
+                        Some(&gradient_stops),
+                        vg::TileMode::Clamp,
+                        None,
+                    ),
+                    vg::gradient::Interpolation::default(),
+                );
+                *cache = vg::gradient::shaders::linear_gradient(
+                    ((bounds.x, bounds.y), (bounds.x + bounds.w, bounds.y)),
+                    &gradient_spec,
+                    None,
+                )
+                .map(|s| (gradient_key, s));
+            }
+            cache.as_ref().map(|(_, s)| s.clone())
+        };
 
         let bar_h = (bounds.h - 2.0) / 2.0;
         for (i, &ch_db) in db.iter().enumerate() {
@@ -3158,12 +3255,16 @@ impl View for PunchTruePeakMeter {
             let w = norm * bounds.w;
 
             let mut bar_paint = vg::Paint::default();
-            if ch_db >= TRUE_PEAK_WARN_DB {
-                bar_paint.set_color(vg::Color::from_argb(220, 230, 90, 60));
-            } else {
-                bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160));
-            }
             bar_paint.set_style(vg::PaintStyle::Fill);
+            bar_paint.set_anti_alias(true);
+            match &shader {
+                Some(shader) => {
+                    bar_paint.set_shader(shader.clone());
+                }
+                None => {
+                    bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160));
+                }
+            }
             if w > 0.5 {
                 canvas.draw_rect(vg::Rect::from_xywh(bounds.x, y, w, bar_h), &bar_paint);
             }
@@ -3521,16 +3622,6 @@ impl View for SheenResponseStrip {
 //       band_N_enabled, band_N_solo,
 //       band_N_freq, band_N_threshold, band_N_ratio,
 //       band_N_q, band_N_mode, band_N_attack, band_N_release, band_N_gain);
-// Helper so the closure literals passed to `dyneq_slider!` get their parameter
-// type pinned down by this function's signature (a bare `|p| &p.field` closure
-// called inline cannot infer `p`'s type on its own).
-fn dyneq_param<'p, P: Param>(
-    params: &'p Arc<BusChannelStripParams>,
-    pf: impl Fn(&'p Arc<BusChannelStripParams>) -> &'p P,
-) -> &'p P {
-    pf(params)
-}
-
 macro_rules! dyneq_slider {
     // #25: `$tooltip_id` is always band 1's param ID for the given field
     // type (e.g. "dyneq_band1_freq"). All 4 bands share identical tooltip
@@ -3546,9 +3637,7 @@ macro_rules! dyneq_slider {
             {
                 let params = cx.data::<Data>().params.clone();
                 components::attach_tooltip(
-                    ParamSlider::new(cx, dyneq_param(&params, $pf))
-                        .height(Pixels(16.0))
-                        .width(Stretch(1.0)),
+                    components::param_slider_with_tooltip(cx, &params, $pf).height(Pixels(16.0)),
                     $tooltip_id,
                 );
             }
@@ -3590,16 +3679,21 @@ macro_rules! dyneq_band_col {
                     let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
                     let dyneq_expand_gen_signal = cx.data::<Data>().dyneq_expand_gen;
                     Button::new(cx, |cx| {
-                        Label::new(
-                            cx,
-                            dyneq_expand_gen_signal.map(move |_| {
-                                if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) {
-                                    "▼"
+                        HStack::new(cx, |cx| {
+                            Binding::new(cx, dyneq_expand_gen_signal, move |cx| {
+                                let kind = if expand_arc_chevron[$band_idx].load(Ordering::Relaxed)
+                                {
+                                    IconKind::ChevronDown
                                 } else {
-                                    "▶"
-                                }
-                            }),
-                        )
+                                    IconKind::ChevronRight
+                                };
+                                Icon::new(cx, kind, vg::Color::from_argb(255, 136, 153, 170))
+                                    .width(Pixels(12.0))
+                                    .height(Pixels(12.0));
+                            });
+                        })
+                        .width(Pixels(12.0))
+                        .height(Pixels(12.0))
                     })
                     .on_press(|cx| cx.emit(AppEvent::ToggleDynEQBand($band_idx)))
                     .class("dyneq-chevron")
@@ -3678,10 +3772,19 @@ fn build_dyneq_back_view(
         HStack::new(cx, |cx| {
             // Back button
             VStack::new(cx, |cx| {
-                Label::new(cx, "\u{25C0} STRIP VIEW")
-                    .class("dyneq-back-btn-label")
-                    .height(Pixels(16.0))
-                    .width(Stretch(1.0));
+                HStack::new(cx, |cx| {
+                    Icon::new(
+                        cx,
+                        IconKind::ChevronLeft,
+                        vg::Color::from_argb(255, 102, 204, 102),
+                    )
+                    .width(Pixels(11.0))
+                    .height(Pixels(11.0));
+                    Label::new(cx, "STRIP VIEW").class("dyneq-back-btn-label");
+                })
+                .alignment(Alignment::Center)
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
             })
             .class("dyneq-back-btn")
             .on_press(|cx| cx.emit(AppEvent::CloseDynEq))
@@ -3874,10 +3977,19 @@ fn build_sheen_back_view(cx: &mut Context) {
         // ── Header row: back button + wordmark ─────────────────────────
         HStack::new(cx, |cx| {
             VStack::new(cx, |cx| {
-                Label::new(cx, "\u{25C0} STRIP VIEW")
-                    .class("sheen-back-btn-label")
-                    .height(Pixels(16.0))
-                    .width(Stretch(1.0));
+                HStack::new(cx, |cx| {
+                    Icon::new(
+                        cx,
+                        IconKind::ChevronLeft,
+                        vg::Color::from_argb(255, 232, 200, 120),
+                    )
+                    .width(Pixels(11.0))
+                    .height(Pixels(11.0));
+                    Label::new(cx, "STRIP VIEW").class("sheen-back-btn-label");
+                })
+                .alignment(Alignment::Center)
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
             })
             .class("sheen-back-btn")
             .on_press(|cx| cx.emit(AppEvent::CloseSheen))
@@ -3931,10 +4043,21 @@ fn build_sheen_back_view(cx: &mut Context) {
                     .class("param-label")
                     .height(Pixels(14.0))
                     .width(Stretch(1.0));
-                Label::new(cx, "\u{21BA} RESTORE FACTORY")
-                    .class("sheen-restore-btn")
-                    .height(Pixels(32.0))
-                    .width(Stretch(1.0));
+                HStack::new(cx, |cx| {
+                    Icon::new(
+                        cx,
+                        IconKind::Restore,
+                        vg::Color::from_argb(255, 200, 160, 74),
+                    )
+                    .width(Pixels(12.0))
+                    .height(Pixels(12.0));
+                    Label::new(cx, "RESTORE FACTORY").class("sheen-restore-label");
+                })
+                .class("sheen-restore-btn")
+                .alignment(Alignment::Center)
+                .gap(Pixels(6.0))
+                .height(Pixels(32.0))
+                .width(Stretch(1.0));
             })
             .on_press(|cx| cx.emit(AppEvent::RestoreSheenFactory))
             .cursor(CursorIcon::Hand)
@@ -4005,10 +4128,9 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
         match name {
             "BODY" => {
                 components::attach_tooltip(
-                    ParamSlider::new(cx, &params.sheen.sheen_body_db)
+                    components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_body_db)
                         .class("sheen-slider")
-                        .height(Pixels(22.0))
-                        .width(Stretch(1.0)),
+                        .height(Pixels(22.0)),
                     "sheen_body_db",
                 );
                 components::attach_tooltip(
@@ -4021,10 +4143,11 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
             }
             "PRESENCE" => {
                 components::attach_tooltip(
-                    ParamSlider::new(cx, &params.sheen.sheen_presence_db)
-                        .class("sheen-slider")
-                        .height(Pixels(22.0))
-                        .width(Stretch(1.0)),
+                    components::param_slider_with_tooltip(cx, &params, |p| {
+                        &p.sheen.sheen_presence_db
+                    })
+                    .class("sheen-slider")
+                    .height(Pixels(22.0)),
                     "sheen_presence_db",
                 );
                 components::attach_tooltip(
@@ -4037,10 +4160,9 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
             }
             "AIR" => {
                 components::attach_tooltip(
-                    ParamSlider::new(cx, &params.sheen.sheen_air_db)
+                    components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_air_db)
                         .class("sheen-slider")
-                        .height(Pixels(22.0))
-                        .width(Stretch(1.0)),
+                        .height(Pixels(22.0)),
                     "sheen_air_db",
                 );
                 components::attach_tooltip(
@@ -4053,10 +4175,9 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
             }
             "WARMTH" => {
                 components::attach_tooltip(
-                    ParamSlider::new(cx, &params.sheen.sheen_warmth)
+                    components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_warmth)
                         .class("sheen-slider")
-                        .height(Pixels(22.0))
-                        .width(Stretch(1.0)),
+                        .height(Pixels(22.0)),
                     "sheen_warmth",
                 );
                 components::attach_tooltip(
@@ -4079,10 +4200,9 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
             }
             "WIDTH" => {
                 components::attach_tooltip(
-                    ParamSlider::new(cx, &params.sheen.sheen_width)
+                    components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_width)
                         .class("sheen-slider")
-                        .height(Pixels(22.0))
-                        .width(Stretch(1.0)),
+                        .height(Pixels(22.0)),
                     "sheen_width",
                 );
                 components::attach_tooltip(
