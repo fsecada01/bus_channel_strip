@@ -218,10 +218,10 @@ struct BusChannelStrip {
     analysis_result: Arc<spectral::AnalysisResult>,
     /// audio → GUI: per-band gain reduction for the DynEQ spectrum display.
     gr_data: Arc<spectral::GainReductionData>,
-    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading (issue #19).
-    /// Not feature-gated behind "punch" — kept unconditional so the field
-    /// always exists and threads through `editor::create()` uniformly; it's
-    /// simply never written to when the "punch" feature is disabled.
+    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading. Not
+    /// feature-gated behind "punch" — kept unconditional so the field always
+    /// exists and threads through `editor::create()` uniformly; it's simply
+    /// never written to when the "punch" feature is disabled.
     true_peak_data: Arc<spectral::TruePeakData>,
 
     /// Smoothed auto-gain correction factor (linear, 1.0 = unity).
@@ -719,11 +719,8 @@ impl BusChannelStrip {
         if !self.params.punch.punch_bypass.value() {
             self.punch.process(buffer);
         } else {
-            // Keep the true-peak meter decaying to the floor while bypassed
-            // instead of freezing on the last pre-bypass reading (review
-            // finding on issue #19). Narrow reset — leaves the clipper's
-            // oversampler/transient-detector state untouched so there's no
-            // discontinuity when bypass is turned back off.
+            // See `reset_true_peak_meter()`'s doc comment for why bypass
+            // needs this instead of a full `reset()`.
             self.punch.reset_true_peak_meter();
         }
 

@@ -77,9 +77,8 @@ mod plugin_integration_tests {
         );
     }
 
-    /// Punch's clipper ceiling defaults to -1.0 dBTP (issue #19), leaving
-    /// headroom for DAC reconstruction/intersample overshoot. Was -0.1 dB
-    /// prior to true-peak detection landing — if this regresses, sessions
+    /// Punch's clipper ceiling defaults to -1.0 dBTP, leaving headroom for
+    /// DAC reconstruction/intersample overshoot — if this regresses, sessions
     /// created after this change will silently lose that headroom.
     #[cfg(feature = "punch")]
     #[test]

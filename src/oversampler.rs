@@ -369,13 +369,9 @@ impl Oversampler {
 mod tests {
     use super::*;
 
-    /// Regression test for a review finding on issue #19: `Oversampler`
-    /// used to always allocate `upsample_buffer` sized for the max 16x
-    /// factor regardless of what factor the caller actually requested.
-    /// `new_upsample_only` (used by a metering-only caller that never
-    /// downsamples) must produce numerically identical upsampled output to
-    /// the pre-existing `new_at_factor` path — the fix is a buffer-sizing
-    /// change, not a behavioral one.
+    /// `new_upsample_only` must produce numerically identical upsampled
+    /// output to `new_at_factor` for the same factor — it differs only in
+    /// buffer sizing, not behavior.
     #[test]
     fn test_new_upsample_only_matches_new_at_factor_output() {
         let mut os_full = Oversampler::new_at_factor(4, 64);

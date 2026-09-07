@@ -146,7 +146,7 @@ impl Default for GainReductionData {
 //
 // Lock-free per-channel true-peak (ITU-R BS.1770-4 intersample-peak) reading
 // written by the audio thread and read by the GUI thread for Punch's
-// true-peak meter (issue #19). Relaxed ordering is sufficient — display only.
+// true-peak meter. Relaxed ordering is sufficient — display only.
 
 /// Lock-free stereo true-peak reading (dBTP) shared with the GUI thread.
 pub struct TruePeakData {

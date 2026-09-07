@@ -154,7 +154,7 @@ pub struct Data {
     pub analysis_requested: Arc<AtomicBool>,
     /// Shared with the audio thread — read after analysis completes.
     pub analysis_result: Arc<spectral::AnalysisResult>,
-    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading (issue #19).
+    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading.
     pub true_peak_data: Arc<spectral::TruePeakData>,
     /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
     /// Applied via toggle_class to the chassis root for live CSS rescaling, and also
@@ -2880,14 +2880,8 @@ impl View for SpectrumCanvas {
 }
 
 // ============================================================================
-// Punch True-Peak Meter — issue #19
+// Punch True-Peak Meter
 // ============================================================================
-//
-// Small horizontal-bar meter surfacing Punch's ITU-R BS.1770-4 true-peak
-// reading in the module's control panel. Follows the same lock-free-atomic
-// + custom-View-draw() pattern as `SpectrumCanvas`'s gain-reduction display
-// above: the audio thread publishes dBTP readings via `TruePeakData`
-// (Relaxed — display only), and this view re-reads them every frame.
 
 /// Meter floor (dBTP) — values at or below this render as an empty bar.
 const TRUE_PEAK_METER_FLOOR_DB: f32 = -24.0;
@@ -2896,6 +2890,10 @@ const TRUE_PEAK_METER_CEILING_DB: f32 = 3.0;
 /// Above this reading the bar renders in the "over" warning color.
 const TRUE_PEAK_WARN_DB: f32 = -1.0;
 
+/// Horizontal-bar meter for Punch's ITU-R BS.1770-4 true-peak reading.
+/// Mirrors `SpectrumCanvas`'s lock-free-atomic + custom-`View`-`draw()`
+/// pattern: the audio thread publishes dBTP readings via `TruePeakData`
+/// (`Relaxed` — display only), and this view re-reads them every frame.
 struct PunchTruePeakMeter {
     true_peak_data: Arc<spectral::TruePeakData>,
 }

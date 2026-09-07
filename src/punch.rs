@@ -17,8 +17,7 @@
 
 use crate::oversampler::Oversampler;
 use crate::shaping::biquad_coeffs;
-// Reused as the true-peak detector's floor (see `TruePeakDetector`) so it
-// can never drift from `TruePeakData`'s own GUI-facing floor.
+// Shared with `TruePeakData`'s GUI-facing floor so the two can never drift.
 use crate::spectral::TRUE_PEAK_FLOOR_DB;
 use biquad::{Biquad, DirectForm1, Type};
 use nice_plug::buffer::Buffer;
@@ -340,12 +339,6 @@ struct TruePeakDetector {
 impl TruePeakDetector {
     fn new(sample_rate: f32, max_block_size: usize) -> Self {
         Self {
-            // `new_upsample_only`, not `new_at_factor`: this detector only
-            // ever calls `upsample()` (see the struct doc above), so the
-            // downsample scratch buffer and the 16x-sized upsample buffer
-            // `new_at_factor` would otherwise allocate are pure waste —
-            // right-size to the 4x this detector actually uses (review
-            // finding on issue #19).
             oversampler: Oversampler::new_upsample_only(TRUE_PEAK_OS_FACTOR, max_block_size),
             held_peak_db: TRUE_PEAK_FLOOR_DB,
             hold_counter: 0,
@@ -661,9 +654,9 @@ impl PunchModule {
                 let mixed = dry * (1.0 - self.mix) + wet * self.mix;
                 let output = mixed * self.output_gain;
 
-                // 7. True-peak metering on the final output (ITU-R BS.1770-4,
-                //    issue #19) — measured post-everything so the meter
-                //    reflects what will actually hit the DAC.
+                // 7. True-peak metering (ITU-R BS.1770-4) on the final output —
+                //    measured post-everything so the meter reflects what will
+                //    actually hit the DAC.
                 let true_peak_detector = if ch_idx == 0 {
                     &mut self.true_peak_l
                 } else {
@@ -697,11 +690,11 @@ impl PunchModule {
     }
 
     /// Reset only the true-peak meter, leaving the clipper's oversampler and
-    /// transient-detector state untouched. Called every buffer while Punch
-    /// is bypassed (issue #19 review finding) so the GUI meter decays to the
-    /// floor instead of freezing on the last pre-bypass reading — a full
-    /// `reset()` would also flush the clipper's filter state, causing a
-    /// discontinuity/click when bypass is turned back off.
+    /// transient-detector state untouched. Call every buffer while Punch is
+    /// bypassed so the GUI meter decays to the floor instead of freezing on
+    /// the last pre-bypass reading — a full `reset()` would also flush the
+    /// clipper's filter state, causing a discontinuity/click when bypass is
+    /// turned back off.
     pub fn reset_true_peak_meter(&mut self) {
         self.true_peak_l.reset();
         self.true_peak_r.reset();
@@ -721,8 +714,7 @@ impl PunchModule {
         self.current_transient_activity
     }
 
-    /// Current true-peak reading (dBTP) for each channel, per ITU-R
-    /// BS.1770-4 — surfaced to the Punch GUI meter (issue #19).
+    /// Current true-peak reading (dBTP) for each channel, per ITU-R BS.1770-4.
     pub fn get_true_peak_db(&self) -> (f32, f32) {
         (self.true_peak_l.value_db(), self.true_peak_r.value_db())
     }
@@ -861,7 +853,7 @@ mod tests {
         assert!((db_to_linear(6.0) - 1.995).abs() < 0.01);
     }
 
-    // ── True-Peak Detector (ITU-R BS.1770-4, issue #19) ─────────────────────
+    // ── True-Peak Detector (ITU-R BS.1770-4) ─────────────────────────────────
 
     /// Intersample-peak conformance-style test: a sine at Fs/3 (three
     /// samples per cycle) rarely lands a sample exactly on the waveform's
@@ -1021,11 +1013,11 @@ mod tests {
         );
     }
 
-    /// Regression test for a review finding on issue #19: while Punch is
-    /// bypassed, `process()` never runs, so without an explicit reset the
-    /// true-peak meter would freeze on its last pre-bypass reading forever.
-    /// `reset_true_peak_meter()` (called every buffer from `lib.rs` while
-    /// bypassed) must bring the reading back to the floor.
+    /// While Punch is bypassed, `process()` never runs, so without an
+    /// explicit reset the true-peak meter would freeze on its last
+    /// pre-bypass reading forever. `reset_true_peak_meter()` (called every
+    /// buffer from `lib.rs` while bypassed) must bring the reading back to
+    /// the floor.
     #[test]
     fn test_reset_true_peak_meter_returns_to_floor_without_disturbing_clipper() {
         let sr = 44_100.0_f32;
