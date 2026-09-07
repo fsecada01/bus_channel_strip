@@ -965,6 +965,9 @@ impl ButterComp2 {
     /// Current gain reduction in dB, normalized to the shared meter convention
     /// (0.0 = no reduction, positive = attenuation amount).
     pub fn get_gain_reduction_db(&self) -> f32 {
+        // Safety: self.state is a valid, non-null ButterComp2State* for the
+        // lifetime of self — allocated in ButterComp2::new and freed only in
+        // Drop, same invariant relied on by process()/reset() above.
         unsafe { buttercomp2_get_gain_reduction_db(self.state) as f32 }
     }
 }

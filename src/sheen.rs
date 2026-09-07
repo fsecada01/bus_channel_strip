@@ -299,6 +299,9 @@ impl SheenModule {
     /// Process a stereo buffer in place. Lock-free, allocation-free.
     pub fn process(&mut self, buffer: &mut Buffer) {
         if self.sheen_bypass {
+            // Meter would otherwise freeze at its last reading — same decay
+            // rate as the per-sample WARMTH-inactive branch below (issue #22).
+            self.warmth_saturation_level *= 0.99;
             return;
         }
 
@@ -1024,6 +1027,38 @@ mod tests {
         assert!(
             sheen.get_warmth_saturation_level() < 0.5,
             "saturation level should decay while WARMTH is bypassed, got {}",
+            sheen.get_warmth_saturation_level()
+        );
+    }
+
+    /// Regression for the module-level (master) bypass path — distinct from
+    /// `warmth_saturation_level_decays_when_bypassed` above, which only
+    /// bypasses the WARMTH stage while the module keeps running `process()`.
+    /// When `sheen_bypass` itself is on, `process()` early-returns before
+    /// ever reaching the per-sample loop; without an explicit decay there
+    /// the GUI meter freezes at its last reading forever (issue #22 review).
+    #[test]
+    fn warmth_saturation_level_decays_when_module_bypassed() {
+        let mut sheen = SheenModule::new(SR);
+        sheen.warmth_saturation_level = 0.5;
+        sheen.update_parameters(
+            true, 0.0, true, 0.0, true, 0.0, true, 1.0, false, false, 0.0, true,
+        );
+        let n = 64;
+        let mut l = vec![0.3_f32; n];
+        let mut r = vec![0.3_f32; n];
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |s| {
+                s.clear();
+                s.push(&mut l);
+                s.push(&mut r);
+            });
+        }
+        sheen.process(&mut buffer);
+        assert!(
+            sheen.get_warmth_saturation_level() < 0.5,
+            "saturation level should decay while the module is master-bypassed, got {}",
             sheen.get_warmth_saturation_level()
         );
     }

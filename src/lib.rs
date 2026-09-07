@@ -496,6 +496,10 @@ impl BusChannelStrip {
         );
         if !self.params.transformer.transformer_bypass.value() {
             self.transformer.process(buffer);
+        } else {
+            // Meter would otherwise freeze at its last reading — see
+            // decay_saturation_level()'s doc comment (issue #22).
+            self.transformer.decay_saturation_level();
         }
         {
             use std::sync::atomic::Ordering;
@@ -753,6 +757,8 @@ impl BusChannelStrip {
         } else {
             // See reset_true_peak_meter()'s doc comment for why.
             self.punch.reset_true_peak_meter();
+            // Meter would otherwise freeze at its last reading (issue #22).
+            self.punch.decay_gain_reduction_meter();
         }
 
         // Publish the true-peak meter reading to the GUI (Relaxed — display only).

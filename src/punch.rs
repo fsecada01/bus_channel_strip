@@ -686,6 +686,14 @@ impl PunchModule {
         self.current_gain_reduction
     }
 
+    /// Decay the saturation-meter proxy toward zero without touching any
+    /// other state. `current_gain_reduction` is only updated inside
+    /// `process()` (same 0.9/0.1 smoothing factor used there), so while
+    /// bypassed it would otherwise freeze at its last reading (issue #22).
+    pub fn decay_gain_reduction_meter(&mut self) {
+        self.current_gain_reduction *= 0.9;
+    }
+
     /// Get current transient activity (0.0 - 1.0+) for metering.
     /// Reserved for future transient detector visualization.
     #[allow(dead_code)]
@@ -919,6 +927,25 @@ mod tests {
             "value should have decayed well below the initial peak after hold+decay, \
              got {} (was {peak_after_hit})",
             detector.value_db()
+        );
+    }
+
+    /// Regression for the module-level bypass path (lib.rs calls this
+    /// instead of `process()` when `punch_bypass` is on) — without it the
+    /// GUI saturation meter freezes at its last reading forever (issue #22
+    /// review).
+    #[test]
+    fn test_punch_module_decay_gain_reduction_meter_reduces_toward_zero() {
+        let mut m = PunchModule::new(44100.0);
+        m.current_gain_reduction = 0.8;
+
+        for _ in 0..100 {
+            m.decay_gain_reduction_meter();
+        }
+        let level = m.get_gain_reduction();
+        assert!(
+            level < 1e-3,
+            "expected gain-reduction meter to have decayed near zero after 100 calls, got {level}"
         );
     }
 

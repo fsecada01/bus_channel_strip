@@ -412,6 +412,17 @@ impl TransformerModule {
     pub fn get_saturation_level(&self) -> f32 {
         (self.input_transformer.harmonic_state + self.output_transformer.harmonic_state) * 0.5
     }
+
+    /// Decay both stages' saturation-meter state toward zero without
+    /// touching any other processing state. Call once per buffer while the
+    /// module is bypassed (`process()` isn't run, so `harmonic_state`
+    /// wouldn't otherwise decay) — same per-buffer decay rate `process_sample`
+    /// applies per-sample when its own saturation amount is near zero, so
+    /// the GUI meter still falls to zero instead of freezing (issue #22).
+    pub fn decay_saturation_level(&mut self) {
+        self.input_transformer.harmonic_state *= 0.99;
+        self.output_transformer.harmonic_state *= 0.99;
+    }
 }
 
 /// Dispatch into the per-model saturation nonlinearity. Pointwise (memoryless)
@@ -1079,6 +1090,58 @@ mod tests {
             "Expected positive saturation level after driving a hot signal, got {level}"
         );
         assert!(level.is_finite());
+    }
+
+    /// Regression for the module-level bypass path (lib.rs calls this
+    /// instead of `process()` when `transformer_bypass` is on) — without it
+    /// the GUI meter freezes at its last reading forever (issue #22 review).
+    #[test]
+    fn test_transformer_module_decay_saturation_level_reduces_toward_zero() {
+        let mut t = TransformerModule::new(44100.0);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+        );
+        let n = 2048_usize;
+        let omega = 2.0 * core::f32::consts::PI * 440.0 / 44100.0;
+        let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin() * 0.9).collect();
+        let mut r: Vec<f32> = l.clone();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        t.process(&mut buf);
+        let level_before = t.get_saturation_level();
+        assert!(level_before > 0.0);
+
+        for _ in 0..200 {
+            t.decay_saturation_level();
+        }
+        let level_after_200 = t.get_saturation_level();
+        assert!(
+            level_after_200 < level_before * 0.5,
+            "expected substantial decay after 200 calls, before={level_before} after={level_after_200}"
+        );
+
+        for _ in 0..2000 {
+            t.decay_saturation_level();
+        }
+        let level_after_2200 = t.get_saturation_level();
+        assert!(
+            level_after_2200 < 1e-3,
+            "expected level to have decayed near zero after 2200 calls, got {level_after_2200}"
+        );
     }
 
     #[test]
