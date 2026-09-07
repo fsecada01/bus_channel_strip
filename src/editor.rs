@@ -11,8 +11,11 @@ use vizia_plug::vizia::prelude::*;
 use vizia_plug::widgets::{ParamButton, ParamButtonExt, ParamSlider, RawParamEvent};
 use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
+use crate::api5500::Api5500;
 use crate::components::{self, ModuleTheme};
 use crate::presets::{self, Preset};
+use crate::pultec::PultecEQ;
+use crate::sheen::SheenModule;
 use crate::spectral;
 use crate::styles::COMPONENT_STYLES;
 use crate::{BusChannelStripParams, ModuleType};
@@ -156,6 +159,14 @@ pub struct Data {
     pub analysis_result: Arc<spectral::AnalysisResult>,
     /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading.
     pub true_peak_data: Arc<spectral::TruePeakData>,
+    /// audio → GUI: ButterComp2 gain reduction, dB (issue #22 inline metering).
+    pub buttercomp2_gr_data: Arc<spectral::LevelMeterData>,
+    /// audio → GUI: Transformer saturation level (issue #22 inline metering).
+    pub transformer_sat_data: Arc<spectral::LevelMeterData>,
+    /// audio → GUI: Punch saturation level (issue #22 inline metering).
+    pub punch_sat_data: Arc<spectral::LevelMeterData>,
+    /// audio → GUI: Sheen WARMTH saturation level (issue #22 inline metering).
+    pub sheen_sat_data: Arc<spectral::LevelMeterData>,
     /// Current chassis zoom level as integer percentage. Valid: 75, 100, 125, 150, 200.
     /// Applied via toggle_class to the chassis root for live CSS rescaling, and also
     /// drives a real host window resize (see `AppEvent::SetZoom`).
@@ -1148,6 +1159,10 @@ pub(crate) fn create(
     analysis_result: Arc<spectral::AnalysisResult>,
     gr_data: Arc<spectral::GainReductionData>,
     true_peak_data: Arc<spectral::TruePeakData>,
+    buttercomp2_gr_data: Arc<spectral::LevelMeterData>,
+    transformer_sat_data: Arc<spectral::LevelMeterData>,
+    punch_sat_data: Arc<spectral::LevelMeterData>,
+    sheen_sat_data: Arc<spectral::LevelMeterData>,
 ) -> Option<Box<dyn Editor>> {
     let editor_state_for_data = editor_state.clone();
     create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, gui_cx| {
@@ -1180,6 +1195,10 @@ pub(crate) fn create(
             analysis_requested: analysis_requested.clone(),
             analysis_result: analysis_result.clone(),
             true_peak_data: true_peak_data.clone(),
+            buttercomp2_gr_data: buttercomp2_gr_data.clone(),
+            transformer_sat_data: transformer_sat_data.clone(),
+            punch_sat_data: punch_sat_data.clone(),
+            sheen_sat_data: sheen_sat_data.clone(),
             zoom_level: Signal::new(initial_zoom),
             editor_state: editor_state_for_data.clone(),
             focused_slot: Signal::new(None),
@@ -2194,6 +2213,11 @@ fn build_empty_slot(cx: &mut Context, slot_idx: usize) {
 
 fn build_api5500_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // ── Inline spectrum strip (issue #22) ────────────────────────────────
+        Api5500ResponseStrip::new(cx, cx.data::<Data>().params.clone())
+            .height(Pixels(32.0))
+            .width(Stretch(1.0));
+
         // ── Shelf bands: LF and HF side-by-side ──────────────────────────────
         HStack::new(cx, |cx| {
             // Left: LF low shelf
@@ -2302,6 +2326,18 @@ fn build_api5500_controls(cx: &mut Context) {
 
 fn build_buttercomp2_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // ── Inline gain-reduction meter (issue #22) — reflects whichever ────
+        // model is currently active (lib.rs publishes from the dispatch match).
+        LevelMeterBar::new(
+            cx,
+            cx.data::<Data>().buttercomp2_gr_data.clone(),
+            0.0,
+            24.0,
+            (220, 255, 140, 0),
+        )
+        .height(Pixels(14.0))
+        .width(Stretch(1.0));
+
         // Model selector — always visible above the reactive control surface.
         #[cfg(feature = "buttercomp2")]
         components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
@@ -2496,6 +2532,11 @@ fn build_fet_controls(cx: &mut Context) {
 
 fn build_pultec_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // ── Inline spectrum strip (issue #22) ────────────────────────────────
+        PultecResponseStrip::new(cx, cx.data::<Data>().params.clone())
+            .height(Pixels(32.0))
+            .width(Stretch(1.0));
+
         // LOW FREQUENCY: boost freq/gain on top row, independent cut
         // freq/gain on bottom row. Independent cut freq enables the classic
         // EQP-1A boost+cut trick (boost at 60 Hz, cut at 200 Hz → tight lows).
@@ -2762,8 +2803,10 @@ impl View for SpectrumCanvas {
             let gr = gr_db[b].clamp(0.0, MAX_GR_DB);
             if gr > 0.1 {
                 let bar_h = (gr / MAX_GR_DB) * MAX_BAR_H;
+                // Alpha 220 matches `LevelMeterBar`'s fill convention (issue #22) —
+                // per-band coloring is kept since it also identifies which band.
                 let mut gr_paint = vg::Paint::default();
-                gr_paint.set_color(vg::Color::from_argb(200, r, g, bl));
+                gr_paint.set_color(vg::Color::from_argb(220, r, g, bl));
                 gr_paint.set_style(vg::PaintStyle::Fill);
                 canvas.draw_rect(
                     vg::Rect::from_xywh(band_left[b], bounds.y, band_w, bar_h),
@@ -2946,6 +2989,327 @@ impl View for PunchTruePeakMeter {
         }
 
         cx.needs_redraw();
+    }
+}
+
+// ============================================================================
+// Level Meter Bar — generic inline scalar meter (issue #22)
+// ============================================================================
+
+/// Single horizontal-bar meter reading a `LevelMeterData` scalar; follows
+/// `PunchTruePeakMeter`'s lock-free-atomic draw() pattern. Reused for
+/// ButterComp2's gain reduction and the Transformer/Punch/Sheen saturation
+/// meters — `floor`/`ceiling` map the raw reading to the 0..1 bar fill and
+/// `bar_argb` is the module's own accent color (ADR-0009).
+struct LevelMeterBar {
+    data: Arc<spectral::LevelMeterData>,
+    floor: f32,
+    ceiling: f32,
+    bar_argb: (u8, u8, u8, u8),
+}
+
+impl LevelMeterBar {
+    fn new(
+        cx: &mut Context,
+        data: Arc<spectral::LevelMeterData>,
+        floor: f32,
+        ceiling: f32,
+        bar_argb: (u8, u8, u8, u8),
+    ) -> Handle<'_, Self> {
+        Self {
+            data,
+            floor,
+            ceiling,
+            bar_argb,
+        }
+        .build(cx, |_cx| {})
+    }
+}
+
+impl View for LevelMeterBar {
+    fn element(&self) -> Option<&'static str> {
+        Some("level-meter-bar")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        use vizia_plug::vizia::vg;
+
+        let bounds = cx.bounds();
+        if bounds.w < 1.0 || bounds.h < 1.0 {
+            return;
+        }
+
+        let value = f32::from_bits(self.data.value.load(Ordering::Relaxed));
+        let norm = ((value - self.floor) / (self.ceiling - self.floor)).clamp(0.0, 1.0);
+
+        let mut bg_paint = vg::Paint::default();
+        bg_paint.set_color(vg::Color::from_argb(255, 18, 25, 31));
+        bg_paint.set_style(vg::PaintStyle::Fill);
+        canvas.draw_rect(
+            vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h),
+            &bg_paint,
+        );
+
+        let w = norm * bounds.w;
+        if w > 0.5 {
+            let (a, r, g, b) = self.bar_argb;
+            let mut bar_paint = vg::Paint::default();
+            bar_paint.set_color(vg::Color::from_argb(a, r, g, b));
+            bar_paint.set_style(vg::PaintStyle::Fill);
+            canvas.draw_rect(
+                vg::Rect::from_xywh(bounds.x, bounds.y, w, bounds.h),
+                &bar_paint,
+            );
+        }
+
+        cx.needs_redraw();
+    }
+}
+
+// ============================================================================
+// Frequency Response Strip — inline EQ curve display (issue #22)
+// ============================================================================
+
+// Display-only — the visual curve doesn't need to track the plugin's actual
+// sample rate (same approximation `SpectrumCanvas` makes for its band guides).
+const RESPONSE_STRIP_SAMPLE_RATE: f32 = 48000.0;
+const RESPONSE_STRIP_MIN_HZ: f32 = 20.0;
+const RESPONSE_STRIP_MAX_HZ: f32 = 20000.0;
+const RESPONSE_STRIP_PROBES: usize = 48;
+const RESPONSE_STRIP_FLOOR_DB: f32 = -15.0;
+const RESPONSE_STRIP_CEILING_DB: f32 = 15.0;
+
+/// Shared curve renderer for the per-module frequency-response strips.
+/// `db_fn` is sampled once per probe point (log-spaced 20 Hz – 20 kHz) and
+/// must be a pure function of the module's current parameter values — see
+/// each module's `frequency_response_db` associated function.
+fn draw_frequency_response_curve(
+    cx: &mut DrawContext,
+    canvas: &Canvas,
+    db_fn: impl Fn(f32) -> f32,
+    line_argb: (u8, u8, u8, u8),
+    fill_argb: (u8, u8, u8, u8),
+) {
+    use vizia_plug::vizia::vg;
+
+    let bounds = cx.bounds();
+    if bounds.w < 1.0 || bounds.h < 1.0 {
+        return;
+    }
+
+    let mut bg_paint = vg::Paint::default();
+    bg_paint.set_color(vg::Color::from_argb(255, 18, 25, 31));
+    bg_paint.set_style(vg::PaintStyle::Fill);
+    canvas.draw_rect(
+        vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h),
+        &bg_paint,
+    );
+
+    // 0 dB reference line.
+    let zero_norm =
+        (0.0 - RESPONSE_STRIP_FLOOR_DB) / (RESPONSE_STRIP_CEILING_DB - RESPONSE_STRIP_FLOOR_DB);
+    let zero_y = bounds.y + bounds.h - zero_norm * bounds.h;
+    let mut zero_paint = vg::Paint::default();
+    zero_paint.set_color(vg::Color::from_argb(80, 220, 220, 220));
+    zero_paint.set_style(vg::PaintStyle::Stroke);
+    zero_paint.set_stroke_width(1.0);
+    let mut zero_builder = vg::PathBuilder::new();
+    zero_builder.move_to((bounds.x, zero_y));
+    zero_builder.line_to((bounds.x + bounds.w, zero_y));
+    canvas.draw_path(&zero_builder.detach(), &zero_paint);
+
+    let log_min = RESPONSE_STRIP_MIN_HZ.ln();
+    let log_max = RESPONSE_STRIP_MAX_HZ.ln();
+
+    let mut fill_builder = vg::PathBuilder::new();
+    let mut line_builder = vg::PathBuilder::new();
+    for i in 0..RESPONSE_STRIP_PROBES {
+        let t = i as f32 / (RESPONSE_STRIP_PROBES - 1) as f32;
+        let hz = (log_min + t * (log_max - log_min)).exp();
+        let db = db_fn(hz).clamp(RESPONSE_STRIP_FLOOR_DB, RESPONSE_STRIP_CEILING_DB);
+        let norm =
+            (db - RESPONSE_STRIP_FLOOR_DB) / (RESPONSE_STRIP_CEILING_DB - RESPONSE_STRIP_FLOOR_DB);
+        let x = bounds.x + t * bounds.w;
+        let y = bounds.y + bounds.h - norm * bounds.h;
+        if i == 0 {
+            fill_builder.move_to((x, y));
+            line_builder.move_to((x, y));
+        } else {
+            fill_builder.line_to((x, y));
+            line_builder.line_to((x, y));
+        }
+    }
+    fill_builder.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
+    fill_builder.line_to((bounds.x, bounds.y + bounds.h));
+    fill_builder.close();
+
+    let (fa, fr, fg, fb) = fill_argb;
+    let mut fill_paint = vg::Paint::default();
+    fill_paint.set_color(vg::Color::from_argb(fa, fr, fg, fb));
+    fill_paint.set_style(vg::PaintStyle::Fill);
+    fill_paint.set_anti_alias(true);
+    canvas.draw_path(&fill_builder.detach(), &fill_paint);
+
+    let (la, lr, lg, lb) = line_argb;
+    let mut line_paint = vg::Paint::default();
+    line_paint.set_color(vg::Color::from_argb(la, lr, lg, lb));
+    line_paint.set_style(vg::PaintStyle::Stroke);
+    line_paint.set_stroke_width(1.5);
+    line_paint.set_anti_alias(true);
+    canvas.draw_path(&line_builder.detach(), &line_paint);
+
+    cx.needs_redraw();
+}
+
+/// API5500 inline spectrum strip. Cyan accent per ADR-0009.
+struct Api5500ResponseStrip {
+    params: Arc<BusChannelStripParams>,
+}
+
+impl Api5500ResponseStrip {
+    fn new(cx: &mut Context, params: Arc<BusChannelStripParams>) -> Handle<'_, Self> {
+        Self { params }.build(cx, |_cx| {})
+    }
+}
+
+impl View for Api5500ResponseStrip {
+    fn element(&self) -> Option<&'static str> {
+        Some("response-strip")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let p = &self.params.api5500;
+        let (lf_freq, lf_gain) = (p.lf_freq.value(), p.lf_gain.value());
+        let (lmf_freq, lmf_gain, lmf_q) = (p.lmf_freq.value(), p.lmf_gain.value(), p.lmf_q.value());
+        let (mf_freq, mf_gain, mf_q) = (p.mf_freq.value(), p.mf_gain.value(), p.mf_q.value());
+        let (hmf_freq, hmf_gain, hmf_q) = (p.hmf_freq.value(), p.hmf_gain.value(), p.hmf_q.value());
+        let (hf_freq, hf_gain) = (p.hf_freq.value(), p.hf_gain.value());
+        draw_frequency_response_curve(
+            cx,
+            canvas,
+            |hz| {
+                Api5500::frequency_response_db(
+                    RESPONSE_STRIP_SAMPLE_RATE,
+                    lf_freq,
+                    lf_gain,
+                    lmf_freq,
+                    lmf_gain,
+                    lmf_q,
+                    mf_freq,
+                    mf_gain,
+                    mf_q,
+                    hmf_freq,
+                    hmf_gain,
+                    hmf_q,
+                    hf_freq,
+                    hf_gain,
+                    hz,
+                )
+            },
+            (220, 0, 200, 255),
+            (60, 0, 200, 255),
+        );
+    }
+}
+
+/// Pultec inline spectrum strip. Gold accent per ADR-0009.
+struct PultecResponseStrip {
+    params: Arc<BusChannelStripParams>,
+}
+
+impl PultecResponseStrip {
+    fn new(cx: &mut Context, params: Arc<BusChannelStripParams>) -> Handle<'_, Self> {
+        Self { params }.build(cx, |_cx| {})
+    }
+}
+
+impl View for PultecResponseStrip {
+    fn element(&self) -> Option<&'static str> {
+        Some("response-strip")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let p = &self.params.pultec;
+        let lf_boost_freq = p.pultec_lf_boost_freq.value();
+        let lf_boost_db = p.pultec_lf_boost_gain.value();
+        let lf_boost_bandwidth = p.pultec_lf_boost_bandwidth.value();
+        let lf_cut_freq = p.pultec_lf_cut_freq.value();
+        let lf_cut_db = p.pultec_lf_cut_gain.value();
+        let lf_cut_bandwidth = p.pultec_lf_cut_bandwidth.value();
+        let hf_boost_freq = p.pultec_hf_boost_freq.value();
+        let hf_boost_db = p.pultec_hf_boost_gain.value();
+        let hf_boost_bandwidth = p.pultec_hf_boost_bandwidth.value();
+        let hf_cut_freq = p.pultec_hf_cut_freq.value();
+        let hf_cut_db = p.pultec_hf_cut_gain.value();
+        draw_frequency_response_curve(
+            cx,
+            canvas,
+            |hz| {
+                PultecEQ::frequency_response_db(
+                    RESPONSE_STRIP_SAMPLE_RATE,
+                    lf_boost_freq,
+                    lf_boost_db,
+                    lf_boost_bandwidth,
+                    lf_cut_freq,
+                    lf_cut_db,
+                    lf_cut_bandwidth,
+                    hf_boost_freq,
+                    hf_boost_db,
+                    hf_boost_bandwidth,
+                    hf_cut_freq,
+                    hf_cut_db,
+                    hz,
+                )
+            },
+            (220, 255, 215, 0),
+            (60, 255, 215, 0),
+        );
+    }
+}
+
+/// Sheen inline spectrum strip (BODY/PRESENCE/AIR only — WARMTH is the
+/// separate saturation meter). Brass accent matching the back-view theme.
+struct SheenResponseStrip {
+    params: Arc<BusChannelStripParams>,
+}
+
+impl SheenResponseStrip {
+    fn new(cx: &mut Context, params: Arc<BusChannelStripParams>) -> Handle<'_, Self> {
+        Self { params }.build(cx, |_cx| {})
+    }
+}
+
+impl View for SheenResponseStrip {
+    fn element(&self) -> Option<&'static str> {
+        Some("response-strip")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let p = &self.params.sheen;
+        let body_db = p.sheen_body_db.value();
+        let body_bypass = p.sheen_body_bypass.value();
+        let presence_db = p.sheen_presence_db.value();
+        let presence_bypass = p.sheen_presence_bypass.value();
+        let air_db = p.sheen_air_db.value();
+        let air_bypass = p.sheen_air_bypass.value();
+        draw_frequency_response_curve(
+            cx,
+            canvas,
+            |hz| {
+                SheenModule::frequency_response_db(
+                    RESPONSE_STRIP_SAMPLE_RATE,
+                    body_db,
+                    body_bypass,
+                    presence_db,
+                    presence_bypass,
+                    air_db,
+                    air_bypass,
+                    hz,
+                )
+            },
+            (220, 232, 200, 120),
+            (60, 200, 160, 74),
+        );
     }
 }
 
@@ -3381,6 +3745,12 @@ fn build_sheen_back_view(cx: &mut Context) {
         .gap(Pixels(12.0))
         .alignment(Alignment::Center);
 
+        // ── Inline spectrum strip (issue #22) — BODY/PRESENCE/AIR only; ──
+        // WARMTH has its own saturation meter in its column below.
+        SheenResponseStrip::new(cx, cx.data::<Data>().params.clone())
+            .height(Pixels(32.0))
+            .width(Stretch(1.0));
+
         // ── Five slider columns ────────────────────────────────────────
         // Each column shares the same vertical layout: stage label →
         // ParamSlider → per-stage bypass. ParamSlider in this version
@@ -3468,6 +3838,16 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
+                // Inline saturation meter (issue #22).
+                LevelMeterBar::new(
+                    cx,
+                    cx.data::<Data>().sheen_sat_data.clone(),
+                    0.0,
+                    0.5,
+                    (220, 232, 200, 120),
+                )
+                .height(Pixels(14.0))
+                .width(Stretch(1.0));
             }
             "WIDTH" => {
                 ParamSlider::new(cx, &params.sheen.sheen_width)
@@ -3492,6 +3872,18 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
 
 fn build_transformer_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
+        // ── Inline saturation meter (issue #22) ──────────────────────────────
+        components::module_section(cx, "SATURATION", |cx| {
+            LevelMeterBar::new(
+                cx,
+                cx.data::<Data>().transformer_sat_data.clone(),
+                0.0,
+                0.5,
+                (220, 200, 80, 60),
+            )
+            .height(Pixels(14.0))
+            .width(Stretch(1.0));
+        });
         // Model + compression on one row
         components::module_row(cx, |cx| {
             components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
@@ -3569,6 +3961,19 @@ fn build_punch_controls(cx: &mut Context) {
                 .class("punch-true-peak-meter")
                 .height(Pixels(20.0))
                 .width(Stretch(1.0));
+        });
+        // ── Inline saturation meter (issue #22) — Punch's clip/transient ────
+        // activity proxy, reused per the DoD's Punch saturation-meter mapping.
+        components::module_section(cx, "SATURATION", |cx| {
+            LevelMeterBar::new(
+                cx,
+                cx.data::<Data>().punch_sat_data.clone(),
+                0.0,
+                1.0,
+                (220, 0, 160, 255),
+            )
+            .height(Pixels(14.0))
+            .width(Stretch(1.0));
         });
         components::module_section(cx, "CLIPPER", |cx| {
             components::module_row(cx, |cx| {

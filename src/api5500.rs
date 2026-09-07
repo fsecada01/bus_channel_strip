@@ -1,5 +1,6 @@
 use crate::detune::{micro_detune_pair, DetuneRng};
 use crate::shaping::{Filter, FilterType};
+use crate::svf::{SvfCoefficients, SvfType};
 use biquad::Q_BUTTERWORTH_F32;
 use nice_plug::buffer::Buffer;
 
@@ -163,6 +164,57 @@ impl Api5500 {
         self.mf.reset();
         self.hmf.reset();
         self.hf.reset();
+    }
+
+    /// Pure frequency-response probe (dB) for the inline EQ spectrum strip
+    /// (issue #22). Computed straight from parameter values with no access
+    /// to any live filter/audio-thread state, so it's safe to call from the
+    /// GUI thread. Mirrors `update_parameters`'s gain clamping exactly.
+    #[allow(clippy::too_many_arguments)]
+    pub fn frequency_response_db(
+        sample_rate: f32,
+        lf_freq: f32,
+        lf_gain: f32,
+        lmf_freq: f32,
+        lmf_gain: f32,
+        lmf_q: f32,
+        mf_freq: f32,
+        mf_gain: f32,
+        mf_q: f32,
+        hmf_freq: f32,
+        hmf_gain: f32,
+        hmf_q: f32,
+        hf_freq: f32,
+        hf_gain: f32,
+        probe_hz: f32,
+    ) -> f32 {
+        let w = core::f32::consts::TAU * probe_hz / sample_rate;
+        let lf_gain = lf_gain.clamp(-12.0, 12.0);
+        let lmf_gain = lmf_gain.clamp(-12.0, 12.0);
+        let mf_gain = mf_gain.clamp(-12.0, 12.0);
+        let hmf_gain = hmf_gain.clamp(-12.0, 12.0);
+        let hf_gain = hf_gain.clamp(-12.0, 12.0);
+
+        SvfCoefficients::new(
+            SvfType::LowShelf(lf_gain),
+            sample_rate,
+            lf_freq,
+            Q_BUTTERWORTH_F32,
+        )
+        .magnitude_db(w)
+            + SvfCoefficients::new(SvfType::Bell(lmf_gain), sample_rate, lmf_freq, lmf_q)
+                .magnitude_db(w)
+            + SvfCoefficients::new(SvfType::Bell(mf_gain), sample_rate, mf_freq, mf_q)
+                .magnitude_db(w)
+            + SvfCoefficients::new(SvfType::Bell(hmf_gain), sample_rate, hmf_freq, hmf_q)
+                .magnitude_db(w)
+            + SvfCoefficients::new(
+                SvfType::HighShelf(hf_gain),
+                sample_rate,
+                hf_freq,
+                Q_BUTTERWORTH_F32,
+            )
+            .magnitude_db(w)
     }
 }
 
@@ -378,5 +430,42 @@ mod tests {
             before, eq.detune,
             "reset() did not redraw the stereo micro-detune"
         );
+    }
+
+    // ── #22 frequency_response_db ───────────────────────────────────────────
+
+    #[test]
+    fn test_frequency_response_all_flat_is_near_zero_db() {
+        let db = Api5500::frequency_response_db(
+            48000.0, 100.0, 0.0, 300.0, 0.0, 0.7, 1000.0, 0.0, 1.0, 5000.0, 0.0, 1.0, 12000.0, 0.0,
+            1000.0,
+        );
+        assert!(
+            db.abs() < 0.01,
+            "expected ~0 dB with every band flat, got {db}"
+        );
+    }
+
+    #[test]
+    fn test_frequency_response_mf_bell_peaks_at_center() {
+        let db = Api5500::frequency_response_db(
+            48000.0, 100.0, 0.0, 300.0, 0.0, 0.7, 1000.0, 6.0, 1.0, 5000.0, 0.0, 1.0, 12000.0, 0.0,
+            1000.0,
+        );
+        assert!(
+            (db - 6.0).abs() < 0.05,
+            "expected ~6 dB at MF's own center freq, got {db}"
+        );
+    }
+
+    #[test]
+    fn test_frequency_response_clamps_extreme_gain() {
+        // 100 dB should clamp to 12 dB, same as update_parameters.
+        let db = Api5500::frequency_response_db(
+            48000.0, 100.0, 100.0, 300.0, 0.0, 0.7, 1000.0, 0.0, 1.0, 5000.0, 0.0, 1.0, 12000.0,
+            0.0, 20.0,
+        );
+        assert!(db.is_finite());
+        assert!(db <= 12.5, "LF gain should clamp to +12 dB, got {db}");
     }
 }

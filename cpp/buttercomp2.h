@@ -31,6 +31,10 @@ void buttercomp2_process_stereo(ButterComp2State* state,
 // Reset state (for parameter changes or initialization)
 void buttercomp2_reset(ButterComp2State* state);
 
+// #22: current gain reduction in dB (0.0 = no reduction, positive = amount
+// of attenuation), block-rate smoothed. For the GUI meter only.
+double buttercomp2_get_gain_reduction_db(ButterComp2State* state);
+
 #ifdef __cplusplus
 }
 #endif

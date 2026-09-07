@@ -175,6 +175,36 @@ impl Default for TruePeakData {
     }
 }
 
+// ── LevelMeterData ────────────────────────────────────────────────────────────
+//
+// Generic lock-free scalar meter reading written by the audio thread and read
+// by the GUI thread (issue #22 inline metering). One instance per module
+// meter (ButterComp2 GR, Transformer/Punch/Sheen saturation) — each writer
+// documents its own unit/convention at the call site, e.g. positive dB of
+// gain reduction, or a 0.0-1.0 saturation proxy. Relaxed ordering is
+// sufficient — display only, a stale read is acceptable.
+
+/// Lock-free single-scalar meter reading shared with the GUI thread.
+pub struct LevelMeterData {
+    /// Current meter reading, as raw f32 bits. Unit/convention is documented
+    /// by each writer (see module doc comment above).
+    pub value: AtomicU32,
+}
+
+impl LevelMeterData {
+    pub fn new() -> Self {
+        Self {
+            value: AtomicU32::new(0.0_f32.to_bits()),
+        }
+    }
+}
+
+impl Default for LevelMeterData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,6 +387,27 @@ mod tests {
         assert!(
             (recovered - test_db).abs() < 1e-6,
             "True-peak write/read: expected {test_db}, got {recovered}"
+        );
+    }
+
+    // ── LevelMeterData ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_level_meter_data_initialized_zero() {
+        let lmd = LevelMeterData::new();
+        let val = f32::from_bits(lmd.value.load(Ordering::Relaxed));
+        assert!(val == 0.0, "LevelMeterData should init at 0.0, got {val}");
+    }
+
+    #[test]
+    fn test_level_meter_data_write_read() {
+        let lmd = LevelMeterData::new();
+        let test_val = 6.2_f32;
+        lmd.value.store(test_val.to_bits(), Ordering::Relaxed);
+        let recovered = f32::from_bits(lmd.value.load(Ordering::Relaxed));
+        assert!(
+            (recovered - test_val).abs() < 1e-6,
+            "LevelMeterData write/read: expected {test_val}, got {recovered}"
         );
     }
 

@@ -26,6 +26,10 @@ constexpr double kMaxReleaseScale = 2.0;
 // so it tracks the program material's character rather than jittering
 // block-to-block.
 constexpr double kCrestSmoothTcSeconds = 0.1;
+
+// #22: block-rate smoothing time constant for the GR meter reading — fast
+// enough to feel responsive, slow enough not to flicker between blocks.
+constexpr double kGrMeterSmoothTcSeconds = 0.05;
 } // namespace
 
 struct ButterComp2State {
@@ -45,6 +49,12 @@ struct ButterComp2State {
     // buttercomp2_reset so a transport restart doesn't carry over a stale
     // learned value from unrelated prior material.
     double crest_scale_smoothed;
+
+    // #22: block-rate smoothed linear gain factor (1.0 = no reduction),
+    // tracking the worst-case (most-reduced) sample across both channels in
+    // the most recent block. Read via buttercomp2_get_gain_reduction_db for
+    // the GUI GR meter — display only, not used in the audio path.
+    double gr_meter_smoothed;
 
     // Per-channel state variables (Left/Right)
     double control_A_pos[2];
@@ -81,6 +91,7 @@ ButterComp2State* buttercomp2_create(double sample_rate) {
     // sounding digital" default-on precedent set by #16's hysteresis).
     state->adaptive_envelope_bypass = false;
     state->crest_scale_smoothed = 1.0; // neutral — matches the fixed baseline
+    state->gr_meter_smoothed = 1.0;    // neutral — no reduction
 
     // Initialize state variables to zero (calloc handles this)
     state->fpflip = 1;
@@ -135,6 +146,7 @@ void buttercomp2_reset(ButterComp2State* state) {
         state->dyn_B[ch] = 0.0;
     }
     state->crest_scale_smoothed = 1.0;
+    state->gr_meter_smoothed = 1.0;
 }
 
 void buttercomp2_process_stereo(ButterComp2State* state, 
@@ -168,6 +180,10 @@ void buttercomp2_process_stereo(ButterComp2State* state,
     double crest_peak = 0.0;
     double crest_sum_sq = 0.0;
 
+    // #22: worst-case (smallest) linear gain factor applied by either
+    // compression stage anywhere in this block, across both channels.
+    double block_min_gain = 1.0;
+
     for (int i = 0; i < num_samples; i++) {
         // Process both channels
         float* channels[2] = {&left_channel[i], &right_channel[i]};
@@ -200,12 +216,15 @@ void buttercomp2_process_stereo(ButterComp2State* state,
             double control_B = state->target_neg[ch] * compress_amount * 0.1;
             
             // Apply compression with different characteristics
+            double stage1_gain;
             if (input_sample > 0.0) {
                 state->control_A_pos[ch] += (control_A - state->control_A_pos[ch]) * dynamic_release_speed;
-                input_sample /= (1.0 + state->control_A_pos[ch]);
+                stage1_gain = 1.0 / (1.0 + state->control_A_pos[ch]);
+                input_sample *= stage1_gain;
             } else {
                 state->control_A_neg[ch] += (control_B - state->control_A_neg[ch]) * dynamic_release_speed;
-                input_sample /= (1.0 + fabs(state->control_A_neg[ch]));
+                stage1_gain = 1.0 / (1.0 + fabs(state->control_A_neg[ch]));
+                input_sample *= stage1_gain;
             }
 
             // Second stage of compression (parallel)
@@ -218,10 +237,16 @@ void buttercomp2_process_stereo(ButterComp2State* state,
 
             // Apply dynamic compression
             double comp_ratio = 1.0 + (compress_amount * 0.1);
+            double stage2_gain = 1.0;
             if (abs_sample > state->avg_A[ch] * 1.1) {
-                input_sample /= comp_ratio;
+                stage2_gain = 1.0 / comp_ratio;
+                input_sample *= stage2_gain;
             }
-            
+
+            // #22: track this sample's total applied gain for the GR meter.
+            double total_stage_gain = stage1_gain * stage2_gain;
+            if (total_stage_gain < block_min_gain) block_min_gain = total_stage_gain;
+
             // Output stage.
             // No inline hard clip: the dedicated Punch clipper at the end of
             // the signal chain owns ceiling management. Clipping here robs the
@@ -264,6 +289,22 @@ void buttercomp2_process_stereo(ButterComp2State* state,
         state->crest_scale_smoothed =
             smooth_coeff * state->crest_scale_smoothed + (1.0 - smooth_coeff) * target_scale;
     }
+
+    // #22: block-rate smooth the GR meter reading toward this block's
+    // worst-case gain, independent of the adaptive-envelope bypass state —
+    // the meter should keep reading even when #18's adaptation is off.
+    if (num_samples > 0) {
+        double block_duration_s = (double)num_samples / state->sample_rate;
+        double gr_smooth_coeff = std::exp(-block_duration_s / kGrMeterSmoothTcSeconds);
+        state->gr_meter_smoothed =
+            gr_smooth_coeff * state->gr_meter_smoothed + (1.0 - gr_smooth_coeff) * block_min_gain;
+    }
+}
+
+double buttercomp2_get_gain_reduction_db(ButterComp2State* state) {
+    if (!state) return 0.0;
+    double gain = std::max(state->gr_meter_smoothed, 1e-9);
+    return -20.0 * std::log10(gain);
 }
 
 } // extern "C"

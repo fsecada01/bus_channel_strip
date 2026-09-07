@@ -221,6 +221,15 @@ struct BusChannelStrip {
     /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading.
     true_peak_data: Arc<spectral::TruePeakData>,
 
+    /// audio → GUI: ButterComp2 gain reduction, dB (issue #22 inline metering).
+    buttercomp2_gr_data: Arc<spectral::LevelMeterData>,
+    /// audio → GUI: Transformer saturation level (issue #22 inline metering).
+    transformer_sat_data: Arc<spectral::LevelMeterData>,
+    /// audio → GUI: Punch saturation level (issue #22 inline metering).
+    punch_sat_data: Arc<spectral::LevelMeterData>,
+    /// audio → GUI: Sheen WARMTH saturation level (issue #22 inline metering).
+    sheen_sat_data: Arc<spectral::LevelMeterData>,
+
     /// Smoothed auto-gain correction factor (linear, 1.0 = unity).
     /// Updated per buffer; reset to 1.0 when auto-gain is disabled.
     auto_gain_correction: f32,
@@ -292,6 +301,10 @@ impl Default for BusChannelStrip {
             analysis_result: Arc::new(spectral::AnalysisResult::new()),
             gr_data: Arc::new(spectral::GainReductionData::new()),
             true_peak_data: Arc::new(spectral::TruePeakData::new()),
+            buttercomp2_gr_data: Arc::new(spectral::LevelMeterData::new()),
+            transformer_sat_data: Arc::new(spectral::LevelMeterData::new()),
+            punch_sat_data: Arc::new(spectral::LevelMeterData::new()),
+            sheen_sat_data: Arc::new(spectral::LevelMeterData::new()),
             auto_gain_correction: 1.0,
         }
     }
@@ -349,9 +362,13 @@ impl BusChannelStrip {
     #[cfg(feature = "buttercomp2")]
     fn process_module_buttercomp(&mut self, buffer: &mut Buffer) {
         if self.params.buttercomp2.comp_bypass.value() {
+            use std::sync::atomic::Ordering;
+            self.buttercomp2_gr_data
+                .value
+                .store(0.0_f32.to_bits(), Ordering::Relaxed);
             return;
         }
-        match self.params.buttercomp2.comp_model.value() {
+        let gr_db = match self.params.buttercomp2.comp_model.value() {
             ButterComp2Model::Classic => {
                 self.compressor.update_parameters(
                     self.params.buttercomp2.comp_compress.value(),
@@ -360,6 +377,7 @@ impl BusChannelStrip {
                     self.params.buttercomp2.comp_adaptive_env_bypass.value(),
                 );
                 self.compressor.process(buffer);
+                self.compressor.get_gain_reduction_db()
             }
             ButterComp2Model::Vca => {
                 self.vca_compressor.update_parameters(
@@ -370,6 +388,7 @@ impl BusChannelStrip {
                     self.params.buttercomp2.comp_sc_hp_freq.value(),
                 );
                 self.vca_compressor.process(buffer);
+                self.vca_compressor.get_gain_reduction_db()
             }
             ButterComp2Model::Optical => {
                 let thresh = self.params.buttercomp2.opt_thresh.smoothed.next();
@@ -378,6 +397,7 @@ impl BusChannelStrip {
                 self.optical_compressor
                     .update_parameters(thresh, speed, char_v);
                 self.optical_compressor.process(buffer, thresh);
+                self.optical_compressor.get_gain_reduction_db()
             }
             ButterComp2Model::Fet => {
                 self.fet_compressor.update_parameters(
@@ -390,7 +410,14 @@ impl BusChannelStrip {
                     self.params.buttercomp2.comp_sc_hp_freq.value(),
                 );
                 self.fet_compressor.process(buffer);
+                self.fet_compressor.get_gain_reduction_db()
             }
+        };
+        {
+            use std::sync::atomic::Ordering;
+            self.buttercomp2_gr_data
+                .value
+                .store(gr_db.to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -469,6 +496,17 @@ impl BusChannelStrip {
         );
         if !self.params.transformer.transformer_bypass.value() {
             self.transformer.process(buffer);
+        } else {
+            // Meter would otherwise freeze at its last reading — see
+            // decay_saturation_level()'s doc comment (issue #22).
+            self.transformer.decay_saturation_level();
+        }
+        {
+            use std::sync::atomic::Ordering;
+            let level = self.transformer.get_saturation_level();
+            self.transformer_sat_data
+                .value
+                .store(level.to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -719,6 +757,8 @@ impl BusChannelStrip {
         } else {
             // See reset_true_peak_meter()'s doc comment for why.
             self.punch.reset_true_peak_meter();
+            // Meter would otherwise freeze at its last reading (issue #22).
+            self.punch.decay_gain_reduction_meter();
         }
 
         // Publish the true-peak meter reading to the GUI (Relaxed — display only).
@@ -727,6 +767,10 @@ impl BusChannelStrip {
             let (peak_l, peak_r) = self.punch.get_true_peak_db();
             self.true_peak_data.channels[0].store(peak_l.to_bits(), Ordering::Relaxed);
             self.true_peak_data.channels[1].store(peak_r.to_bits(), Ordering::Relaxed);
+            let sat = self.punch.get_gain_reduction();
+            self.punch_sat_data
+                .value
+                .store(sat.to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -859,6 +903,10 @@ impl Plugin for BusChannelStrip {
             self.analysis_result.clone(),
             self.gr_data.clone(),
             self.true_peak_data.clone(),
+            self.buttercomp2_gr_data.clone(),
+            self.transformer_sat_data.clone(),
+            self.punch_sat_data.clone(),
+            self.sheen_sat_data.clone(),
         )
     }
 
@@ -1097,6 +1145,13 @@ impl Plugin for BusChannelStrip {
                 self.params.sheen.sheen_width_bypass.value(),
             );
             self.sheen.process(buffer);
+            {
+                use std::sync::atomic::Ordering;
+                let level = self.sheen.get_warmth_saturation_level();
+                self.sheen_sat_data
+                    .value
+                    .store(level.to_bits(), Ordering::Relaxed);
+            }
         }
 
         // 7) Auto-gain compensation (before master trim so it doesn't fight the user's gain knob).
