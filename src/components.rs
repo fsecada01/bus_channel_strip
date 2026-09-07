@@ -4,8 +4,10 @@
 use nice_plug::prelude::*;
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
+use vizia_plug::vizia::vg;
 use vizia_plug::widgets::*;
 
+use crate::icons::{Icon, IconKind};
 use crate::BusChannelStripParams;
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -199,6 +201,34 @@ pub fn create_bool_button<'c, 'p, F>(
     .height(Auto)
     .top(Pixels(0.0))
     .bottom(Pixels(0.0));
+}
+
+/// Collapsed-tab expand button: a full-size clickable `ParamButton` (empty
+/// label) with a `ChevronRight` [`Icon`] overlaid on top. Replaces the
+/// previous `"\u{25B6}"` glyph label — see `docs/adr` and roadmap v2.0 §4.4.
+pub fn create_expand_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
+    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
+{
+    ZStack::new(cx, |cx| {
+        ParamButton::new(cx, param_map(params))
+            .with_label("")
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+        Icon::new(
+            cx,
+            IconKind::ChevronRight,
+            vg::Color::from_argb(255, 224, 224, 224),
+        )
+        .hoverable(false)
+        .width(Pixels(12.0))
+        .height(Pixels(12.0));
+    })
+    .class("expand-btn");
 }
 
 // Specialized components for common parameter types

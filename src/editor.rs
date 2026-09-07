@@ -8,10 +8,12 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use vizia_plug::vizia::prelude::*;
+use vizia_plug::vizia::vg;
 use vizia_plug::widgets::{ParamButton, ParamButtonExt, ParamSlider, RawParamEvent};
 use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
 use crate::components::{self, ModuleTheme};
+use crate::icons::{Icon, IconKind};
 use crate::presets::{self, Preset};
 use crate::spectral;
 use crate::styles::COMPONENT_STYLES;
@@ -968,45 +970,31 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_api5500)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_api5500);
         }
         ModuleType::ButterComp2 => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_buttercomp2)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_buttercomp2);
         }
         ModuleType::PultecEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_pultec)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_pultec);
         }
         ModuleType::DynamicEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_dynamic_eq)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_dynamic_eq);
         }
         ModuleType::Transformer => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_transformer)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_transformer);
         }
         ModuleType::Punch => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_punch)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_punch);
         }
         ModuleType::Haas => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.routing.hide_haas)
-                .with_label("\u{25B6}")
-                .class("expand-btn");
+            components::create_expand_button(cx, &params, |p| &p.routing.hide_haas);
         }
         // Empty slots are never collapsed (is_module_hidden returns false).
         ModuleType::Empty => {}
@@ -1024,7 +1012,14 @@ fn build_expand_button_for_type(cx: &mut Context, mt: ModuleType) {
 /// parent, which would cause clicks to fall back to the drag handle row.
 fn build_eject_button(cx: &mut Context, slot_idx: usize) {
     HStack::new(cx, |cx| {
-        Label::new(cx, "\u{2715}").class("eject-btn-glyph"); // ✕
+        Icon::new(
+            cx,
+            IconKind::Close,
+            vg::Color::from_argb(255, 216, 144, 144),
+        )
+        .class("eject-btn-glyph")
+        .width(Pixels(11.0))
+        .height(Pixels(11.0));
         Label::new(cx, "REMOVE").class("eject-btn-label");
     })
     .class("eject-btn")
@@ -1250,7 +1245,14 @@ pub(crate) fn create(
                 // next to the brand so users always know where to look.
                 let focused_slot_signal = cx.data::<Data>().focused_slot;
                 HStack::new(cx, |cx| {
-                    Label::new(cx, "\u{2715} EXIT FOCUS").class("exit-focus-label");
+                    Icon::new(
+                        cx,
+                        IconKind::Close,
+                        vg::Color::from_argb(255, 255, 176, 152),
+                    )
+                    .width(Pixels(10.0))
+                    .height(Pixels(10.0));
+                    Label::new(cx, "EXIT FOCUS").class("exit-focus-label");
                 })
                 .class("exit-focus-btn")
                 .display(focused_slot_signal.map(|f| {
@@ -2605,11 +2607,20 @@ fn build_dynamic_eq_controls(cx: &mut Context) {
         // Uses Button::new (not VStack) so the full 40px hit area is reliably clickable;
         // VStack + on_press can have dead zones where child labels shadow parent events.
         Button::new(cx, |cx| {
-            Label::new(cx, "OPEN EDITOR  \u{25B6}")
-                .class("dyneq-open-label")
-                .width(Stretch(1.0))
-                .top(Pixels(0.0))
-                .bottom(Pixels(0.0))
+            HStack::new(cx, |cx| {
+                Label::new(cx, "OPEN EDITOR").class("dyneq-open-label");
+                Icon::new(
+                    cx,
+                    IconKind::ChevronRight,
+                    vg::Color::from_argb(255, 102, 204, 102),
+                )
+                .width(Pixels(12.0))
+                .height(Pixels(12.0));
+            })
+            .alignment(Alignment::Center)
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0))
         })
         .class("dyneq-open-btn")
         .on_press(|cx| cx.emit(AppEvent::OpenDynEq))
@@ -2665,8 +2676,6 @@ impl View for SpectrumCanvas {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        use vizia_plug::vizia::vg;
-
         // Early-out when the canvas is hidden (display:none gives zero bounds).
         // Without this guard, cx.needs_redraw() at the end would spin the render loop
         // at 60 fps even when the DynEQ view is closed, competing with event processing
@@ -2905,8 +2914,6 @@ impl View for PunchTruePeakMeter {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        use vizia_plug::vizia::vg;
-
         let bounds = cx.bounds();
         if bounds.w < 1.0 || bounds.h < 1.0 {
             return;
@@ -3033,16 +3040,21 @@ macro_rules! dyneq_band_col {
                     let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
                     let dyneq_expand_gen_signal = cx.data::<Data>().dyneq_expand_gen;
                     Button::new(cx, |cx| {
-                        Label::new(
-                            cx,
-                            dyneq_expand_gen_signal.map(move |_| {
-                                if expand_arc_chevron[$band_idx].load(Ordering::Relaxed) {
-                                    "▼"
+                        HStack::new(cx, |cx| {
+                            Binding::new(cx, dyneq_expand_gen_signal, move |cx| {
+                                let kind = if expand_arc_chevron[$band_idx].load(Ordering::Relaxed)
+                                {
+                                    IconKind::ChevronDown
                                 } else {
-                                    "▶"
-                                }
-                            }),
-                        )
+                                    IconKind::ChevronRight
+                                };
+                                Icon::new(cx, kind, vg::Color::from_argb(255, 136, 153, 170))
+                                    .width(Pixels(12.0))
+                                    .height(Pixels(12.0));
+                            });
+                        })
+                        .width(Pixels(12.0))
+                        .height(Pixels(12.0))
                     })
                     .on_press(|cx| cx.emit(AppEvent::ToggleDynEQBand($band_idx)))
                     .class("dyneq-chevron")
@@ -3113,10 +3125,19 @@ fn build_dyneq_back_view(
         HStack::new(cx, |cx| {
             // Back button
             VStack::new(cx, |cx| {
-                Label::new(cx, "\u{25C0} STRIP VIEW")
-                    .class("dyneq-back-btn-label")
-                    .height(Pixels(16.0))
-                    .width(Stretch(1.0));
+                HStack::new(cx, |cx| {
+                    Icon::new(
+                        cx,
+                        IconKind::ChevronLeft,
+                        vg::Color::from_argb(255, 102, 204, 102),
+                    )
+                    .width(Pixels(11.0))
+                    .height(Pixels(11.0));
+                    Label::new(cx, "STRIP VIEW").class("dyneq-back-btn-label");
+                })
+                .alignment(Alignment::Center)
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
             })
             .class("dyneq-back-btn")
             .on_press(|cx| cx.emit(AppEvent::CloseDynEq))
@@ -3309,10 +3330,19 @@ fn build_sheen_back_view(cx: &mut Context) {
         // ── Header row: back button + wordmark ─────────────────────────
         HStack::new(cx, |cx| {
             VStack::new(cx, |cx| {
-                Label::new(cx, "\u{25C0} STRIP VIEW")
-                    .class("sheen-back-btn-label")
-                    .height(Pixels(16.0))
-                    .width(Stretch(1.0));
+                HStack::new(cx, |cx| {
+                    Icon::new(
+                        cx,
+                        IconKind::ChevronLeft,
+                        vg::Color::from_argb(255, 232, 200, 120),
+                    )
+                    .width(Pixels(11.0))
+                    .height(Pixels(11.0));
+                    Label::new(cx, "STRIP VIEW").class("sheen-back-btn-label");
+                })
+                .alignment(Alignment::Center)
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
             })
             .class("sheen-back-btn")
             .on_press(|cx| cx.emit(AppEvent::CloseSheen))
@@ -3363,10 +3393,21 @@ fn build_sheen_back_view(cx: &mut Context) {
                     .class("param-label")
                     .height(Pixels(14.0))
                     .width(Stretch(1.0));
-                Label::new(cx, "\u{21BA} RESTORE FACTORY")
-                    .class("sheen-restore-btn")
-                    .height(Pixels(32.0))
-                    .width(Stretch(1.0));
+                HStack::new(cx, |cx| {
+                    Icon::new(
+                        cx,
+                        IconKind::Restore,
+                        vg::Color::from_argb(255, 200, 160, 74),
+                    )
+                    .width(Pixels(12.0))
+                    .height(Pixels(12.0));
+                    Label::new(cx, "RESTORE FACTORY").class("sheen-restore-label");
+                })
+                .class("sheen-restore-btn")
+                .alignment(Alignment::Center)
+                .gap(Pixels(6.0))
+                .height(Pixels(32.0))
+                .width(Stretch(1.0));
             })
             .on_press(|cx| cx.emit(AppEvent::RestoreSheenFactory))
             .cursor(CursorIcon::Hand)

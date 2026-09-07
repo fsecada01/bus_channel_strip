@@ -66,6 +66,8 @@ mod components;
 #[cfg(feature = "gui")]
 mod editor;
 #[cfg(feature = "gui")]
+mod icons;
+#[cfg(feature = "gui")]
 mod styles;
 
 /// Compute RMS across all channels from a slice-of-slices buffer view.
