@@ -84,6 +84,11 @@ impl ModuleTheme {
     }
 }
 
+/// Upper-bound estimate of `.param-drag-tooltip`'s rendered width (padding +
+/// ~5 chars at 11px bold), used to clamp its position against the slider's
+/// right edge in `param_slider_with_tooltip`.
+const TOOLTIP_WIDTH_ESTIMATE_PX: f32 = 60.0;
+
 /// Wraps a `ParamSlider` with a floating value tooltip that follows the
 /// cursor during drag (roadmap v2.0 §4.4 "Knob micro-interactions").
 /// `ParamSlider` is a sealed external widget (vizia_plug) with no override
@@ -124,7 +129,12 @@ where
             let p = param_map(&params_owned);
             let value_text = p.normalized_value_to_string(p.unmodulated_normalized_value(), true);
             tooltip_text.set(value_text);
-            tooltip_x.set((x - bounds.x - 20.0).max(0.0));
+            // Clamp against both edges so the tooltip never overflows past the
+            // slider it's attached to; TOOLTIP_WIDTH_ESTIMATE_PX is a fixed
+            // upper-bound estimate since the label's actual rendered width
+            // isn't known from this event handler.
+            let max_x = (bounds.w - TOOLTIP_WIDTH_ESTIMATE_PX).max(0.0);
+            tooltip_x.set((x - bounds.x - 20.0).clamp(0.0, max_x));
             tooltip_visible.set(true);
         } else if tooltip_visible.get() {
             tooltip_visible.set(false);
@@ -276,7 +286,8 @@ pub fn create_expand_button<'c, 'p, F>(
         .width(Pixels(12.0))
         .height(Pixels(12.0));
     })
-    .class("expand-btn");
+    .class("expand-btn")
+    .alignment(Alignment::Center);
 }
 
 // Specialized components for common parameter types

@@ -2912,6 +2912,13 @@ struct PunchTruePeakMeter {
     /// independent of whatever hold/decay the DSP detector already applies.
     displayed_db: RefCell<[f32; 2]>,
     last_frame: RefCell<Instant>,
+    /// Cached gradient shader, keyed on `(bounds.x, bounds.w)`. Colors and
+    /// stops are fixed, so the shader only needs rebuilding when the
+    /// meter's horizontal bounds change (e.g. a window resize) — a linear
+    /// gradient's color mapping along its axis doesn't depend on the
+    /// y-coordinate of its defining points, so one shader serves both
+    /// channel bars.
+    cached_gradient: RefCell<Option<((f32, f32), vg::Shader)>>,
 }
 
 impl PunchTruePeakMeter {
@@ -2920,6 +2927,7 @@ impl PunchTruePeakMeter {
             true_peak_data,
             displayed_db: RefCell::new([spectral::TRUE_PEAK_FLOOR_DB; 2]),
             last_frame: RefCell::new(Instant::now()),
+            cached_gradient: RefCell::new(None),
         }
         .build(cx, |_cx| {})
     }
@@ -2974,24 +2982,45 @@ impl View for PunchTruePeakMeter {
         // the filled bar is a window into it, so a bar's own color shifts
         // as it grows, rather than snapping between two flat colors at the
         // warn threshold.
-        let warn_frac = ((TRUE_PEAK_WARN_DB - TRUE_PEAK_METER_FLOOR_DB)
-            / (TRUE_PEAK_METER_CEILING_DB - TRUE_PEAK_METER_FLOOR_DB))
-            .clamp(0.0, 1.0);
-        let gradient_colors: [vg::Color4f; 3] = [
-            vg::Color::from_argb(220, 90, 200, 160).into(),
-            vg::Color::from_argb(220, 230, 190, 60).into(),
-            vg::Color::from_argb(220, 230, 60, 60).into(),
-        ];
-        let gradient_stops = [0.0_f32, warn_frac, 1.0_f32];
-        let gradient_spec = vg::gradient::Gradient::new(
-            vg::gradient::Colors::new(
-                &gradient_colors,
-                Some(&gradient_stops),
-                vg::TileMode::Clamp,
-                None,
-            ),
-            vg::gradient::Interpolation::default(),
-        );
+        const BOUNDS_EPSILON: f32 = 0.5;
+        let gradient_key = (bounds.x, bounds.w);
+        let shader = {
+            let mut cache = self.cached_gradient.borrow_mut();
+            let stale = match &*cache {
+                Some((key, _)) => {
+                    (key.0 - gradient_key.0).abs() > BOUNDS_EPSILON
+                        || (key.1 - gradient_key.1).abs() > BOUNDS_EPSILON
+                }
+                None => true,
+            };
+            if stale {
+                let warn_frac = ((TRUE_PEAK_WARN_DB - TRUE_PEAK_METER_FLOOR_DB)
+                    / (TRUE_PEAK_METER_CEILING_DB - TRUE_PEAK_METER_FLOOR_DB))
+                    .clamp(0.0, 1.0);
+                let gradient_colors: [vg::Color4f; 3] = [
+                    vg::Color::from_argb(220, 90, 200, 160).into(),
+                    vg::Color::from_argb(220, 230, 190, 60).into(),
+                    vg::Color::from_argb(220, 230, 60, 60).into(),
+                ];
+                let gradient_stops = [0.0_f32, warn_frac, 1.0_f32];
+                let gradient_spec = vg::gradient::Gradient::new(
+                    vg::gradient::Colors::new(
+                        &gradient_colors,
+                        Some(&gradient_stops),
+                        vg::TileMode::Clamp,
+                        None,
+                    ),
+                    vg::gradient::Interpolation::default(),
+                );
+                *cache = vg::gradient::shaders::linear_gradient(
+                    ((bounds.x, bounds.y), (bounds.x + bounds.w, bounds.y)),
+                    &gradient_spec,
+                    None,
+                )
+                .map(|s| (gradient_key, s));
+            }
+            cache.as_ref().map(|(_, s)| s.clone())
+        };
 
         let bar_h = (bounds.h - 2.0) / 2.0;
         for (i, &ch_db) in db.iter().enumerate() {
@@ -3004,13 +3033,9 @@ impl View for PunchTruePeakMeter {
             let mut bar_paint = vg::Paint::default();
             bar_paint.set_style(vg::PaintStyle::Fill);
             bar_paint.set_anti_alias(true);
-            match vg::gradient::shaders::linear_gradient(
-                ((bounds.x, y), (bounds.x + bounds.w, y)),
-                &gradient_spec,
-                None,
-            ) {
+            match &shader {
                 Some(shader) => {
-                    bar_paint.set_shader(shader);
+                    bar_paint.set_shader(shader.clone());
                 }
                 None => {
                     bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160));

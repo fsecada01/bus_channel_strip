@@ -128,6 +128,7 @@ mod tests {
             IconKind::ChevronLeft,
             IconKind::ChevronRight,
             IconKind::ChevronDown,
+            IconKind::Restore,
         ];
         for (i, a) in kinds.iter().enumerate() {
             for (j, b) in kinds.iter().enumerate() {
