@@ -2060,53 +2060,74 @@ fn build_led_indicator_for_type(cx: &mut Context, mt: ModuleType) {
     match mt {
         ModuleType::Api5500EQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.api5500.eq_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            components::attach_tooltip(
+                ParamButton::new(cx, &params.api5500.eq_bypass)
+                    .with_label("")
+                    .class("module-led-indicator"),
+                "eq_bypass",
+            );
         }
         ModuleType::ButterComp2 => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.buttercomp2.comp_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            components::attach_tooltip(
+                ParamButton::new(cx, &params.buttercomp2.comp_bypass)
+                    .with_label("")
+                    .class("module-led-indicator"),
+                "comp_bypass",
+            );
         }
         ModuleType::PultecEQ => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.pultec.pultec_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            components::attach_tooltip(
+                ParamButton::new(cx, &params.pultec.pultec_bypass)
+                    .with_label("")
+                    .class("module-led-indicator"),
+                "pultec_bypass",
+            );
         }
         ModuleType::DynamicEQ => {
             #[cfg(feature = "dynamic_eq")]
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.dynamic_eq.dyneq_bypass)
-                    .with_label("")
-                    .class("module-led-indicator");
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.dynamic_eq.dyneq_bypass)
+                        .with_label("")
+                        .class("module-led-indicator"),
+                    "dyneq_bypass",
+                );
             }
         }
         ModuleType::Transformer => {
             let params = cx.data::<Data>().params.clone();
-            ParamButton::new(cx, &params.transformer.transformer_bypass)
-                .with_label("")
-                .class("module-led-indicator");
+            components::attach_tooltip(
+                ParamButton::new(cx, &params.transformer.transformer_bypass)
+                    .with_label("")
+                    .class("module-led-indicator"),
+                "transformer_bypass",
+            );
         }
         ModuleType::Punch => {
             #[cfg(feature = "punch")]
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.punch.punch_bypass)
-                    .with_label("")
-                    .class("module-led-indicator");
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.punch.punch_bypass)
+                        .with_label("")
+                        .class("module-led-indicator"),
+                    "punch_bypass",
+                );
             }
         }
         ModuleType::Haas => {
             #[cfg(feature = "haas")]
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.haas.haas_bypass)
-                    .with_label("")
-                    .class("module-led-indicator");
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.haas.haas_bypass)
+                        .with_label("")
+                        .class("module-led-indicator"),
+                    "haas_bypass",
+                );
             }
         }
         // No LED for empty slots — there is nothing to indicate.
@@ -3888,10 +3909,13 @@ fn build_sheen_back_view(cx: &mut Context) {
                     .height(Pixels(14.0))
                     .width(Stretch(1.0));
                 let params = cx.data::<Data>().params.clone();
-                ParamButton::new(cx, &params.sheen.sheen_bypass)
-                    .class("sheen-master-bypass")
-                    .height(Pixels(32.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.sheen.sheen_bypass)
+                        .class("sheen-master-bypass")
+                        .height(Pixels(32.0))
+                        .width(Stretch(1.0)),
+                    "sheen_bypass",
+                );
             })
             .height(Auto)
             .width(Pixels(180.0))
@@ -3980,44 +4004,68 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
         let params = cx.data::<Data>().params.clone();
         match name {
             "BODY" => {
-                ParamSlider::new(cx, &params.sheen.sheen_body_db)
-                    .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen.sheen_body_bypass)
-                    .class("sheen-stage-bypass")
-                    .height(Pixels(24.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamSlider::new(cx, &params.sheen.sheen_body_db)
+                        .class("sheen-slider")
+                        .height(Pixels(22.0))
+                        .width(Stretch(1.0)),
+                    "sheen_body_db",
+                );
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.sheen.sheen_body_bypass)
+                        .class("sheen-stage-bypass")
+                        .height(Pixels(24.0))
+                        .width(Stretch(1.0)),
+                    "sheen_body_bypass",
+                );
             }
             "PRESENCE" => {
-                ParamSlider::new(cx, &params.sheen.sheen_presence_db)
-                    .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen.sheen_presence_bypass)
-                    .class("sheen-stage-bypass")
-                    .height(Pixels(24.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamSlider::new(cx, &params.sheen.sheen_presence_db)
+                        .class("sheen-slider")
+                        .height(Pixels(22.0))
+                        .width(Stretch(1.0)),
+                    "sheen_presence_db",
+                );
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.sheen.sheen_presence_bypass)
+                        .class("sheen-stage-bypass")
+                        .height(Pixels(24.0))
+                        .width(Stretch(1.0)),
+                    "sheen_presence_bypass",
+                );
             }
             "AIR" => {
-                ParamSlider::new(cx, &params.sheen.sheen_air_db)
-                    .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen.sheen_air_bypass)
-                    .class("sheen-stage-bypass")
-                    .height(Pixels(24.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamSlider::new(cx, &params.sheen.sheen_air_db)
+                        .class("sheen-slider")
+                        .height(Pixels(22.0))
+                        .width(Stretch(1.0)),
+                    "sheen_air_db",
+                );
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.sheen.sheen_air_bypass)
+                        .class("sheen-stage-bypass")
+                        .height(Pixels(24.0))
+                        .width(Stretch(1.0)),
+                    "sheen_air_bypass",
+                );
             }
             "WARMTH" => {
-                ParamSlider::new(cx, &params.sheen.sheen_warmth)
-                    .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen.sheen_warmth_bypass)
-                    .class("sheen-stage-bypass")
-                    .height(Pixels(24.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamSlider::new(cx, &params.sheen.sheen_warmth)
+                        .class("sheen-slider")
+                        .height(Pixels(22.0))
+                        .width(Stretch(1.0)),
+                    "sheen_warmth",
+                );
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.sheen.sheen_warmth_bypass)
+                        .class("sheen-stage-bypass")
+                        .height(Pixels(24.0))
+                        .width(Stretch(1.0)),
+                    "sheen_warmth_bypass",
+                );
                 // Inline saturation meter (issue #22).
                 LevelMeterBar::new(
                     cx,
@@ -4030,14 +4078,20 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
                 .width(Stretch(1.0));
             }
             "WIDTH" => {
-                ParamSlider::new(cx, &params.sheen.sheen_width)
-                    .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
-                ParamButton::new(cx, &params.sheen.sheen_width_bypass)
-                    .class("sheen-stage-bypass")
-                    .height(Pixels(24.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamSlider::new(cx, &params.sheen.sheen_width)
+                        .class("sheen-slider")
+                        .height(Pixels(22.0))
+                        .width(Stretch(1.0)),
+                    "sheen_width",
+                );
+                components::attach_tooltip(
+                    ParamButton::new(cx, &params.sheen.sheen_width_bypass)
+                        .class("sheen-stage-bypass")
+                        .height(Pixels(24.0))
+                        .width(Stretch(1.0)),
+                    "sheen_width_bypass",
+                );
             }
             _ => {}
         }
