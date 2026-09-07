@@ -150,9 +150,7 @@ impl Default for GainReductionData {
 
 /// Lock-free stereo true-peak reading (dBTP) shared with the GUI thread.
 pub struct TruePeakData {
-    /// Left/right true-peak level in dBTP, as raw f32 bits. Initialized to
-    /// a very low floor (silence) rather than 0.0 dB, since 0.0 would read
-    /// as "at full scale" for a meter that hasn't processed any audio yet.
+    /// Left/right true-peak level in dBTP, as raw f32 bits.
     pub channels: [AtomicU32; 2],
 }
 

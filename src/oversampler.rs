@@ -159,12 +159,8 @@ impl Default for HalfbandFir {
 /// highest rate (factor/2 → factor). `down_stages` mirror this.
 pub struct Oversampler {
     factor: usize,
-    /// Upper bound on `factor` for this instance's lifetime, fixed at
-    /// construction. `upsample_buffer` is sized to this rather than the
-    /// global `MAX_OS_STAGES` ceiling, so a caller that only ever needs
-    /// (e.g.) 4× doesn't pay for 16×'s worth of scratch space. `set_factor`
-    /// clamps to it defensively so a factor bump can never index past the
-    /// buffer it was sized for.
+    /// Upper bound on `factor` for this instance's lifetime; `upsample_buffer`
+    /// is sized to this instead of the global `MAX_OS_STAGES` ceiling.
     max_factor: usize,
     num_stages: usize,
     hb_coeffs: [f32; HB_NUM_TAPS],
@@ -205,9 +201,8 @@ impl Oversampler {
         }
     }
 
-    /// `max_factor` bounds every future `set_factor` call for this instance
-    /// (see the field doc on `max_factor`) — pass the largest factor this
-    /// instance will ever be switched to, not just its starting factor.
+    /// `max_factor` should be the largest factor this instance will ever be
+    /// switched to via `set_factor`, not just its starting factor.
     pub fn new(max_factor: usize, max_block_size: usize) -> Self {
         Self::new_inner(max_factor, max_block_size, true)
     }
@@ -223,12 +218,9 @@ impl Oversampler {
         os
     }
 
-    /// Construct an `Oversampler` fixed at `factor` for a caller that will
-    /// only ever call `upsample()` — e.g. a true-peak/metering tap that
-    /// never reconstructs back to the native rate. Skips allocating the
-    /// downsample scratch buffer entirely; calling `downsample()` on the
-    /// result will panic (empty buffer), so only use this where the call
-    /// site's contract guarantees `downsample()` is never reached.
+    /// Like `new_at_factor`, but for a caller that will only ever call
+    /// `upsample()` (e.g. a metering tap) — skips the downsample buffer.
+    /// Calling `downsample()` on the result panics (empty buffer).
     pub fn new_upsample_only(factor: usize, max_block_size: usize) -> Self {
         let mut os = Self::new_inner(factor, max_block_size, false);
         os.set_factor(factor);
@@ -369,9 +361,6 @@ impl Oversampler {
 mod tests {
     use super::*;
 
-    /// `new_upsample_only` must produce numerically identical upsampled
-    /// output to `new_at_factor` for the same factor — it differs only in
-    /// buffer sizing, not behavior.
     #[test]
     fn test_new_upsample_only_matches_new_at_factor_output() {
         let mut os_full = Oversampler::new_at_factor(4, 64);
@@ -388,20 +377,14 @@ mod tests {
         }
     }
 
-    /// `set_factor` must clamp to the `max_factor` an instance was
-    /// constructed with, so a caller that (mistakenly) requests a larger
-    /// factor than the buffer was sized for can never index out of bounds
-    /// on the audio thread.
     #[test]
     fn test_set_factor_clamps_to_max_factor() {
         let mut os = Oversampler::new_upsample_only(4, 16);
-        os.set_factor(16); // exceeds the 4x this instance was sized for
+        os.set_factor(16);
         assert_eq!(os.factor(), 4, "set_factor should clamp to max_factor");
 
-        // Must not panic (would index out of the 4x-sized upsample_buffer
-        // if the clamp were missing).
         for i in 0..16 {
-            os.upsample(0.0, i);
+            os.upsample(0.0, i); // must not panic (OOB if the clamp were missing)
         }
     }
 }

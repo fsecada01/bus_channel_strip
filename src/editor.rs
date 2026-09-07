@@ -2883,17 +2883,12 @@ impl View for SpectrumCanvas {
 // Punch True-Peak Meter
 // ============================================================================
 
-/// Meter floor (dBTP) — values at or below this render as an empty bar.
 const TRUE_PEAK_METER_FLOOR_DB: f32 = -24.0;
-/// Meter ceiling (dBTP) — values at or above this render as a full bar.
 const TRUE_PEAK_METER_CEILING_DB: f32 = 3.0;
-/// Above this reading the bar renders in the "over" warning color.
 const TRUE_PEAK_WARN_DB: f32 = -1.0;
 
-/// Horizontal-bar meter for Punch's ITU-R BS.1770-4 true-peak reading.
-/// Mirrors `SpectrumCanvas`'s lock-free-atomic + custom-`View`-`draw()`
-/// pattern: the audio thread publishes dBTP readings via `TruePeakData`
-/// (`Relaxed` — display only), and this view re-reads them every frame.
+/// Horizontal-bar meter for Punch's ITU-R BS.1770-4 true-peak reading;
+/// follows `SpectrumCanvas`'s lock-free-atomic draw() pattern.
 struct PunchTruePeakMeter {
     true_peak_data: Arc<spectral::TruePeakData>,
 }
@@ -2940,9 +2935,9 @@ impl View for PunchTruePeakMeter {
 
             let mut bar_paint = vg::Paint::default();
             if ch_db >= TRUE_PEAK_WARN_DB {
-                bar_paint.set_color(vg::Color::from_argb(220, 230, 90, 60)); // over: red-orange
+                bar_paint.set_color(vg::Color::from_argb(220, 230, 90, 60));
             } else {
-                bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160)); // nominal: teal-green
+                bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160));
             }
             bar_paint.set_style(vg::PaintStyle::Fill);
             if w > 0.5 {

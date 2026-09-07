@@ -302,30 +302,16 @@ fn apply_clipping(input: f32, threshold: f32, softness: f32, mode: ClipMode) -> 
 // True-Peak Detector (ITU-R BS.1770-4)
 // ============================================================================
 
-/// Oversampling factor used for true-peak measurement. ITU-R BS.1770-4
-/// requires a minimum of 4x oversampling for intersample-peak detection; it
-/// does not mandate a specific interpolation kernel, only adequate stopband
-/// attenuation, so the existing halfband-Kaiser `Oversampler` (~-40 dB
-/// stopband) satisfies the spirit of the standard.
+/// ITU-R BS.1770-4 requires ≥4x oversampling for intersample-peak detection.
 const TRUE_PEAK_OS_FACTOR: usize = 4;
-
-/// How long a peak reading is held before it starts decaying, in ms. Long
-/// enough that a brief true-peak excursion stays legible on the meter.
+/// Hold time (ms) before a peak reading starts decaying.
 const TRUE_PEAK_HOLD_MS: f32 = 300.0;
-
-/// Decay rate once the hold period elapses, in dB/s — a standard PPM-style
-/// ballistic (fast enough to track program material, slow enough to read).
+/// Decay rate once the hold period elapses (dB/s), PPM-style.
 const TRUE_PEAK_DECAY_DB_PER_S: f32 = 20.0;
 
 /// ITU-R BS.1770-4 true-peak (intersample-peak) detector for a single
-/// channel.
-///
-/// Wraps a dedicated 4x `Oversampler` used only for its `upsample()` half —
-/// true-peak metering never reconstructs back to the native rate, so
-/// `downsample()` is never called. The true peak of a sample interval is
-/// `max(|s|)` across the 4 interpolated points the oversampler produces for
-/// that interval, approximating the peak of the reconstructed continuous
-/// waveform between the two surrounding samples.
+/// channel. Peak of a sample interval is `max(|s|)` across the 4 points a
+/// 4x `Oversampler` interpolates for it; only `upsample()` is ever called.
 struct TruePeakDetector {
     oversampler: Oversampler,
     /// Current metered value in dBTP, with peak-hold-then-decay ballistics.
@@ -347,7 +333,6 @@ impl TruePeakDetector {
         }
     }
 
-    /// Process one input sample, updating the held true-peak reading.
     /// `idx` is this sample's position within the current block (see
     /// `Oversampler::upsample`).
     #[inline]
@@ -654,9 +639,7 @@ impl PunchModule {
                 let mixed = dry * (1.0 - self.mix) + wet * self.mix;
                 let output = mixed * self.output_gain;
 
-                // 7. True-peak metering (ITU-R BS.1770-4) on the final output —
-                //    measured post-everything so the meter reflects what will
-                //    actually hit the DAC.
+                // 7. True-peak metering (ITU-R BS.1770-4) on the final output.
                 let true_peak_detector = if ch_idx == 0 {
                     &mut self.true_peak_l
                 } else {
@@ -689,12 +672,9 @@ impl PunchModule {
         self.true_peak_r.reset();
     }
 
-    /// Reset only the true-peak meter, leaving the clipper's oversampler and
-    /// transient-detector state untouched. Call every buffer while Punch is
-    /// bypassed so the GUI meter decays to the floor instead of freezing on
-    /// the last pre-bypass reading — a full `reset()` would also flush the
-    /// clipper's filter state, causing a discontinuity/click when bypass is
-    /// turned back off.
+    /// Like `reset()` but leaves the clipper's oversampler/transient-detector
+    /// state untouched — a full `reset()` while bypassed would click when
+    /// bypass turns back off.
     pub fn reset_true_peak_meter(&mut self) {
         self.true_peak_l.reset();
         self.true_peak_r.reset();
@@ -855,18 +835,16 @@ mod tests {
 
     // ── True-Peak Detector (ITU-R BS.1770-4) ─────────────────────────────────
 
-    /// Intersample-peak conformance-style test: a sine at Fs/3 (three
-    /// samples per cycle) rarely lands a sample exactly on the waveform's
-    /// true peak, so the sample-domain peak understates the reconstructed
-    /// continuous-time peak. A true-peak detector must recover a reading
-    /// closer to the actual amplitude than the raw sample peak does.
+    /// A sine at Fs/3 (3 samples/cycle) rarely samples its own true peak, so
+    /// this checks the detector recovers closer to the real amplitude than
+    /// the raw sample-domain peak does.
     #[test]
     fn test_true_peak_detector_exceeds_sample_domain_peak() {
         let sr = 44_100.0_f32;
         let mut detector = TruePeakDetector::new(sr, 4096);
         let amplitude = 0.9_f32;
         let two_pi = core::f32::consts::TAU;
-        let cycle_samples = 3.0_f32; // Fs/3 — 3 samples per cycle, no phase alignment to the peak.
+        let cycle_samples = 3.0_f32;
 
         let mut raw_sample_peak = 0.0f32;
         let n = 300;
@@ -876,9 +854,6 @@ mod tests {
             detector.process(x, idx % 4096);
         }
 
-        // Sample-domain peak is well below the true amplitude for this
-        // deliberately mis-aligned sampling — that's the whole premise of
-        // needing a true-peak (not sample-peak) meter.
         assert!(
             raw_sample_peak < 0.85,
             "raw sample peak should understate the true amplitude, got {raw_sample_peak}"
@@ -891,8 +866,6 @@ mod tests {
             "true-peak reading ({true_peak_db} dBTP) should exceed the raw sample peak \
              ({raw_sample_peak_db} dBTP) for an intersample-peak signal"
         );
-        // Should recover close to the actual 0.9 amplitude (~-0.92 dBTP),
-        // allowing headroom for halfband-FIR passband ripple/interpolation error.
         let expected_db = linear_to_db(amplitude);
         assert!(
             (true_peak_db - expected_db).abs() < 1.0,
@@ -916,10 +889,8 @@ mod tests {
         let sr = 44_100.0_f32;
         let mut detector = TruePeakDetector::new(sr, 512);
 
-        // One loud sample, then silence. The cascaded halfband FIRs have
-        // group delay, so the impulse's filtered peak doesn't appear at the
-        // very next call — give it a window to propagate through both
-        // stages before reading.
+        // Group delay through the cascaded FIRs means the peak doesn't
+        // appear until several samples after the impulse.
         detector.process(0.99, 0);
         for idx in 1..50 {
             detector.process(0.0, idx);
@@ -930,7 +901,7 @@ mod tests {
             "should register a near-0dBTP hit after the FIR group delay, got {peak_after_hit}"
         );
 
-        // Shortly after, still within the hold window — should not have decayed.
+        // Still within the hold window — should not have decayed.
         for idx in 50..60 {
             detector.process(0.0, idx % 512);
         }
@@ -939,9 +910,7 @@ mod tests {
             "value should be held steady shortly after the peak"
         );
 
-        // Run well past the hold window with silence — should decay toward the floor.
-        // Decay is 20 dB/s; budget enough extra samples past the hold window
-        // for a clearly-measurable (>3 dB) drop.
+        // Past the hold window: 10k extra samples at 20 dB/s guarantees >3 dB decay.
         let hold_samples = (sr * TRUE_PEAK_HOLD_MS / 1000.0) as usize;
         for idx in 0..(hold_samples + 10_000) {
             detector.process(0.0, idx % 512);
@@ -975,19 +944,19 @@ mod tests {
         let sr = 44_100.0_f32;
         let mut punch = PunchModule::new(sr);
         punch.update_parameters(
-            -1.0,                   // threshold
-            ClipMode::Hard,         // mode
-            0.0,                    // softness
-            OversamplingFactor::X4, // oversampling
-            0.0,                    // attack
-            0.0,                    // sustain
-            5.0,                    // attack_time
-            100.0,                  // release_time
-            0.5,                    // sensitivity
-            0.0,                    // input gain
-            0.0,                    // output gain
-            1.0,                    // mix (fully wet)
-            20.0,                   // wet HPF (off)
+            -1.0,
+            ClipMode::Hard,
+            0.0,
+            OversamplingFactor::X4,
+            0.0,
+            0.0,
+            5.0,
+            100.0,
+            0.5,
+            0.0,
+            0.0,
+            1.0,
+            20.0,
         );
 
         let n = 256;
@@ -1013,11 +982,6 @@ mod tests {
         );
     }
 
-    /// While Punch is bypassed, `process()` never runs, so without an
-    /// explicit reset the true-peak meter would freeze on its last
-    /// pre-bypass reading forever. `reset_true_peak_meter()` (called every
-    /// buffer from `lib.rs` while bypassed) must bring the reading back to
-    /// the floor.
     #[test]
     fn test_reset_true_peak_meter_returns_to_floor_without_disturbing_clipper() {
         let sr = 44_100.0_f32;

@@ -218,10 +218,7 @@ struct BusChannelStrip {
     analysis_result: Arc<spectral::AnalysisResult>,
     /// audio → GUI: per-band gain reduction for the DynEQ spectrum display.
     gr_data: Arc<spectral::GainReductionData>,
-    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading. Not
-    /// feature-gated behind "punch" — kept unconditional so the field always
-    /// exists and threads through `editor::create()` uniformly; it's simply
-    /// never written to when the "punch" feature is disabled.
+    /// audio → GUI: Punch's true-peak (ITU-R BS.1770-4) meter reading.
     true_peak_data: Arc<spectral::TruePeakData>,
 
     /// Smoothed auto-gain correction factor (linear, 1.0 = unity).
@@ -719,8 +716,7 @@ impl BusChannelStrip {
         if !self.params.punch.punch_bypass.value() {
             self.punch.process(buffer);
         } else {
-            // See `reset_true_peak_meter()`'s doc comment for why bypass
-            // needs this instead of a full `reset()`.
+            // See reset_true_peak_meter()'s doc comment for why.
             self.punch.reset_true_peak_meter();
         }
 
