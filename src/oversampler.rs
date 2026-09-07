@@ -159,18 +159,25 @@ impl Default for HalfbandFir {
 /// highest rate (factor/2 → factor). `down_stages` mirror this.
 pub struct Oversampler {
     factor: usize,
+    /// Upper bound on `factor` for this instance's lifetime; `upsample_buffer`
+    /// is sized to this instead of the global `MAX_OS_STAGES` ceiling.
+    max_factor: usize,
     num_stages: usize,
     hb_coeffs: [f32; HB_NUM_TAPS],
     up_stages: [HalfbandFir; MAX_OS_STAGES],
     down_stages: [HalfbandFir; MAX_OS_STAGES],
     upsample_buffer: Vec<f32>,
+    /// Empty (no allocation) for an `Oversampler` built via
+    /// `new_upsample_only` — such an instance must never call `downsample`.
     downsample_buffer: Vec<f32>,
 }
 
 impl Oversampler {
-    pub fn new(_max_factor: usize, max_block_size: usize) -> Self {
+    fn new_inner(max_factor: usize, max_block_size: usize, needs_downsample: bool) -> Self {
+        let max_factor = max_factor.clamp(1, 1 << MAX_OS_STAGES);
         Self {
             factor: 1,
+            max_factor,
             num_stages: 0,
             hb_coeffs: design_halfband_kaiser(8.0),
             up_stages: [
@@ -185,9 +192,19 @@ impl Oversampler {
                 HalfbandFir::new(),
                 HalfbandFir::new(),
             ],
-            upsample_buffer: vec![0.0; max_block_size * (1 << MAX_OS_STAGES)],
-            downsample_buffer: vec![0.0; max_block_size],
+            upsample_buffer: vec![0.0; max_block_size * max_factor],
+            downsample_buffer: if needs_downsample {
+                vec![0.0; max_block_size]
+            } else {
+                Vec::new()
+            },
         }
+    }
+
+    /// `max_factor` should be the largest factor this instance will ever be
+    /// switched to via `set_factor`, not just its starting factor.
+    pub fn new(max_factor: usize, max_block_size: usize) -> Self {
+        Self::new_inner(max_factor, max_block_size, true)
     }
 
     /// Construct an `Oversampler` already set to `factor`. Equivalent to
@@ -201,7 +218,17 @@ impl Oversampler {
         os
     }
 
+    /// Like `new_at_factor`, but for a caller that will only ever call
+    /// `upsample()` (e.g. a metering tap) — skips the downsample buffer.
+    /// Calling `downsample()` on the result panics (empty buffer).
+    pub fn new_upsample_only(factor: usize, max_block_size: usize) -> Self {
+        let mut os = Self::new_inner(factor, max_block_size, false);
+        os.set_factor(factor);
+        os
+    }
+
     pub fn set_factor(&mut self, factor: usize) {
+        let factor = factor.min(self.max_factor);
         let new_num_stages = match factor {
             1 => 0,
             2 => 1,
@@ -327,5 +354,37 @@ impl Oversampler {
             s.reset();
         }
         self.downsample_buffer.fill(0.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_upsample_only_matches_new_at_factor_output() {
+        let mut os_full = Oversampler::new_at_factor(4, 64);
+        let mut os_lean = Oversampler::new_upsample_only(4, 64);
+
+        for i in 0..64 {
+            let x = (i as f32 * 0.1).sin();
+            let full = os_full.upsample(x, i).to_vec();
+            let lean = os_lean.upsample(x, i).to_vec();
+            assert_eq!(
+                full, lean,
+                "new_upsample_only output diverged from new_at_factor at sample {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_factor_clamps_to_max_factor() {
+        let mut os = Oversampler::new_upsample_only(4, 16);
+        os.set_factor(16);
+        assert_eq!(os.factor(), 4, "set_factor should clamp to max_factor");
+
+        for i in 0..16 {
+            os.upsample(0.0, i); // must not panic (OOB if the clamp were missing)
+        }
     }
 }

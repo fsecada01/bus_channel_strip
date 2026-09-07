@@ -77,6 +77,18 @@ mod plugin_integration_tests {
         );
     }
 
+    /// Punch's clipper ceiling defaults to -1.0 dBTP, leaving DAC/intersample headroom.
+    #[cfg(feature = "punch")]
+    #[test]
+    fn test_punch_threshold_defaults_to_minus_one_dbtp() {
+        let plugin = BusChannelStrip::default();
+        let default_db = plugin.params.punch.punch_threshold.value();
+        assert!(
+            (default_db - (-1.0)).abs() < 0.01,
+            "punch_threshold default should be -1.0 dBTP, got {default_db:.4}"
+        );
+    }
+
     // ─── Gain delivery through the plugin's pultec instance ───────────────────
 
     /// Zero gains through the plugin's own PultecEQ instance must be transparent.
