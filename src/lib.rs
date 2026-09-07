@@ -16,6 +16,10 @@ mod presets;
 mod shaping;
 mod spectral;
 mod svf;
+// Only consumed from `components.rs` (gui-gated); kept testable in non-gui
+// builds too so `cargo test` always exercises the tooltip-coverage checks.
+#[cfg(any(feature = "gui", test))]
+mod tooltips;
 // Only consumed from `editor.rs` (gui-gated); kept testable in non-gui
 // builds too so `cargo test` always exercises the zoom/window-size math.
 #[cfg(any(feature = "gui", test))]
