@@ -7,9 +7,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use vizia_plug::vizia::prelude::*;
 use vizia_plug::vizia::vg;
-use vizia_plug::widgets::{ParamButton, ParamButtonExt, ParamSlider, RawParamEvent};
+use vizia_plug::widgets::{ParamButton, ParamButtonExt, RawParamEvent};
 use vizia_plug::{create_vizia_editor, ViziaState, ViziaTheming};
 
 use crate::components::{self, ModuleTheme};
@@ -2896,15 +2897,31 @@ const TRUE_PEAK_METER_FLOOR_DB: f32 = -24.0;
 const TRUE_PEAK_METER_CEILING_DB: f32 = 3.0;
 const TRUE_PEAK_WARN_DB: f32 = -1.0;
 
+/// Attack/release time constants for the true-peak meter's display-layer
+/// ballistics (roadmap v2.0 §4.4 "smooth needle ballistics") — see
+/// `spectral::meter_ballistics_step`. Fast attack so real peaks are still
+/// caught promptly; slower release for a readable, non-flickering meter.
+const TRUE_PEAK_METER_ATTACK_TC_S: f32 = 0.02;
+const TRUE_PEAK_METER_RELEASE_TC_S: f32 = 0.3;
+
 /// Horizontal-bar meter for Punch's ITU-R BS.1770-4 true-peak reading;
 /// follows `SpectrumCanvas`'s lock-free-atomic draw() pattern.
 struct PunchTruePeakMeter {
     true_peak_data: Arc<spectral::TruePeakData>,
+    /// Display-layer ballistics state — smooths the raw per-frame reading
+    /// independent of whatever hold/decay the DSP detector already applies.
+    displayed_db: RefCell<[f32; 2]>,
+    last_frame: RefCell<Instant>,
 }
 
 impl PunchTruePeakMeter {
     fn new(cx: &mut Context, true_peak_data: Arc<spectral::TruePeakData>) -> Handle<'_, Self> {
-        Self { true_peak_data }.build(cx, |_cx| {})
+        Self {
+            true_peak_data,
+            displayed_db: RefCell::new([spectral::TRUE_PEAK_FLOOR_DB; 2]),
+            last_frame: RefCell::new(Instant::now()),
+        }
+        .build(cx, |_cx| {})
     }
 }
 
@@ -2919,10 +2936,31 @@ impl View for PunchTruePeakMeter {
             return;
         }
 
-        let db = [
+        let target_db = [
             f32::from_bits(self.true_peak_data.channels[0].load(Ordering::Relaxed)),
             f32::from_bits(self.true_peak_data.channels[1].load(Ordering::Relaxed)),
         ];
+
+        let now = Instant::now();
+        let dt = now
+            .duration_since(*self.last_frame.borrow())
+            .as_secs_f32()
+            .min(0.1);
+        *self.last_frame.borrow_mut() = now;
+
+        let db = {
+            let mut displayed = self.displayed_db.borrow_mut();
+            for (d, &target) in displayed.iter_mut().zip(target_db.iter()) {
+                *d = spectral::meter_ballistics_step(
+                    *d,
+                    target,
+                    dt,
+                    TRUE_PEAK_METER_ATTACK_TC_S,
+                    TRUE_PEAK_METER_RELEASE_TC_S,
+                );
+            }
+            *displayed
+        };
 
         let mut bg_paint = vg::Paint::default();
         bg_paint.set_color(vg::Color::from_argb(255, 18, 25, 31));
@@ -2930,6 +2968,29 @@ impl View for PunchTruePeakMeter {
         canvas.draw_rect(
             vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h),
             &bg_paint,
+        );
+
+        // Fixed green→amber→red gradient spanning the meter's full width —
+        // the filled bar is a window into it, so a bar's own color shifts
+        // as it grows, rather than snapping between two flat colors at the
+        // warn threshold.
+        let warn_frac = ((TRUE_PEAK_WARN_DB - TRUE_PEAK_METER_FLOOR_DB)
+            / (TRUE_PEAK_METER_CEILING_DB - TRUE_PEAK_METER_FLOOR_DB))
+            .clamp(0.0, 1.0);
+        let gradient_colors: [vg::Color4f; 3] = [
+            vg::Color::from_argb(220, 90, 200, 160).into(),
+            vg::Color::from_argb(220, 230, 190, 60).into(),
+            vg::Color::from_argb(220, 230, 60, 60).into(),
+        ];
+        let gradient_stops = [0.0_f32, warn_frac, 1.0_f32];
+        let gradient_spec = vg::gradient::Gradient::new(
+            vg::gradient::Colors::new(
+                &gradient_colors,
+                Some(&gradient_stops),
+                vg::TileMode::Clamp,
+                None,
+            ),
+            vg::gradient::Interpolation::default(),
         );
 
         let bar_h = (bounds.h - 2.0) / 2.0;
@@ -2941,12 +3002,20 @@ impl View for PunchTruePeakMeter {
             let w = norm * bounds.w;
 
             let mut bar_paint = vg::Paint::default();
-            if ch_db >= TRUE_PEAK_WARN_DB {
-                bar_paint.set_color(vg::Color::from_argb(220, 230, 90, 60));
-            } else {
-                bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160));
-            }
             bar_paint.set_style(vg::PaintStyle::Fill);
+            bar_paint.set_anti_alias(true);
+            match vg::gradient::shaders::linear_gradient(
+                ((bounds.x, y), (bounds.x + bounds.w, y)),
+                &gradient_spec,
+                None,
+            ) {
+                Some(shader) => {
+                    bar_paint.set_shader(shader);
+                }
+                None => {
+                    bar_paint.set_color(vg::Color::from_argb(220, 90, 200, 160));
+                }
+            }
             if w > 0.5 {
                 canvas.draw_rect(vg::Rect::from_xywh(bounds.x, y, w, bar_h), &bar_paint);
             }
@@ -2983,16 +3052,6 @@ impl View for PunchTruePeakMeter {
 //       band_N_enabled, band_N_solo,
 //       band_N_freq, band_N_threshold, band_N_ratio,
 //       band_N_q, band_N_mode, band_N_attack, band_N_release, band_N_gain);
-// Helper so the closure literals passed to `dyneq_slider!` get their parameter
-// type pinned down by this function's signature (a bare `|p| &p.field` closure
-// called inline cannot infer `p`'s type on its own).
-fn dyneq_param<'p, P: Param>(
-    params: &'p Arc<BusChannelStripParams>,
-    pf: impl Fn(&'p Arc<BusChannelStripParams>) -> &'p P,
-) -> &'p P {
-    pf(params)
-}
-
 macro_rules! dyneq_slider {
     ($cx:expr, $label:literal, $pf:expr) => {{
         VStack::new($cx, |cx| {
@@ -3002,9 +3061,7 @@ macro_rules! dyneq_slider {
                 .width(Stretch(1.0));
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamSlider::new(cx, dyneq_param(&params, $pf))
-                    .height(Pixels(16.0))
-                    .width(Stretch(1.0));
+                components::param_slider_with_tooltip(cx, &params, $pf).height(Pixels(16.0));
             }
         })
         .class("param-control")
@@ -3471,50 +3528,45 @@ fn sheen_stage_column(cx: &mut Context, name: &'static str, sub: &'static str, _
         let params = cx.data::<Data>().params.clone();
         match name {
             "BODY" => {
-                ParamSlider::new(cx, &params.sheen.sheen_body_db)
+                components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_body_db)
                     .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
+                    .height(Pixels(22.0));
                 ParamButton::new(cx, &params.sheen.sheen_body_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "PRESENCE" => {
-                ParamSlider::new(cx, &params.sheen.sheen_presence_db)
+                components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_presence_db)
                     .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
+                    .height(Pixels(22.0));
                 ParamButton::new(cx, &params.sheen.sheen_presence_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "AIR" => {
-                ParamSlider::new(cx, &params.sheen.sheen_air_db)
+                components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_air_db)
                     .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
+                    .height(Pixels(22.0));
                 ParamButton::new(cx, &params.sheen.sheen_air_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "WARMTH" => {
-                ParamSlider::new(cx, &params.sheen.sheen_warmth)
+                components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_warmth)
                     .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
+                    .height(Pixels(22.0));
                 ParamButton::new(cx, &params.sheen.sheen_warmth_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))
                     .width(Stretch(1.0));
             }
             "WIDTH" => {
-                ParamSlider::new(cx, &params.sheen.sheen_width)
+                components::param_slider_with_tooltip(cx, &params, |p| &p.sheen.sheen_width)
                     .class("sheen-slider")
-                    .height(Pixels(22.0))
-                    .width(Stretch(1.0));
+                    .height(Pixels(22.0));
                 ParamButton::new(cx, &params.sheen.sheen_width_bypass)
                     .class("sheen-stage-bypass")
                     .height(Pixels(24.0))

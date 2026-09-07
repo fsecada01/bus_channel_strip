@@ -1081,6 +1081,43 @@ slider .thumb:hover {
     transform: scale(1.1);
 }
 
+/* ── ParamSlider micro-interactions (roadmap v2.0 §4.4) ──────────────────
+   ParamSlider (vizia_plug) is a sealed external widget — these rules target
+   its own internal `.fill`/`.value` elements and `:active` pseudo-class
+   (set by ParamSlider itself via cx.set_active() during drag) rather than
+   any Rust-side override. Spring-back: an overshoot easing curve on the
+   fill bar's left/width so it settles into place with a subtle bounce on
+   every value change. Fade: the value label sits at reduced opacity at
+   rest and eases to full opacity while the slider is being dragged. */
+param-slider .fill {
+    transition:
+        left 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+        width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+param-slider .value {
+    opacity: 0.8;
+    transition: opacity 0.15s ease;
+}
+
+param-slider:active .value {
+    opacity: 1;
+}
+
+/* Floating value tooltip that follows the cursor during a ParamSlider
+   drag — see `components::param_slider_with_tooltip`. */
+.param-drag-tooltip {
+    background: linear-gradient(145deg, #262a32, #1a1d24);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    top: -20px;
+}
+
 /* Specialized slider themes */
 .frequency-slider {
     border: 1px solid rgba(64, 160, 208, 0.3);
