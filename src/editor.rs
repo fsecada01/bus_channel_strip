@@ -1169,6 +1169,13 @@ pub(crate) fn create(
         cx.add_stylesheet(COMPONENT_STYLES)
             .expect("Failed to add stylesheet");
 
+        // #25: shorten vizia's default 1500ms tooltip hover-delay to the
+        // 800ms this issue's DoD specifies. Applies app-wide to every
+        // `.tooltip(...)` attached via `components::attach_tooltip`.
+        cx.emit(EnvironmentEvent::SetTooltipDelay(Duration::from_millis(
+            800,
+        )));
+
         // Restore the zoom buttons' selected state from the persisted scale
         // factor (issue #20) so it matches the real window size this editor
         // was just spawned at, instead of always starting at 100%.
@@ -1755,7 +1762,13 @@ fn create_master_section(cx: &mut Context) {
                 .height(Pixels(16.0))
                 .width(Stretch(1.0));
             let params = cx.data::<Data>().params.clone();
-            components::create_bypass_button(cx, "BYPASS", &params, |p| &p.global.global_bypass);
+            components::create_bypass_button(
+                cx,
+                "BYPASS",
+                crate::tooltips::NO_TOOLTIP,
+                &params,
+                |p| &p.global.global_bypass,
+            );
         })
         .height(Auto)
         .width(Pixels(80.0))
@@ -1764,14 +1777,22 @@ fn create_master_section(cx: &mut Context) {
         .bottom(Pixels(0.0));
 
         // Auto-gain compensation toggle.
-        components::create_bool_button(cx, "AUTO GAIN", &cx.data::<Data>().params.clone(), |p| {
-            &p.global.global_auto_gain
-        });
+        components::create_bool_button(
+            cx,
+            "AUTO GAIN",
+            crate::tooltips::NO_TOOLTIP,
+            &cx.data::<Data>().params.clone(),
+            |p| &p.global.global_auto_gain,
+        );
 
         Label::new(cx, "MASTER").class("master-label");
-        components::create_gain_slider(cx, "Gain", &cx.data::<Data>().params.clone(), |p| {
-            &p.global.gain
-        });
+        components::create_gain_slider(
+            cx,
+            "Gain",
+            crate::tooltips::NO_TOOLTIP,
+            &cx.data::<Data>().params.clone(),
+            |p| &p.global.gain,
+        );
     })
     .class("master-controls")
     .gap(Pixels(12.0));
@@ -2097,30 +2118,42 @@ fn build_bypass_button_for_type(cx: &mut Context, mt: ModuleType) {
     let params = cx.data::<Data>().params.clone();
     match mt {
         ModuleType::Api5500EQ => {
-            components::create_active_led_button(cx, &params, |p| &p.api5500.eq_bypass);
+            components::create_active_led_button(cx, "eq_bypass", &params, |p| {
+                &p.api5500.eq_bypass
+            });
         }
         ModuleType::ButterComp2 => {
-            components::create_active_led_button(cx, &params, |p| &p.buttercomp2.comp_bypass);
+            components::create_active_led_button(cx, "comp_bypass", &params, |p| {
+                &p.buttercomp2.comp_bypass
+            });
         }
         ModuleType::PultecEQ => {
-            components::create_active_led_button(cx, &params, |p| &p.pultec.pultec_bypass);
+            components::create_active_led_button(cx, "pultec_bypass", &params, |p| {
+                &p.pultec.pultec_bypass
+            });
         }
         ModuleType::DynamicEQ => {
             #[cfg(feature = "dynamic_eq")]
-            components::create_active_led_button(cx, &params, |p| &p.dynamic_eq.dyneq_bypass);
+            components::create_active_led_button(cx, "dyneq_bypass", &params, |p| {
+                &p.dynamic_eq.dyneq_bypass
+            });
         }
         ModuleType::Transformer => {
-            components::create_active_led_button(cx, &params, |p| {
+            components::create_active_led_button(cx, "transformer_bypass", &params, |p| {
                 &p.transformer.transformer_bypass
             });
         }
         ModuleType::Punch => {
             #[cfg(feature = "punch")]
-            components::create_active_led_button(cx, &params, |p| &p.punch.punch_bypass);
+            components::create_active_led_button(cx, "punch_bypass", &params, |p| {
+                &p.punch.punch_bypass
+            });
         }
         ModuleType::Haas => {
             #[cfg(feature = "haas")]
-            components::create_active_led_button(cx, &params, |p| &p.haas.haas_bypass);
+            components::create_active_led_button(cx, "haas_bypass", &params, |p| {
+                &p.haas.haas_bypass
+            });
         }
         // No bypass for empty slots — pass-through is unconditional.
         ModuleType::Empty => {}
@@ -2229,12 +2262,14 @@ fn build_api5500_controls(cx: &mut Context) {
                 components::create_frequency_slider(
                     cx,
                     "FREQ",
+                    "lf_freq",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.api5500.lf_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "GAIN",
+                    "lf_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.api5500.lf_gain,
                 );
@@ -2254,12 +2289,14 @@ fn build_api5500_controls(cx: &mut Context) {
                 components::create_frequency_slider(
                     cx,
                     "FREQ",
+                    "hf_freq",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.api5500.hf_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "GAIN",
+                    "hf_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.api5500.hf_gain,
                 );
@@ -2281,40 +2318,70 @@ fn build_api5500_controls(cx: &mut Context) {
             components::create_frequency_slider(
                 cx,
                 "LMF",
+                "lmf_freq",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.api5500.lmf_freq,
             );
-            components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.lmf_gain
-            });
-            components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.lmf_q
-            });
+            components::create_gain_slider(
+                cx,
+                "GAIN",
+                "lmf_gain",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.lmf_gain,
+            );
+            components::create_param_slider(
+                cx,
+                "Q",
+                "lmf_q",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.lmf_q,
+            );
         });
         components::module_row(cx, |cx| {
-            components::create_frequency_slider(cx, "MF", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.mf_freq
-            });
-            components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.mf_gain
-            });
-            components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.mf_q
-            });
+            components::create_frequency_slider(
+                cx,
+                "MF",
+                "mf_freq",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.mf_freq,
+            );
+            components::create_gain_slider(
+                cx,
+                "GAIN",
+                "mf_gain",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.mf_gain,
+            );
+            components::create_param_slider(
+                cx,
+                "Q",
+                "mf_q",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.mf_q,
+            );
         });
         components::module_row(cx, |cx| {
             components::create_frequency_slider(
                 cx,
                 "HMF",
+                "hmf_freq",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.api5500.hmf_freq,
             );
-            components::create_gain_slider(cx, "GAIN", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.hmf_gain
-            });
-            components::create_param_slider(cx, "Q", &cx.data::<Data>().params.clone(), |p| {
-                &p.api5500.hmf_q
-            });
+            components::create_gain_slider(
+                cx,
+                "GAIN",
+                "hmf_gain",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.hmf_gain,
+            );
+            components::create_param_slider(
+                cx,
+                "Q",
+                "hmf_q",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.api5500.hmf_q,
+            );
         });
     })
     .gap(Pixels(6.0))
@@ -2340,9 +2407,13 @@ fn build_buttercomp2_controls(cx: &mut Context) {
 
         // Model selector — always visible above the reactive control surface.
         #[cfg(feature = "buttercomp2")]
-        components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
-            &p.buttercomp2.comp_model
-        });
+        components::create_param_slider(
+            cx,
+            "MODEL",
+            "comp_model",
+            &cx.data::<Data>().params.clone(),
+            |p| &p.buttercomp2.comp_model,
+        );
 
         // Reactive control surface — rebuilds when model enum changes.
         // Map the EnumParam value to usize so Binding gets a `Clone + PartialEq` target.
@@ -2375,22 +2446,32 @@ fn build_buttercomp2_controls(cx: &mut Context) {
 /// Classic ButterComp2 control surface — Compress, Output, SC HP, Dry/Wet.
 fn build_classic_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
-        components::create_ratio_slider(cx, "COMPRESS", &cx.data::<Data>().params.clone(), |p| {
-            &p.buttercomp2.comp_compress
-        });
-        components::create_gain_slider(cx, "OUTPUT", &cx.data::<Data>().params.clone(), |p| {
-            &p.buttercomp2.comp_output
-        });
+        components::create_ratio_slider(
+            cx,
+            "COMPRESS",
+            "comp_compress",
+            &cx.data::<Data>().params.clone(),
+            |p| &p.buttercomp2.comp_compress,
+        );
+        components::create_gain_slider(
+            cx,
+            "OUTPUT",
+            "comp_output",
+            &cx.data::<Data>().params.clone(),
+            |p| &p.buttercomp2.comp_output,
+        );
         components::module_row(cx, |cx| {
             components::create_frequency_slider(
                 cx,
                 "SC HP",
+                "comp_sc_hp",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.comp_sc_hp_freq,
             );
             components::create_param_slider(
                 cx,
                 "DRY/WET",
+                "comp_dry_wet",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.comp_dry_wet,
             );
@@ -2407,20 +2488,33 @@ fn build_classic_controls(cx: &mut Context) {
 fn build_vca_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "THRESH", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.vca_thresh
-            });
-            components::create_ratio_slider(cx, "RATIO", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.vca_ratio
-            });
+            components::create_param_slider(
+                cx,
+                "THRESH",
+                "comp_vca_thresh",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.vca_thresh,
+            );
+            components::create_ratio_slider(
+                cx,
+                "RATIO",
+                "comp_vca_ratio",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.vca_ratio,
+            );
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.vca_atk
-            });
+            components::create_param_slider(
+                cx,
+                "ATTACK",
+                "comp_vca_atk",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.vca_atk,
+            );
             components::create_param_slider(
                 cx,
                 "RELEASE",
+                "comp_vca_rel",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.vca_rel,
             );
@@ -2429,12 +2523,17 @@ fn build_vca_controls(cx: &mut Context) {
             components::create_frequency_slider(
                 cx,
                 "SC HP",
+                "comp_sc_hp",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.comp_sc_hp_freq,
             );
-            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.comp_dry_wet
-            });
+            components::create_param_slider(
+                cx,
+                "MIX",
+                "comp_dry_wet",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.comp_dry_wet,
+            );
         });
     })
     .gap(Pixels(6.0))
@@ -2448,26 +2547,43 @@ fn build_vca_controls(cx: &mut Context) {
 fn build_optical_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "THRESH", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.opt_thresh
-            });
-            components::create_param_slider(cx, "CHAR %", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.opt_char
-            });
+            components::create_param_slider(
+                cx,
+                "THRESH",
+                "comp_opt_thresh",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.opt_thresh,
+            );
+            components::create_param_slider(
+                cx,
+                "CHAR %",
+                "comp_opt_char",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.opt_char,
+            );
         });
-        components::create_param_slider(cx, "SPEED", &cx.data::<Data>().params.clone(), |p| {
-            &p.buttercomp2.opt_speed
-        });
+        components::create_param_slider(
+            cx,
+            "SPEED",
+            "comp_opt_speed",
+            &cx.data::<Data>().params.clone(),
+            |p| &p.buttercomp2.opt_speed,
+        );
         components::module_row(cx, |cx| {
             components::create_frequency_slider(
                 cx,
                 "SC HP",
+                "comp_sc_hp",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.comp_sc_hp_freq,
             );
-            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.comp_dry_wet
-            });
+            components::create_param_slider(
+                cx,
+                "MIX",
+                "comp_dry_wet",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.comp_dry_wet,
+            );
         });
     })
     .gap(Pixels(6.0))
@@ -2482,31 +2598,49 @@ fn build_optical_controls(cx: &mut Context) {
 fn build_fet_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_row(cx, |cx| {
-            components::create_gain_slider(cx, "INPUT", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.fet_input_db
-            });
-            components::create_gain_slider(cx, "OUTPUT", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.fet_output_db
-            });
+            components::create_gain_slider(
+                cx,
+                "INPUT",
+                "comp_fet_input",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.fet_input_db,
+            );
+            components::create_gain_slider(
+                cx,
+                "OUTPUT",
+                "comp_fet_output",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.fet_output_db,
+            );
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "ATTACK", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.fet_attack_ms
-            });
+            components::create_param_slider(
+                cx,
+                "ATTACK",
+                "comp_fet_atk",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.fet_attack_ms,
+            );
             components::create_param_slider(
                 cx,
                 "RELEASE",
+                "comp_fet_rel",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.fet_release_ms,
             );
         });
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "RATIO", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.fet_ratio
-            });
+            components::create_param_slider(
+                cx,
+                "RATIO",
+                "comp_fet_ratio",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.fet_ratio,
+            );
             components::create_bool_button(
                 cx,
                 "AUTO REL",
+                "comp_fet_auto",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.fet_auto_release,
             );
@@ -2515,12 +2649,17 @@ fn build_fet_controls(cx: &mut Context) {
             components::create_frequency_slider(
                 cx,
                 "SC HP",
+                "comp_sc_hp",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.buttercomp2.comp_sc_hp_freq,
             );
-            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.buttercomp2.comp_dry_wet
-            });
+            components::create_param_slider(
+                cx,
+                "MIX",
+                "comp_dry_wet",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.buttercomp2.comp_dry_wet,
+            );
         });
     })
     .gap(Pixels(6.0))
@@ -2545,35 +2684,47 @@ fn build_pultec_controls(cx: &mut Context) {
                 components::create_frequency_slider(
                     cx,
                     "FREQ",
+                    "pultec_lf_boost_freq",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_lf_boost_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "BOOST",
+                    "pultec_lf_boost_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_lf_boost_gain,
                 );
-                components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
-                    &p.pultec.pultec_lf_boost_bandwidth
-                });
+                components::create_param_slider(
+                    cx,
+                    "BW",
+                    "pultec_lf_bw",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec.pultec_lf_boost_bandwidth,
+                );
             });
             components::module_row(cx, |cx| {
                 components::create_frequency_slider(
                     cx,
                     "ATTEN",
+                    "pultec_lf_cut_freq",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_lf_cut_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "ATTEN",
+                    "pultec_lf_cut_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_lf_cut_gain,
                 );
-                components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
-                    &p.pultec.pultec_lf_cut_bandwidth
-                });
+                components::create_param_slider(
+                    cx,
+                    "BW",
+                    "pultec_lf_cut_bw",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec.pultec_lf_cut_bandwidth,
+                );
             });
         });
         // HIGH FREQUENCY: boost and cut each on their own row (freq + gain/bw)
@@ -2582,29 +2733,37 @@ fn build_pultec_controls(cx: &mut Context) {
                 components::create_frequency_slider(
                     cx,
                     "FREQ",
+                    "pultec_hf_boost_freq",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_hf_boost_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "BOOST",
+                    "pultec_hf_boost_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_hf_boost_gain,
                 );
-                components::create_param_slider(cx, "BW", &cx.data::<Data>().params.clone(), |p| {
-                    &p.pultec.pultec_hf_boost_bandwidth
-                });
+                components::create_param_slider(
+                    cx,
+                    "BW",
+                    "pultec_hf_boost_bandwidth",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.pultec.pultec_hf_boost_bandwidth,
+                );
             });
             components::module_row(cx, |cx| {
                 components::create_frequency_slider(
                     cx,
                     "ATTEN",
+                    "pultec_hf_cut_freq",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_hf_cut_freq,
                 );
                 components::create_gain_slider(
                     cx,
                     "ATTEN",
+                    "pultec_hf_cut_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.pultec.pultec_hf_cut_gain,
                 );
@@ -2615,6 +2774,7 @@ fn build_pultec_controls(cx: &mut Context) {
             components::create_param_slider(
                 cx,
                 "TUBE DRIVE",
+                "pultec_tube_drive",
                 &cx.data::<Data>().params.clone(),
                 |p| &p.pultec.pultec_tube_drive,
             );
@@ -3351,7 +3511,12 @@ fn dyneq_param<'p, P: Param>(
 }
 
 macro_rules! dyneq_slider {
-    ($cx:expr, $label:literal, $pf:expr) => {{
+    // #25: `$tooltip_id` is always band 1's param ID for the given field
+    // type (e.g. "dyneq_band1_freq"). All 4 bands share identical tooltip
+    // text in `src/tooltips.rs` (matched by OR-pattern across band numbers),
+    // so a single representative ID per field type is correct regardless of
+    // which band this macro expansion actually renders.
+    ($cx:expr, $label:literal, $tooltip_id:literal, $pf:expr) => {{
         VStack::new($cx, |cx| {
             Label::new(cx, $label)
                 .class("dyneq-param-label")
@@ -3359,9 +3524,12 @@ macro_rules! dyneq_slider {
                 .width(Stretch(1.0));
             {
                 let params = cx.data::<Data>().params.clone();
-                ParamSlider::new(cx, dyneq_param(&params, $pf))
-                    .height(Pixels(16.0))
-                    .width(Stretch(1.0));
+                components::attach_tooltip(
+                    ParamSlider::new(cx, dyneq_param(&params, $pf))
+                        .height(Pixels(16.0))
+                        .width(Stretch(1.0)),
+                    $tooltip_id,
+                );
             }
         })
         .class("param-control")
@@ -3390,8 +3558,12 @@ macro_rules! dyneq_band_col {
                     .top(Pixels(0.0))
                     .bottom(Pixels(0.0));
                 let params = cx.data::<Data>().params.clone();
-                components::create_on_button(cx, &params, |p| &p.dynamic_eq.$enabled);
-                components::create_bypass_button(cx, "SOLO", &params, |p| &p.dynamic_eq.$solo);
+                components::create_on_button(cx, "dyneq_band1_enabled", &params, |p| {
+                    &p.dynamic_eq.$enabled
+                });
+                components::create_bypass_button(cx, "SOLO", "dyneq_band1_solo", &params, |p| {
+                    &p.dynamic_eq.$solo
+                });
                 // Chevron toggle button — reactive label via dyneq_expand_gen signal
                 {
                     let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
@@ -3422,10 +3594,12 @@ macro_rules! dyneq_band_col {
             .height(Auto);
 
             // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
-            dyneq_slider!(cx, "MODE", |p| &p.dynamic_eq.$mode);
-            dyneq_slider!(cx, "FREQ", |p| &p.dynamic_eq.$freq);
-            dyneq_slider!(cx, "THRESH", |p| &p.dynamic_eq.$thresh);
-            dyneq_slider!(cx, "GAIN", |p| &p.dynamic_eq.$gain);
+            dyneq_slider!(cx, "MODE", "dyneq_band1_mode", |p| &p.dynamic_eq.$mode);
+            dyneq_slider!(cx, "FREQ", "dyneq_band1_freq", |p| &p.dynamic_eq.$freq);
+            dyneq_slider!(cx, "THRESH", "dyneq_band1_threshold", |p| &p
+                .dynamic_eq
+                .$thresh);
+            dyneq_slider!(cx, "GAIN", "dyneq_band1_gain", |p| &p.dynamic_eq.$gain);
 
             // Tier 2 — conditionally built when band is expanded.
             // Uses Binding::new rather than .display() because .display(lens.map(...))
@@ -3438,10 +3612,16 @@ macro_rules! dyneq_band_col {
                 Binding::new(cx, dyneq_expand_gen_signal, move |cx| {
                     if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
                         VStack::new(cx, |cx| {
-                            dyneq_slider!(cx, "RATIO", |p| &p.dynamic_eq.$ratio);
-                            dyneq_slider!(cx, "Q", |p| &p.dynamic_eq.$q);
-                            dyneq_slider!(cx, "ATK ms", |p| &p.dynamic_eq.$atk);
-                            dyneq_slider!(cx, "REL ms", |p| &p.dynamic_eq.$rel);
+                            dyneq_slider!(cx, "RATIO", "dyneq_band1_ratio", |p| &p
+                                .dynamic_eq
+                                .$ratio);
+                            dyneq_slider!(cx, "Q", "dyneq_band1_q", |p| &p.dynamic_eq.$q);
+                            dyneq_slider!(cx, "ATK ms", "dyneq_band1_attack", |p| &p
+                                .dynamic_eq
+                                .$atk);
+                            dyneq_slider!(cx, "REL ms", "dyneq_band1_release", |p| &p
+                                .dynamic_eq
+                                .$rel);
                         })
                         .width(Stretch(1.0))
                         .height(Auto)
@@ -3499,7 +3679,7 @@ fn build_dyneq_back_view(
             #[cfg(feature = "dynamic_eq")]
             {
                 let params = cx.data::<Data>().params.clone();
-                components::create_bypass_button(cx, "BYPASS", &params, |p| {
+                components::create_bypass_button(cx, "BYPASS", "dyneq_bypass", &params, |p| {
                     &p.dynamic_eq.dyneq_bypass
                 });
             }
@@ -3886,12 +4066,20 @@ fn build_transformer_controls(cx: &mut Context) {
         });
         // Model + compression on one row
         components::module_row(cx, |cx| {
-            components::create_param_slider(cx, "MODEL", &cx.data::<Data>().params.clone(), |p| {
-                &p.transformer.transformer_model
-            });
-            components::create_ratio_slider(cx, "COMP", &cx.data::<Data>().params.clone(), |p| {
-                &p.transformer.transformer_compression
-            });
+            components::create_param_slider(
+                cx,
+                "MODEL",
+                "transformer_model",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.transformer.transformer_model,
+            );
+            components::create_ratio_slider(
+                cx,
+                "COMP",
+                "transformer_compression",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.transformer.transformer_compression,
+            );
         });
         // Input stage: drive + saturation paired
         components::module_section(cx, "INPUT", |cx| {
@@ -3899,12 +4087,14 @@ fn build_transformer_controls(cx: &mut Context) {
                 components::create_param_slider(
                     cx,
                     "DRIVE",
+                    "transformer_input_drive",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.transformer.transformer_input_drive,
                 );
                 components::create_param_slider(
                     cx,
                     "SAT",
+                    "transformer_input_saturation",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.transformer.transformer_input_saturation,
                 );
@@ -3916,12 +4106,14 @@ fn build_transformer_controls(cx: &mut Context) {
                 components::create_param_slider(
                     cx,
                     "DRIVE",
+                    "transformer_output_drive",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.transformer.transformer_output_drive,
                 );
                 components::create_param_slider(
                     cx,
                     "SAT",
+                    "transformer_output_saturation",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.transformer.transformer_output_saturation,
                 );
@@ -3933,12 +4125,14 @@ fn build_transformer_controls(cx: &mut Context) {
                 components::create_param_slider(
                     cx,
                     "LOW",
+                    "transformer_low_response",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.transformer.transformer_low_response,
                 );
                 components::create_param_slider(
                     cx,
                     "HIGH",
+                    "transformer_high_response",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.transformer.transformer_high_response,
                 );
@@ -3980,12 +4174,14 @@ fn build_punch_controls(cx: &mut Context) {
                 components::create_gain_slider(
                     cx,
                     "THRESH",
+                    "punch_threshold",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_threshold,
                 );
                 components::create_param_slider(
                     cx,
                     "MODE",
+                    "punch_clip_mode",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_clip_mode,
                 );
@@ -3994,12 +4190,14 @@ fn build_punch_controls(cx: &mut Context) {
                 components::create_param_slider(
                     cx,
                     "SOFT",
+                    "punch_softness",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_softness,
                 );
                 components::create_param_slider(
                     cx,
                     "OVSMP",
+                    "punch_oversampling",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_oversampling,
                 );
@@ -4010,39 +4208,55 @@ fn build_punch_controls(cx: &mut Context) {
                 components::create_param_slider(
                     cx,
                     "ATTACK",
+                    "punch_attack",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_attack,
                 );
                 components::create_param_slider(
                     cx,
                     "SUSTAIN",
+                    "punch_sustain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_sustain,
                 );
             });
-            components::create_param_slider(cx, "SENS", &cx.data::<Data>().params.clone(), |p| {
-                &p.punch.punch_sensitivity
-            });
+            components::create_param_slider(
+                cx,
+                "SENS",
+                "punch_sensitivity",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.punch.punch_sensitivity,
+            );
         });
         components::module_section(cx, "OUTPUT", |cx| {
             components::module_row(cx, |cx| {
-                components::create_gain_slider(cx, "IN", &cx.data::<Data>().params.clone(), |p| {
-                    &p.punch.punch_input_gain
-                });
-                components::create_gain_slider(cx, "OUT", &cx.data::<Data>().params.clone(), |p| {
-                    &p.punch.punch_output_gain
-                });
+                components::create_gain_slider(
+                    cx,
+                    "IN",
+                    "punch_input_gain",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch.punch_input_gain,
+                );
+                components::create_gain_slider(
+                    cx,
+                    "OUT",
+                    "punch_output_gain",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.punch.punch_output_gain,
+                );
             });
             components::module_row(cx, |cx| {
                 components::create_param_slider(
                     cx,
                     "MIX",
+                    "punch_mix",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_mix,
                 );
                 components::create_frequency_slider(
                     cx,
                     "WET HPF",
+                    "punch_wet_hpf",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.punch.punch_wet_hpf_hz,
                 );
@@ -4061,12 +4275,17 @@ fn build_haas_controls(cx: &mut Context) {
     VStack::new(cx, |cx| {
         components::module_section(cx, "M/S GAIN", |cx| {
             components::module_row(cx, |cx| {
-                components::create_gain_slider(cx, "MID", &cx.data::<Data>().params.clone(), |p| {
-                    &p.haas.haas_mid_gain
-                });
+                components::create_gain_slider(
+                    cx,
+                    "MID",
+                    "haas_mid_gain",
+                    &cx.data::<Data>().params.clone(),
+                    |p| &p.haas.haas_mid_gain,
+                );
                 components::create_gain_slider(
                     cx,
                     "SIDE",
+                    "haas_side_gain",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.haas.haas_side_gain,
                 );
@@ -4077,24 +4296,34 @@ fn build_haas_controls(cx: &mut Context) {
                 components::create_param_slider(
                     cx,
                     "DEPTH",
+                    "haas_comb_depth",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.haas.haas_comb_depth,
                 );
                 components::create_param_slider(
                     cx,
                     "TIME",
+                    "haas_comb_time",
                     &cx.data::<Data>().params.clone(),
                     |p| &p.haas.haas_comb_time,
                 );
             });
-            components::create_param_slider(cx, "MODE", &cx.data::<Data>().params.clone(), |p| {
-                &p.haas.haas_comb_mode
-            });
+            components::create_param_slider(
+                cx,
+                "MODE",
+                "haas_comb_mode",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.haas.haas_comb_mode,
+            );
         });
         components::module_section(cx, "OUTPUT", |cx| {
-            components::create_param_slider(cx, "MIX", &cx.data::<Data>().params.clone(), |p| {
-                &p.haas.haas_mix
-            });
+            components::create_param_slider(
+                cx,
+                "MIX",
+                "haas_mix",
+                &cx.data::<Data>().params.clone(),
+                |p| &p.haas.haas_mix,
+            );
         });
     })
     .gap(Pixels(4.0))
