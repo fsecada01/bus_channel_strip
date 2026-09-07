@@ -680,9 +680,8 @@ impl PunchModule {
         self.true_peak_r.reset();
     }
 
-    /// Get current gain reduction (0.0 - 1.0) for metering.
-    /// Reserved for future clipper GR visualization.
-    #[allow(dead_code)]
+    /// Get current gain reduction (0.0 - 1.0) for metering. Used as the
+    /// Punch saturation-meter proxy (issue #22).
     pub fn get_gain_reduction(&self) -> f32 {
         self.current_gain_reduction
     }

@@ -157,6 +157,11 @@ pub struct SheenModule {
     dirty_presence: bool,
     dirty_air: bool,
     dirty_width: bool,
+
+    /// #22: smoothed WARMTH harmonic-content proxy for the GUI saturation
+    /// meter. Fast attack / slow release; decays toward 0 whenever WARMTH
+    /// isn't actively running (bypassed or effect ~0).
+    warmth_saturation_level: f32,
 }
 
 impl SheenModule {
@@ -235,6 +240,7 @@ impl SheenModule {
             dirty_presence: false,
             dirty_air: false,
             dirty_width: false,
+            warmth_saturation_level: 0.0,
         }
     }
 
@@ -353,8 +359,20 @@ impl SheenModule {
             // Skip the whole stage when effect is at-or-below noise floor;
             // saves the polynomial and the oversampler hop on the dry path.
             if warmth_active {
+                let pre_l = l;
+                let pre_r = r;
                 l = self.process_warmth(l, 0, &mut warmth_scratch);
                 r = self.process_warmth(r, 1, &mut warmth_scratch);
+                // #22: smoothed harmonic-content proxy for the GUI meter —
+                // fast attack / slow release, mirroring Transformer's.
+                let diff = ((l - pre_l).abs() + (r - pre_r).abs()) * 0.5;
+                if diff > self.warmth_saturation_level {
+                    self.warmth_saturation_level = diff;
+                } else {
+                    self.warmth_saturation_level += (diff - self.warmth_saturation_level) * 0.01;
+                }
+            } else {
+                self.warmth_saturation_level *= 0.99;
             }
 
             // ── WIDTH ─ M/S side-only HPF + shelf ───────────────────────
@@ -394,6 +412,58 @@ impl SheenModule {
         for h in &mut self.warmth_hysteresis {
             h.reset();
         }
+        self.warmth_saturation_level = 0.0;
+    }
+
+    /// Current WARMTH saturation level for the GUI meter. Not a calibrated
+    /// unit, just a relative "how much coloration is happening right now"
+    /// signal; 0.0 = none.
+    pub fn get_warmth_saturation_level(&self) -> f32 {
+        self.warmth_saturation_level
+    }
+
+    /// Pure frequency-response probe (dB) for the inline EQ spectrum strip
+    /// (issue #22), covering the BODY/PRESENCE/AIR stages only — WARMTH and
+    /// WIDTH aren't frequency-response-relevant. Computed straight from
+    /// parameter values with no access to any live filter/audio-thread
+    /// state, so it's safe to call from the GUI thread.
+    #[allow(clippy::too_many_arguments)]
+    pub fn frequency_response_db(
+        sample_rate: f32,
+        body_db: f32,
+        body_bypass: bool,
+        presence_db: f32,
+        presence_bypass: bool,
+        air_db: f32,
+        air_bypass: bool,
+        probe_hz: f32,
+    ) -> f32 {
+        let w = core::f32::consts::TAU * probe_hz / sample_rate;
+        let mut total_db = 0.0;
+        if !body_bypass {
+            total_db += SvfCoefficients::new(
+                SvfType::LowShelf(body_db),
+                sample_rate,
+                BODY_FREQ_HZ,
+                BODY_Q,
+            )
+            .magnitude_db(w);
+        }
+        if !presence_bypass {
+            total_db += SvfCoefficients::new(
+                SvfType::Bell(presence_db),
+                sample_rate,
+                PRESENCE_FREQ_HZ,
+                PRESENCE_Q,
+            )
+            .magnitude_db(w);
+        }
+        if !air_bypass {
+            total_db +=
+                SvfCoefficients::new(SvfType::HighShelf(air_db), sample_rate, AIR_FREQ_HZ, AIR_Q)
+                    .magnitude_db(w);
+        }
+        total_db
     }
 
     // ------------------------------------------------------------------
@@ -893,6 +963,152 @@ mod tests {
         assert!(
             (probe - 0.0).abs() < 1.0e-6,
             "warmth hysteresis state not cleared by reset: {probe}"
+        );
+    }
+
+    // ── #22 WARMTH saturation meter ─────────────────────────────────────────
+
+    #[test]
+    fn warmth_saturation_level_zero_at_rest() {
+        let sheen = SheenModule::new(SR);
+        assert_eq!(sheen.get_warmth_saturation_level(), 0.0);
+    }
+
+    #[test]
+    fn warmth_saturation_level_rises_when_active() {
+        let mut sheen = SheenModule::new(SR);
+        sheen.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, false, false, 0.0, true,
+        );
+        let n = 2048;
+        let mut l: Vec<f32> = (0..n)
+            .map(|i| (2.0 * core::f32::consts::PI * 0.1 * i as f32).sin() * 0.9)
+            .collect();
+        let mut r = l.clone();
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |s| {
+                s.clear();
+                s.push(&mut l);
+                s.push(&mut r);
+            });
+        }
+        sheen.process(&mut buffer);
+        let level = sheen.get_warmth_saturation_level();
+        assert!(
+            level > 0.0,
+            "expected positive saturation level, got {level}"
+        );
+        assert!(level.is_finite());
+    }
+
+    #[test]
+    fn warmth_saturation_level_decays_when_bypassed() {
+        let mut sheen = SheenModule::new(SR);
+        sheen.warmth_saturation_level = 0.5;
+        sheen.update_parameters(
+            false, 0.0, true, 0.0, true, 0.0, true, 1.0, true, false, 0.0, true,
+        );
+        let n = 64;
+        let mut l = vec![0.3_f32; n];
+        let mut r = vec![0.3_f32; n];
+        let mut buffer = Buffer::default();
+        unsafe {
+            buffer.set_slices(n, |s| {
+                s.clear();
+                s.push(&mut l);
+                s.push(&mut r);
+            });
+        }
+        sheen.process(&mut buffer);
+        assert!(
+            sheen.get_warmth_saturation_level() < 0.5,
+            "saturation level should decay while WARMTH is bypassed, got {}",
+            sheen.get_warmth_saturation_level()
+        );
+    }
+
+    // ── #22 frequency_response_db ───────────────────────────────────────────
+
+    #[test]
+    fn frequency_response_all_bypassed_is_flat() {
+        let db = SheenModule::frequency_response_db(SR, 6.0, true, 6.0, true, 6.0, true, 1000.0);
+        assert_eq!(db, 0.0, "all stages bypassed should sum to 0 dB");
+    }
+
+    #[test]
+    fn frequency_response_body_boost_at_center_matches_shelf_gain() {
+        let db = SheenModule::frequency_response_db(
+            SR,
+            6.0,
+            false,
+            0.0,
+            true,
+            0.0,
+            true,
+            BODY_FREQ_HZ * 0.1,
+        );
+        // Deep in the shelf's flat region (well below its corner), a low
+        // shelf should read close to its full boost.
+        assert!(
+            (db - 6.0).abs() < 0.5,
+            "expected ~6 dB deep in the BODY shelf's boost region, got {db}"
+        );
+    }
+
+    #[test]
+    fn frequency_response_presence_peaks_at_center_freq() {
+        let db = SheenModule::frequency_response_db(
+            SR,
+            0.0,
+            true,
+            5.0,
+            false,
+            0.0,
+            true,
+            PRESENCE_FREQ_HZ,
+        );
+        assert!(
+            (db - 5.0).abs() < 0.1,
+            "expected ~5 dB at PRESENCE's own center freq, got {db}"
+        );
+    }
+
+    #[test]
+    fn frequency_response_stages_sum() {
+        let body_only = SheenModule::frequency_response_db(
+            SR,
+            4.0,
+            false,
+            0.0,
+            true,
+            0.0,
+            true,
+            PRESENCE_FREQ_HZ,
+        );
+        let presence_only = SheenModule::frequency_response_db(
+            SR,
+            0.0,
+            true,
+            3.0,
+            false,
+            0.0,
+            true,
+            PRESENCE_FREQ_HZ,
+        );
+        let both = SheenModule::frequency_response_db(
+            SR,
+            4.0,
+            false,
+            3.0,
+            false,
+            0.0,
+            true,
+            PRESENCE_FREQ_HZ,
+        );
+        assert!(
+            (both - (body_only + presence_only)).abs() < 0.05,
+            "stages should sum in dB: body={body_only}, presence={presence_only}, both={both}"
         );
     }
 }

@@ -414,6 +414,88 @@ impl PultecEQ {
         }
     }
 
+    /// Pure frequency-response probe (dB) for the inline EQ spectrum strip
+    /// (issue #22). Replicates `update_parameters`'s exact per-stage
+    /// coefficient math (not the stateful dirty-diffing part) and sums
+    /// `magnitude_db` across all five stages — computed straight from
+    /// parameter values with no access to any live filter/audio-thread
+    /// state, so it's safe to call from the GUI thread. Detune (#17) is
+    /// intentionally omitted here (±0.3%, inaudible on a visual display).
+    #[allow(clippy::too_many_arguments)]
+    pub fn frequency_response_db(
+        sample_rate: f32,
+        lf_boost_freq: f32,
+        lf_boost_db: f32,
+        lf_boost_bandwidth: f32,
+        lf_cut_freq: f32,
+        lf_cut_db: f32,
+        lf_cut_bandwidth: f32,
+        hf_boost_freq: f32,
+        hf_boost_db: f32,
+        hf_boost_bandwidth: f32,
+        hf_cut_freq: f32,
+        hf_cut_db: f32,
+        probe_hz: f32,
+    ) -> f32 {
+        let w = core::f32::consts::TAU * probe_hz / sample_rate;
+
+        let lf_boost_db = if lf_boost_db > 0.05 { lf_boost_db } else { 0.0 };
+        let safe_lf_freq = lf_boost_freq.clamp(20.0, 400.0);
+        let lf_boost_q = LF_SHELF_Q_NARROW
+            + lf_boost_bandwidth.clamp(0.0, 1.0) * (LF_SHELF_Q_WIDE - LF_SHELF_Q_NARROW);
+        let lf_boost_stage_db = SvfCoefficients::new(
+            SvfType::LowShelf(lf_boost_db),
+            sample_rate,
+            safe_lf_freq,
+            lf_boost_q,
+        )
+        .magnitude_db(w);
+
+        let resonant_db = lf_boost_db * LF_RESONANT_RATIO;
+        let lf_resonant_stage_db = SvfCoefficients::new(
+            SvfType::Bell(resonant_db),
+            sample_rate,
+            safe_lf_freq,
+            LF_RESONANT_Q,
+        )
+        .magnitude_db(w);
+
+        let lf_cut_db = if lf_cut_db > 0.05 { -lf_cut_db } else { 0.0 };
+        let safe_lf_cut_freq = lf_cut_freq.clamp(20.0, 500.0);
+        let lf_cut_q = LF_SHELF_Q_NARROW
+            + lf_cut_bandwidth.clamp(0.0, 1.0) * (LF_SHELF_Q_WIDE - LF_SHELF_Q_NARROW);
+        let lf_cut_stage_db = SvfCoefficients::new(
+            SvfType::LowShelf(lf_cut_db),
+            sample_rate,
+            safe_lf_cut_freq,
+            lf_cut_q,
+        )
+        .magnitude_db(w);
+
+        let hf_boost_db = if hf_boost_db > 0.05 { hf_boost_db } else { 0.0 };
+        let hf_q = 0.6 + hf_boost_bandwidth * hf_boost_bandwidth * 1.4;
+        let safe_hf_freq = hf_boost_freq.clamp(3000.0, 20000.0);
+        let hf_boost_stage_db =
+            SvfCoefficients::new(SvfType::Bell(hf_boost_db), sample_rate, safe_hf_freq, hf_q)
+                .magnitude_db(w);
+
+        let hf_cut_db = if hf_cut_db > 0.05 { -hf_cut_db } else { 0.0 };
+        let safe_hf_cut_freq = hf_cut_freq.clamp(5000.0, 20000.0);
+        let hf_cut_stage_db = SvfCoefficients::new(
+            SvfType::HighShelf(hf_cut_db),
+            sample_rate,
+            safe_hf_cut_freq,
+            HF_CUT_Q,
+        )
+        .magnitude_db(w);
+
+        lf_boost_stage_db
+            + lf_resonant_stage_db
+            + lf_cut_stage_db
+            + hf_boost_stage_db
+            + hf_cut_stage_db
+    }
+
     /// Current coefficients of the five EQ stages, left channel. Since #17
     /// the right channel deviates by up to ±0.3% (stereo micro-detune) —
     /// the linear-phase FIR kernel is a single shared filter for both
@@ -1248,5 +1330,56 @@ mod tests {
             !eq.linear.kernel_dirty,
             "redesign must proceed once the interval has elapsed"
         );
+    }
+
+    // ── #22 frequency_response_db ───────────────────────────────────────────
+
+    #[test]
+    fn test_frequency_response_all_flat_is_near_zero_db() {
+        let db = PultecEQ::frequency_response_db(
+            48000.0, 60.0, 0.0, 0.67, 200.0, 0.0, 0.5, 8000.0, 0.0, 0.5, 10000.0, 0.0, 1000.0,
+        );
+        assert!(
+            db.abs() < 0.01,
+            "expected ~0 dB with every stage flat, got {db}"
+        );
+    }
+
+    #[test]
+    fn test_frequency_response_lf_boost_matches_process_measurement() {
+        // Cross-check the pure probe against the same scenario
+        // test_pultec_lf_boost_delivers_real_gain exercises through process().
+        let sr = 48_000.0;
+        let mut eq = PultecEQ::new(sr);
+        eq.update_parameters(
+            60.0, 15.0, 0.67, 100.0, 0.0, 0.5, 10000.0, 0.0, 0.5, 10000.0, 0.0, 0.0,
+        );
+        let measured = measure_gain_db(&mut eq, 30.0, sr);
+        let probed = PultecEQ::frequency_response_db(
+            sr, 60.0, 15.0, 0.67, 100.0, 0.0, 0.5, 10000.0, 0.0, 0.5, 10000.0, 0.0, 30.0,
+        );
+        assert!(
+            (measured - probed).abs() < 1.0,
+            "probe should agree with measured gain: measured={measured:.2}, probed={probed:.2}"
+        );
+    }
+
+    #[test]
+    fn test_frequency_response_hf_boost_peaks_near_center() {
+        let db = PultecEQ::frequency_response_db(
+            48000.0, 60.0, 0.0, 0.67, 200.0, 0.0, 0.5, 8000.0, 6.0, 0.5, 10000.0, 0.0, 8000.0,
+        );
+        assert!(
+            (db - 6.0).abs() < 0.1,
+            "expected ~6 dB at HF boost's own center freq, got {db}"
+        );
+    }
+
+    #[test]
+    fn test_frequency_response_clamps_extreme_freq() {
+        let db = PultecEQ::frequency_response_db(
+            48000.0, 1.0, 5.0, 0.67, 200.0, 0.0, 0.5, 8000.0, 0.0, 0.5, 10000.0, 0.0, 1000.0,
+        );
+        assert!(db.is_finite());
     }
 }

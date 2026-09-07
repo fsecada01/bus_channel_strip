@@ -125,6 +125,9 @@ impl TransformerStage {
         scratch: &mut [f32; TRANSFORMER_OS_FACTOR],
     ) -> f32 {
         if self.saturation_amount < 0.01 {
+            // #22: decay the saturation meter toward silence while this stage
+            // is effectively off, instead of freezing at its last reading.
+            self.harmonic_state *= 0.99;
             return input;
         }
 
@@ -152,6 +155,17 @@ impl TransformerStage {
             }
             os.downsample(&scratch[..TRANSFORMER_OS_FACTOR], 0)
         };
+
+        // #22: track a smoothed harmonic-energy proxy (the saturation stage's
+        // contribution above the driven signal) for the GUI saturation meter.
+        // Fast attack / slow release, matching this file's other envelope
+        // followers (see `apply_transformer_compression` below).
+        let harmonic_diff = (saturated - driven_signal).abs();
+        if harmonic_diff > self.harmonic_state {
+            self.harmonic_state = harmonic_diff;
+        } else {
+            self.harmonic_state += (harmonic_diff - self.harmonic_state) * 0.01;
+        }
 
         // Gentle transformer compression (loading effect, native rate)
         if self.compression_amount > 0.01 {
@@ -389,6 +403,14 @@ impl TransformerModule {
         self.input_os_r.reset();
         self.output_os_l.reset();
         self.output_os_r.reset();
+    }
+
+    /// Current harmonic-content (saturation) level for the GUI meter —
+    /// averages the input and output stages' smoothed harmonic-energy
+    /// proxies. Not a calibrated unit, just a relative "how much coloration
+    /// is happening right now" signal; 0.0 = none.
+    pub fn get_saturation_level(&self) -> f32 {
+        (self.input_transformer.harmonic_state + self.output_transformer.harmonic_state) * 0.5
     }
 }
 
@@ -1013,6 +1035,71 @@ mod tests {
         assert!(
             (probe - 0.0).abs() < 1.0e-6,
             "hysteresis state not cleared by reset: {probe}"
+        );
+    }
+
+    // ── #22 saturation meter ────────────────────────────────────────────────
+
+    #[test]
+    fn test_transformer_saturation_level_zero_at_rest() {
+        let t = TransformerModule::new(44100.0);
+        assert_eq!(t.get_saturation_level(), 0.0);
+    }
+
+    #[test]
+    fn test_transformer_saturation_level_rises_with_driven_signal() {
+        let mut t = TransformerModule::new(44100.0);
+        t.update_parameters(
+            TransformerModel::Vintage,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            false,
+        );
+        let n = 2048_usize;
+        let omega = 2.0 * core::f32::consts::PI * 440.0 / 44100.0;
+        let mut l: Vec<f32> = (0..n).map(|i| (omega * i as f32).sin() * 0.9).collect();
+        let mut r: Vec<f32> = l.clone();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(&mut l);
+                ss.push(&mut r);
+            });
+        }
+        t.process(&mut buf);
+        let level = t.get_saturation_level();
+        assert!(
+            level > 0.0,
+            "Expected positive saturation level after driving a hot signal, got {level}"
+        );
+        assert!(level.is_finite());
+    }
+
+    #[test]
+    fn test_transformer_saturation_level_decays_when_bypassed() {
+        let mut stage = TransformerStage::new();
+        stage.harmonic_state = 0.5;
+        stage.saturation_amount = 0.0; // effectively off
+        let mut os = Oversampler::new_at_factor(TRANSFORMER_OS_FACTOR, 1);
+        let mut scratch = [0.0_f32; TRANSFORMER_OS_FACTOR];
+        stage.process_sample(
+            0.5,
+            TransformerModel::Vintage,
+            0,
+            false,
+            &mut os,
+            &mut scratch,
+        );
+        assert!(
+            stage.harmonic_state < 0.5,
+            "harmonic_state should decay when saturation is off, got {}",
+            stage.harmonic_state
         );
     }
 }
