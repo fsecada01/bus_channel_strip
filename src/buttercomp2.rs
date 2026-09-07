@@ -232,6 +232,13 @@ impl FetCompressor {
         self.sat_os_r.reset();
     }
 
+    /// Current gain reduction in dB, normalized to the shared meter convention
+    /// (0.0 = no reduction, positive = attenuation amount). `envelope_db` is
+    /// stored negative (0 = no reduction), so this negates it.
+    pub fn get_gain_reduction_db(&self) -> f32 {
+        -self.envelope_db
+    }
+
     /// Process one stereo sample pair with linked peak detection.
     ///
     /// No allocation, no locking, no panics — safe for the audio thread.
@@ -565,6 +572,13 @@ impl VcaCompressor {
         self.env_gr = 1.0;
         self.rms_sq = 0.0;
     }
+
+    /// Current gain reduction in dB, normalized to the shared meter convention
+    /// (0.0 = no reduction, positive = attenuation amount). `env_gr` is a
+    /// linear multiplier in `[VCA_GR_MIN_LINEAR, 1.0]` (1.0 = no reduction).
+    pub fn get_gain_reduction_db(&self) -> f32 {
+        -20.0 * self.env_gr.log10()
+    }
 }
 
 // ============================================================================
@@ -824,6 +838,13 @@ impl OpticalCompressor {
         self.peak_hold_l = OPT_MIN_LEVEL_DB;
         self.peak_hold_r = OPT_MIN_LEVEL_DB;
     }
+
+    /// Current gain reduction in dB, normalized to the shared meter convention
+    /// (0.0 = no reduction, positive = attenuation amount). `env_fast_l/r` are
+    /// already positive-dB attenuation — reports the worst-case (max) channel.
+    pub fn get_gain_reduction_db(&self) -> f32 {
+        self.env_fast_l.max(self.env_fast_r)
+    }
 }
 
 // ButterComp2 FFI bindings
@@ -849,6 +870,9 @@ extern "C" {
         num_samples: i32,
     );
     fn buttercomp2_reset(state: *mut ButterComp2State);
+    /// #22: current gain reduction in dB (0.0 = no reduction, positive =
+    /// attenuation amount), block-rate smoothed. For the GUI meter only.
+    fn buttercomp2_get_gain_reduction_db(state: *mut ButterComp2State) -> f64;
 }
 
 /// ButterComp2 wrapper for Rust integration
@@ -936,6 +960,15 @@ impl ButterComp2 {
         unsafe {
             buttercomp2_reset(self.state);
         }
+    }
+
+    /// Current gain reduction in dB, normalized to the shared meter convention
+    /// (0.0 = no reduction, positive = attenuation amount).
+    pub fn get_gain_reduction_db(&self) -> f32 {
+        // Safety: self.state is a valid, non-null ButterComp2State* for the
+        // lifetime of self — allocated in ButterComp2::new and freed only in
+        // Drop, same invariant relied on by process()/reset() above.
+        unsafe { buttercomp2_get_gain_reduction_db(self.state) as f32 }
     }
 }
 
@@ -1082,6 +1115,34 @@ mod tests {
             "reset() should clear crest_scale_smoothed back to neutral: \
              post_reset={post_reset_probe:.8}, fresh={fresh_probe:.8}"
         );
+    }
+
+    // ── #22 ButterComp2 (Classic) GR meter accessor ─────────────────────────────
+
+    #[test]
+    fn test_buttercomp2_gr_accessor_zero_at_rest() {
+        let comp = ButterComp2::new(44100.0);
+        assert_eq!(comp.get_gain_reduction_db(), 0.0);
+    }
+
+    #[test]
+    fn test_buttercomp2_gr_accessor_positive_when_reducing() {
+        let mut comp = ButterComp2::new(44100.0);
+        let signal = vec![0.9_f32; 20_000];
+        run_buttercomp2(&mut comp, 1.0, false, &signal);
+        let gr = comp.get_gain_reduction_db();
+        assert!(gr > 0.0, "expected positive GR reading, got {gr}");
+        assert!(gr.is_finite());
+    }
+
+    #[test]
+    fn test_buttercomp2_gr_accessor_resets_to_zero() {
+        let mut comp = ButterComp2::new(44100.0);
+        let signal = vec![0.9_f32; 20_000];
+        run_buttercomp2(&mut comp, 1.0, false, &signal);
+        assert!(comp.get_gain_reduction_db() > 0.0);
+        comp.reset();
+        assert_eq!(comp.get_gain_reduction_db(), 0.0);
     }
 
     // ── FetRatio ──────────────────────────────────────────────────────────────
@@ -1408,6 +1469,75 @@ mod tests {
         assert!(
             out_l < 1.0,
             "Optical compressor should reduce loud signal, got {out_l}"
+        );
+    }
+
+    // ── #22 GR meter accessors ────────────────────────────────────────────────
+
+    #[test]
+    fn test_fet_compressor_gr_accessor_zero_at_rest() {
+        let fet = FetCompressor::new(44100.0);
+        assert_eq!(fet.get_gain_reduction_db(), 0.0);
+    }
+
+    #[test]
+    fn test_fet_compressor_gr_accessor_positive_when_reducing() {
+        let sr = 44_100.0_f32;
+        let mut fet = FetCompressor::new(sr);
+        fet.update_parameters(6.0, 0.0, 0.001, 100.0, FetRatio::R4, false, 20.0);
+        let omega = 2.0 * core::f32::consts::PI * 200.0 / sr;
+        for i in 0..4000 {
+            let x = (omega * i as f32).sin();
+            fet.process_sample(x, x);
+        }
+        let gr = fet.get_gain_reduction_db();
+        assert!(gr > 0.0, "Expected positive GR reading, got {gr}");
+        assert!(
+            (gr - (-fet.envelope_db)).abs() < 1e-6,
+            "GR accessor should equal -envelope_db: gr={gr}, envelope_db={}",
+            fet.envelope_db
+        );
+    }
+
+    #[test]
+    fn test_vca_compressor_gr_accessor_zero_at_rest() {
+        let vca = VcaCompressor::new(44100.0);
+        assert_eq!(vca.get_gain_reduction_db(), 0.0);
+    }
+
+    #[test]
+    fn test_vca_compressor_gr_accessor_positive_when_reducing() {
+        let mut vca = VcaCompressor::new(44100.0);
+        vca.update_parameters(-30.0, 8.0, 1.0, 50.0, 20.0);
+        for _ in 0..2000 {
+            vca.process_sample(0.8, 0.8);
+        }
+        let gr = vca.get_gain_reduction_db();
+        assert!(gr > 0.0, "Expected positive GR reading, got {gr}");
+        assert!(
+            (gr - (-20.0 * vca.env_gr.log10())).abs() < 1e-4,
+            "GR accessor should match env_gr-derived dB, got {gr}"
+        );
+    }
+
+    #[test]
+    fn test_optical_compressor_gr_accessor_zero_at_rest() {
+        let opt = OpticalCompressor::new(44100.0);
+        assert_eq!(opt.get_gain_reduction_db(), 0.0);
+    }
+
+    #[test]
+    fn test_optical_compressor_gr_accessor_positive_when_reducing() {
+        let mut opt = OpticalCompressor::new(44100.0);
+        opt.update_parameters(-12.0, 0.8, 0.5);
+        for _ in 0..2000 {
+            opt.process_sample(1.0, 1.0, -12.0);
+        }
+        let gr = opt.get_gain_reduction_db();
+        assert!(gr > 0.0, "Expected positive GR reading, got {gr}");
+        assert!(
+            (gr - opt.env_fast_l.max(opt.env_fast_r)).abs() < 1e-6,
+            "GR accessor should equal max(env_fast_l, env_fast_r), got {gr}"
         );
     }
 }

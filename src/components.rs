@@ -90,7 +90,12 @@ impl ModuleTheme {
 const TOOLTIP_WIDTH_ESTIMATE_PX: f32 = 60.0;
 
 /// Wraps a `ParamSlider` with a floating value tooltip that follows the
-/// cursor during drag (roadmap v2.0 §4.4 "Knob micro-interactions").
+/// cursor during drag (roadmap v2.0 §4.4 "Knob micro-interactions"). This is
+/// distinct from [`attach_tooltip`]'s hover-delay help text (#25) — the two
+/// compose (see `create_param_slider` et al.): `attach_tooltip` wraps the
+/// whole labeled control with a static hover explainer, while this wraps
+/// just the slider with a tooltip that only appears, and only shows the
+/// live value, while actively dragging.
 /// `ParamSlider` is a sealed external widget (vizia_plug) with no override
 /// hooks, so this observes `MouseMove` bubbling out of it rather than
 /// hooking into its internal drag state — its own `WindowEvent::MouseMove`
@@ -144,10 +149,29 @@ where
     .width(Stretch(1.0))
 }
 
+/// Attaches the #25 hover-delay tooltip to `handle` when `tooltip_id` has a
+/// matching entry in [`crate::tooltips`]. No-op (no tooltip rendered) for
+/// [`crate::tooltips::NO_TOOLTIP`] or any ID outside the 7-module + Sheen
+/// chain. The 800ms delay itself is set once, app-wide, in `editor::create`.
+pub(crate) fn attach_tooltip<'a, V: View>(
+    handle: Handle<'a, V>,
+    tooltip_id: &'static str,
+) -> Handle<'a, V> {
+    match crate::tooltips::get(tooltip_id) {
+        Some(text) => handle.tooltip(move |cx| {
+            Tooltip::new(cx, move |cx| {
+                Label::new(cx, text);
+            })
+        }),
+        None => handle,
+    }
+}
+
 // Enhanced parameter slider with consistent styling
 pub fn create_param_slider<'c, 'p, P, F>(
     cx: &'c mut Context,
     label: &'static str,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
@@ -155,19 +179,22 @@ pub fn create_param_slider<'c, 'p, P, F>(
     P: Param + 'static,
     F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &P,
 {
-    VStack::new(cx, |cx| {
-        Label::new(cx, label)
-            .class("param-label")
-            .height(Pixels(PARAM_LABEL_H))
-            .width(Stretch(1.0));
+    attach_tooltip(
+        VStack::new(cx, |cx| {
+            Label::new(cx, label)
+                .class("param-label")
+                .height(Pixels(PARAM_LABEL_H))
+                .width(Stretch(1.0));
 
-        param_slider_with_tooltip(cx, params, param_map);
-    })
-    .class("param-control")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .top(Pixels(0.0))
-    .bottom(Pixels(0.0));
+            param_slider_with_tooltip(cx, params, param_map);
+        })
+        .class("param-control")
+        .width(Stretch(1.0))
+        .height(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 // Removed problematic raw param slider function for now
@@ -176,18 +203,22 @@ pub fn create_param_slider<'c, 'p, P, F>(
 pub fn create_bypass_button<'c, 'p, F>(
     cx: &'c mut Context,
     _label: &str,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    ParamButton::new(cx, param_map(params))
-        .class("bypass-button")
-        .height(Pixels(28.0))
-        .width(Stretch(1.0))
-        .top(Pixels(0.0))
-        .bottom(Pixels(0.0));
+    attach_tooltip(
+        ParamButton::new(cx, param_map(params))
+            .class("bypass-button")
+            .height(Pixels(28.0))
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 /// Hardware-LED-style bypass button. Visual convention is inverted from the
@@ -197,19 +228,23 @@ pub fn create_bypass_button<'c, 'p, F>(
 /// color, not the text, matching how outboard gear works.
 pub fn create_active_led_button<'c, 'p, F>(
     cx: &'c mut Context,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    ParamButton::new(cx, param_map(params))
-        .with_label("ACTIVE")
-        .class("active-led-button")
-        .height(Pixels(28.0))
-        .width(Stretch(1.0))
-        .top(Pixels(0.0))
-        .bottom(Pixels(0.0));
+    attach_tooltip(
+        ParamButton::new(cx, param_map(params))
+            .with_label("ACTIVE")
+            .class("active-led-button")
+            .height(Pixels(28.0))
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 /// Band enable button. Uses the "on-button" CSS class which inverts the visual
@@ -218,18 +253,22 @@ pub fn create_active_led_button<'c, 'p, F>(
 /// This matches the bypass button convention where dark = normal/processing.
 pub fn create_on_button<'c, 'p, F>(
     cx: &'c mut Context,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    ParamButton::new(cx, param_map(params))
-        .class("on-button")
-        .height(Pixels(28.0))
-        .width(Stretch(1.0))
-        .top(Pixels(0.0))
-        .bottom(Pixels(0.0));
+    attach_tooltip(
+        ParamButton::new(cx, param_map(params))
+            .class("on-button")
+            .height(Pixels(28.0))
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 /// Inline labeled toggle button for BoolParam controls inside a module's control surface.
@@ -238,27 +277,31 @@ pub fn create_on_button<'c, 'p, F>(
 pub fn create_bool_button<'c, 'p, F>(
     cx: &'c mut Context,
     label: &'static str,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
 {
-    VStack::new(cx, |cx| {
-        Label::new(cx, label)
-            .class("param-label")
-            .height(Pixels(PARAM_LABEL_H))
-            .width(Stretch(1.0));
-        ParamButton::new(cx, param_map(params))
-            .class("bool-button")
-            .height(Pixels(20.0))
-            .width(Stretch(1.0));
-    })
-    .class("param-control")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .top(Pixels(0.0))
-    .bottom(Pixels(0.0));
+    attach_tooltip(
+        VStack::new(cx, |cx| {
+            Label::new(cx, label)
+                .class("param-label")
+                .height(Pixels(PARAM_LABEL_H))
+                .width(Stretch(1.0));
+            ParamButton::new(cx, param_map(params))
+                .class("bool-button")
+                .height(Pixels(20.0))
+                .width(Stretch(1.0));
+        })
+        .class("param-control")
+        .width(Stretch(1.0))
+        .height(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 /// Collapsed-tab expand button: a full-size clickable `ParamButton` (empty
@@ -295,74 +338,86 @@ pub fn create_expand_button<'c, 'p, F>(
 pub fn create_frequency_slider<'c, 'p, F>(
     cx: &'c mut Context,
     label: &'static str,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
-    VStack::new(cx, |cx| {
-        Label::new(cx, label)
-            .class("param-label")
-            .height(Pixels(PARAM_LABEL_H))
-            .width(Stretch(1.0));
+    attach_tooltip(
+        VStack::new(cx, |cx| {
+            Label::new(cx, label)
+                .class("param-label")
+                .height(Pixels(PARAM_LABEL_H))
+                .width(Stretch(1.0));
 
-        param_slider_with_tooltip(cx, params, param_map).class("frequency-slider");
-    })
-    .class("param-control")
-    .class("frequency-control")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .top(Pixels(0.0))
-    .bottom(Pixels(0.0));
+            param_slider_with_tooltip(cx, params, param_map).class("frequency-slider");
+        })
+        .class("param-control")
+        .class("frequency-control")
+        .width(Stretch(1.0))
+        .height(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 pub fn create_gain_slider<'c, 'p, F>(
     cx: &'c mut Context,
     label: &'static str,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
-    VStack::new(cx, |cx| {
-        Label::new(cx, label)
-            .class("param-label")
-            .height(Pixels(PARAM_LABEL_H))
-            .width(Stretch(1.0));
+    attach_tooltip(
+        VStack::new(cx, |cx| {
+            Label::new(cx, label)
+                .class("param-label")
+                .height(Pixels(PARAM_LABEL_H))
+                .width(Stretch(1.0));
 
-        param_slider_with_tooltip(cx, params, param_map).class("gain-slider");
-    })
-    .class("param-control")
-    .class("gain-control")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .top(Pixels(0.0))
-    .bottom(Pixels(0.0));
+            param_slider_with_tooltip(cx, params, param_map).class("gain-slider");
+        })
+        .class("param-control")
+        .class("gain-control")
+        .width(Stretch(1.0))
+        .height(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
 
 pub fn create_ratio_slider<'c, 'p, F>(
     cx: &'c mut Context,
     label: &'static str,
+    tooltip_id: &'static str,
     params: &'p Arc<BusChannelStripParams>,
     param_map: F,
 ) where
     'p: 'c,
     F: 'static + Clone + Copy + Send + Sync + Fn(&Arc<BusChannelStripParams>) -> &FloatParam,
 {
-    VStack::new(cx, |cx| {
-        Label::new(cx, label)
-            .class("param-label")
-            .height(Pixels(PARAM_LABEL_H))
-            .width(Stretch(1.0));
+    attach_tooltip(
+        VStack::new(cx, |cx| {
+            Label::new(cx, label)
+                .class("param-label")
+                .height(Pixels(PARAM_LABEL_H))
+                .width(Stretch(1.0));
 
-        param_slider_with_tooltip(cx, params, param_map).class("ratio-slider");
-    })
-    .class("param-control")
-    .class("ratio-control")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .top(Pixels(0.0))
-    .bottom(Pixels(0.0));
+            param_slider_with_tooltip(cx, params, param_map).class("ratio-slider");
+        })
+        .class("param-control")
+        .class("ratio-control")
+        .width(Stretch(1.0))
+        .height(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
 }
