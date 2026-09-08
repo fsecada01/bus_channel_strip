@@ -70,6 +70,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn amount_outside_0_1_is_clamped() {
+        // amount > 1.0 must not widen the loop past MAX_THRESHOLD, and a
+        // negative amount must behave like 0.0 (exact passthrough), not
+        // invert the loop or panic.
+        let mut over = HysteresisCell::new();
+        let mut at_max = HysteresisCell::new();
+        for &x in &[-2.0_f32, -0.5, 0.0, 0.5, 2.0] {
+            assert_eq!(over.process(x, 5.0), at_max.process(x, 1.0));
+        }
+
+        let mut negative = HysteresisCell::new();
+        for &x in &[-1.0_f32, -0.3, 0.0, 0.4, 1.0] {
+            assert_eq!(negative.process(x, -3.0), x);
+        }
+    }
+
     /// The defining property of hysteresis: the same input value `x = 1.0`
     /// produces different output depending on approach direction — `x + r`
     /// when arrived at by descending from above, `x - r` when arrived at by
