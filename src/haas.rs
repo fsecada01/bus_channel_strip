@@ -790,6 +790,74 @@ mod tests {
         );
     }
 
+    #[test]
+    fn hermite_read_at_integer_delay_is_exact() {
+        // At a whole-sample delay (frac=0) Hermite interpolation degenerates
+        // to c0 = x0 — the raw buffer sample, with no interpolation error.
+        let mut buf = [0.0_f32; DELAY_BUF_LEN];
+        for (i, s) in buf.iter_mut().enumerate() {
+            *s = (i as f32 * 0.037).sin();
+        }
+        let write_pos = 500;
+        for delay in [0usize, 1, 4, 100] {
+            let got = hermite4_read(&buf, write_pos, delay as f32);
+            let expected = buf[(write_pos + DELAY_BUF_LEN - delay) & DELAY_MASK];
+            assert!(
+                (got - expected).abs() < 1.0e-5,
+                "delay={delay}: got {got}, want {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn delay_smooth_coeff_guards_nonpositive_sample_rate() {
+        // Division by (tau * sample_rate) would be a div-by-zero (or
+        // negative-domain `exp` blowup) if this guard were missing.
+        assert_eq!(delay_smooth_coeff(0.0), 1.0);
+        assert_eq!(delay_smooth_coeff(-48_000.0), 1.0);
+        assert!(delay_smooth_coeff(48_000.0) > 0.0 && delay_smooth_coeff(48_000.0) < 1.0);
+    }
+
+    #[test]
+    fn widecomb_depth_is_clamped_at_half() {
+        // "effective_depth = comb_depth.min(0.5)" clamps the *comb*
+        // contribution identically for depth=0.5 and depth=1.0 in WideComb
+        // mode, so the pre-trim wide_l/wide_r are the same in both cases —
+        // but `output_trim` itself is derived from the raw (unclamped)
+        // `comb_depth`, so the two configs still scale differently. At
+        // mix=1.0 the final output is exactly `wide * output_trim`, so
+        // dividing each config's output by its own trim must recover the
+        // same (clamp-invariant) pre-trim signal.
+        let n = 1024;
+        let make_buf = || {
+            let mut b = StereoBuf::new(n);
+            for i in 0..n {
+                b.data_l[i] = ((i as f32) * 0.09).sin();
+                b.data_r[i] = ((i as f32) * 0.11).cos();
+            }
+            b
+        };
+
+        let mut haas_half = HaasModule::new(SR);
+        haas_half.update_parameters(1.0, 1.0, 0.5, 7.0, CombMode::WideComb, 1.0);
+        let mut buf_half = make_buf();
+        buf_half.process_through(&mut haas_half);
+
+        let mut haas_full = HaasModule::new(SR);
+        haas_full.update_parameters(1.0, 1.0, 1.0, 7.0, CombMode::WideComb, 1.0);
+        let mut buf_full = make_buf();
+        buf_full.process_through(&mut haas_full);
+
+        for i in 0..n {
+            let pre_trim_half = buf_half.data_l[i] / haas_half.output_trim;
+            let pre_trim_full = buf_full.data_l[i] / haas_full.output_trim;
+            assert!(
+                (pre_trim_half - pre_trim_full).abs() < 1.0e-5,
+                "pre-trim L diverged at {i}: depth=0.5 gave {pre_trim_half}, depth=1.0 gave {pre_trim_full}"
+            );
+        }
+    }
+
     // ----- Helpers ---------------------------------------------------------
 
     fn pearson(a: &[f32], b: &[f32]) -> f32 {
