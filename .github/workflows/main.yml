@@ -61,6 +61,16 @@ jobs:
             features: api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui
 
     runs-on: ${{ matrix.os }}
+    # Signing/notarization (#26) is scaffolded but has no real credentials
+    # configured yet — these booleans gate every signing step below to a
+    # clean no-op skip until the corresponding repo secrets are added.
+    # See docs/adr/0015-installer-signing.md for what each secret is and how
+    # to obtain it.
+    env:
+      APPLE_SIGNING_AVAILABLE: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+      APPLE_INSTALLER_SIGNING_AVAILABLE: ${{ secrets.APPLE_INSTALLER_IDENTITY != '' }}
+      APPLE_NOTARIZATION_AVAILABLE: ${{ secrets.APPLE_ID != '' && secrets.APPLE_ID_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+      WIN_SIGNING_AVAILABLE: ${{ secrets.WIN_CODESIGN_PFX != '' && secrets.WIN_CODESIGN_PFX_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -190,6 +200,61 @@ jobs:
         run: |
           cargo +nightly run --locked --package xtask -- bundle bus_channel_strip --release --target ${{ matrix.target }} --features ${{ matrix.features }}
 
+      # --- Code signing (#26) — no-ops until the secrets above are set ---
+
+      - name: Import Windows code-signing certificate
+        if: matrix.target == 'x86_64-pc-windows-msvc' && env.WIN_SIGNING_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          $certPath = "$env:RUNNER_TEMP\win-codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.WIN_CODESIGN_PFX }}"))
+          echo "WIN_CODESIGN_PFX_PATH=$certPath" >> $env:GITHUB_ENV
+
+      - name: Sign Windows plugin binaries
+        if: matrix.target == 'x86_64-pc-windows-msvc' && env.WIN_SIGNING_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1).FullName
+          & $signtool sign /f "$env:WIN_CODESIGN_PFX_PATH" /p "${{ secrets.WIN_CODESIGN_PFX_PASSWORD }}" `
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+            "target\bundled\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3" `
+            "target\bundled\Bus-Channel-Strip.clap"
+
+      - name: Import Apple signing certificate
+        if: matrix.os == 'macos-14' && env.APPLE_SIGNING_AVAILABLE == 'true'
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/apple-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/apple-cert.p12"
+          # Recorded before anything below can fail, so the always()-guarded
+          # cleanup step can find and remove both regardless of where this
+          # step errors out (e.g. a bad APPLE_CERTIFICATE_PASSWORD).
+          echo "APPLE_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_CERT_PATH=$CERT_PATH" >> "$GITHUB_ENV"
+
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+      - name: Code-sign macOS plugin bundles
+        if: matrix.os == 'macos-14' && env.APPLE_SIGNING_AVAILABLE == 'true'
+        run: |
+          # No --deep: Apple discourages it beyond ad-hoc testing since it
+          # can silently skip or mis-sign nested code. Neither bundle embeds
+          # any nested frameworks/dylibs today, so a plain top-level sign is
+          # both correct and sufficient; revisit if that ever changes.
+          codesign --force --options runtime --timestamp \
+            --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
+            target/bundled/Bus-Channel-Strip.vst3
+          codesign --force --options runtime --timestamp \
+            --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
+            target/bundled/Bus-Channel-Strip.clap
+
       - name: Create archive name
         id: archive
         shell: bash
@@ -216,6 +281,17 @@ jobs:
         with:
           name: ${{ steps.archive.outputs.name }}
           path: target/bundled/${{ steps.archive.outputs.name }}
+
+      - name: Remove temporary Windows signing certificate
+        if: always() && matrix.target == 'x86_64-pc-windows-msvc' && env.WIN_SIGNING_AVAILABLE == 'true'
+        shell: pwsh
+        run: Remove-Item -Path "$env:WIN_CODESIGN_PFX_PATH" -ErrorAction SilentlyContinue
+
+      - name: Remove temporary Apple signing keychain
+        if: always() && matrix.os == 'macos-14' && env.APPLE_SIGNING_AVAILABLE == 'true'
+        run: |
+          rm -f "$APPLE_CERT_PATH"
+          security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
 
   create-release:
     needs: build
