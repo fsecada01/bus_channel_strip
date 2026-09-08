@@ -1648,30 +1648,30 @@ scrollbar .thumb:hover {
 .theme-daylight .api5500-theme {
     background: linear-gradient(165deg, #dceaf2 0%, #cfe1ec 45%, #c2d7e6) !important;
 }
-.theme-daylight .api5500-theme .module-title {
-    color: #0b6690;
+.theme-daylight .api5500-theme .module-name {
+    color: #0b6690 !important;
 }
 
 .theme-daylight .buttercomp2-theme {
     background: linear-gradient(165deg, #f4e6d2 0%, #ecd9c0 45%, #e2ccac) !important;
 }
-.theme-daylight .buttercomp2-theme .module-title {
-    color: #a8500c;
+.theme-daylight .buttercomp2-theme .module-name {
+    color: #a8500c !important;
 }
 
 .theme-daylight .pultec-theme {
     border-color: #a8860c !important;
     background: linear-gradient(165deg, #f2ecd2 0%, #e8dfbc 45%, #ded3a6) !important;
 }
-.theme-daylight .pultec-theme .module-title {
-    color: #7a5c00;
+.theme-daylight .pultec-theme .module-name {
+    color: #7a5c00 !important;
 }
 
 .theme-daylight .dynamic-eq-theme {
     background: linear-gradient(165deg, #dcf0dc 0%, #cce6cc 45%, #bcdcbc) !important;
 }
-.theme-daylight .dynamic-eq-theme .module-title {
-    color: #1c6b1c;
+.theme-daylight .dynamic-eq-theme .module-name {
+    color: #1c6b1c !important;
 }
 .theme-daylight .dyneq-card-desc {
     color: #5c6b5c;
@@ -1680,23 +1680,23 @@ scrollbar .thumb:hover {
 .theme-daylight .transformer-theme {
     background: linear-gradient(165deg, #f0ded2 0%, #e6ccbc 45%, #dcbaa6) !important;
 }
-.theme-daylight .transformer-theme .module-title {
-    color: #8a3c14;
+.theme-daylight .transformer-theme .module-name {
+    color: #8a3c14 !important;
 }
 
 .theme-daylight .punch-theme {
     background: linear-gradient(165deg, #f4dcde 0%, #eacace 45%, #dfb7be) !important;
 }
-.theme-daylight .punch-theme .module-title {
-    color: #a3172a;
+.theme-daylight .punch-theme .module-name {
+    color: #a3172a !important;
 }
 
 .theme-daylight .haas-theme {
     border-color: #57689c !important;
     background: linear-gradient(165deg, #dfe2f0 0%, #d0d3e6 45%, #c1c5dc) !important;
 }
-.theme-daylight .haas-theme .module-title {
-    color: #374070;
+.theme-daylight .haas-theme .module-name {
+    color: #374070 !important;
 }
 
 .theme-daylight .empty-theme {
@@ -1715,7 +1715,7 @@ scrollbar .thumb:hover {
     border-bottom-color: rgba(0, 0, 0, 0.12);
 }
 .theme-daylight .module-name {
-    color: #241f16;
+    color: #241f16 !important;
 }
 .theme-daylight .module-type {
     color: #5c5644;
