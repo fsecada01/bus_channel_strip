@@ -1,6 +1,6 @@
 ---
 title: v2.0 Roadmap
-description: "Stop sounding digital." A perceived-quality release targeting the four artifacts that read as digital — top-octave aliasing, midrange phase smear, lifeless saturation, and overly-precise stereo. ~3-month scope.
+description: '"Stop sounding digital." A perceived-quality release targeting the four artifacts that read as digital — top-octave aliasing, midrange phase smear, lifeless saturation, and overly-precise stereo. ~3-month scope.'
 ---
 
 v2.0 is a **perceived-quality release**, not a feature dump. The chassis identity, signal chain, and module set stay the same. We make every existing module sound and feel substantially better, and we ship the missing UI surface (presets, HiDPI, resizing, themes) that v1.0 left for later.
