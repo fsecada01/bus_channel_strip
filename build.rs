@@ -93,6 +93,12 @@ fn main() {
         build.flag("-static-libgcc").flag("-static-libstdc++");
     } else if target.contains("apple-darwin") {
         build
+            // Without an explicit -std, clang's default C++ dialect for the
+            // `--target=x86_64-apple-macosx` cross-compile triple (used when
+            // building x86_64-apple-darwin from an ARM64 host) predates C++11,
+            // so `constexpr` is rejected as an unknown type name. Match the
+            // c++17 already forced on Windows/MSVC (see above).
+            .flag("-std=c++17")
             .flag("-mmacosx-version-min=10.9")
             .cpp_link_stdlib("c++")
             .cpp_set_stdlib("c++");
