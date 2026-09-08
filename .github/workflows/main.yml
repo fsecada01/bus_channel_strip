@@ -7,10 +7,14 @@
 # Do NOT add gn, ninja, or depot_tools — Skia's GN build system is embedded in skia-bindings.
 #
 # macOS Intel (x86_64-apple-darwin) cross-compile from ARM64 runner (macos-14):
-# - Xcode's bundled clang on ARM64 blocks x86 SIMD headers with a compile error.
-# - We install Homebrew LLVM and prepend it to PATH so Skia's GN finds a proper
-#   multi-target clang with x86 intrinsic headers.
-# - Do NOT set CC/CXX env vars — Skia's GN configures its own compiler separately.
+# - Xcode's bundled clang on ARM64 blocks x86 SIMD headers with a compile error,
+#   and Skia's GN build resolves its C/C++ compiler via `xcrun`, which bypasses
+#   $PATH entirely — so prepending Homebrew LLVM to PATH does NOT fix this.
+# - Do NOT set CC/CXX env vars — Skia's GN configures its own compiler separately
+#   and ignores them too.
+# - Instead we point Skia's GN directly at Homebrew LLVM's clang via SKIA_GN_ARGS
+#   (cc=/cxx=), which skia-bindings passes straight through to GN, sidestepping
+#   xcrun's ARM64-only clang resolution (see issue #1).
 #
 # macOS ARM64 (aarch64-apple-darwin) native build:
 # - CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD disables x86-only zlib SIMD paths for skia-safe
@@ -47,11 +51,10 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-14  # ARM64 runner; cross-compiles x86_64 via rustup target
             name: macos-intel
-            # No GUI: Skia's GN/ninja uses xcrun clang (not PATH), so Homebrew LLVM
-            # cannot override it. Cross-compiling Skia's x86 SIMD code from ARM64
-            # host fails with hard #error in Xcode's mmintrin.h/emmintrin.h headers.
-            # ARM64 build includes full GUI. Intel users can build with GUI from source.
-            features: api5500,buttercomp2,pultec,transformer,punch,dynamic_eq
+            # GUI enabled (issue #1): Skia's GN is pointed at Homebrew LLVM via
+            # SKIA_GN_ARGS (cc=/cxx=), set below, bypassing xcrun's ARM64-only
+            # clang so x86 SIMD intrinsic headers resolve correctly.
+            features: api5500,buttercomp2,pultec,transformer,punch,dynamic_eq,gui
           - target: aarch64-apple-darwin
             os: macos-14
             name: macos-arm64
@@ -110,6 +113,14 @@ jobs:
           # Configure Rust for MSVC target (matches local script)
           rustup target add x86_64-pc-windows-msvc
 
+      - name: Install Homebrew LLVM (macOS Intel cross-compile)
+        # Provides a clang with x86 SIMD intrinsic headers. Needed only for the
+        # x86_64-apple-darwin cross-compile from this ARM64 (macos-14) runner —
+        # Xcode's bundled ARM64 clang hard-blocks those headers. Not needed for
+        # the aarch64-apple-darwin native build. See issue #1 / SKIA_GN_ARGS below.
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: brew install llvm
+
       - name: Set environment for pre-built Skia binaries
         shell: bash
         run: |
@@ -140,6 +151,15 @@ jobs:
           if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
             echo "CFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
             echo "CXXFLAGS=-DZLIB_DISABLE_CHUNK_SIMD" >> $GITHUB_ENV
+          fi
+
+          # x86_64 cross-compile from the ARM64 macos-14 runner: point Skia's GN
+          # straight at Homebrew LLVM's clang (installed above), bypassing xcrun
+          # entirely — xcrun always resolves to Xcode's ARM64-only clang and
+          # ignores both $PATH and CC/CXX (issue #1).
+          if [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
+            LLVM_PREFIX="$(brew --prefix llvm)"
+            echo "SKIA_GN_ARGS=cc=\"${LLVM_PREFIX}/bin/clang\" cxx=\"${LLVM_PREFIX}/bin/clang++\"" >> $GITHUB_ENV
           fi
           # Do NOT set DOCS_RS in CI. That variable is meant for docs.rs
           # and forces skia-bindings into a special docs build path that
@@ -259,7 +279,7 @@ jobs:
           ### Platform notes
           - **Windows** — full GUI
           - **macOS Apple Silicon (ARM64)** — full GUI
-          - **macOS Intel (x86_64)** — headless (no GUI); GUI available via local source build
+          - **macOS Intel (x86_64)** — full GUI
           - **Linux** — full GUI
 
           See the [documentation](https://fsecada01.github.io/bus_channel_strip/) for installation and usage." \
