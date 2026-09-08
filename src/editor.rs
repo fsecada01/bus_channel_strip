@@ -115,6 +115,10 @@ pub enum AppEvent {
     SaveUserPreset,
     /// Live-updates `Data::preset_save_name` as the save-name textbox is edited.
     SetPresetSaveName(String),
+    /// Flip between the "Studio" (dark) and "Daylight" (bright neutral) GUI
+    /// themes (issue #24). Applied via toggle_class on the chassis root, same
+    /// mechanism as `SetZoom`, and persisted to `BusChannelStripParams::theme_daylight`.
+    ToggleTheme,
 }
 
 // ============================================================================
@@ -178,6 +182,10 @@ pub struct Data {
     /// zoom's scale factor here so it survives a session save/reload and sizes the
     /// real host window correctly the next time the editor is opened.
     pub editor_state: Arc<ViziaState>,
+    /// `true` while the "Daylight" theme is active (issue #24), seeded from
+    /// the persisted `BusChannelStripParams::theme_daylight` at editor spawn.
+    /// Applied via toggle_class to the chassis root, mirroring `zoom_level`.
+    pub daylight_theme: Signal<bool>,
     /// When `Some(slot)`, the rack is in focus mode: that slot renders full
     /// and every other slot collapses to its narrow tab regardless of its
     /// per-module hide flag. Set only via keyboard `1..7`; click-to-focus
@@ -344,6 +352,14 @@ impl Model for Data {
                 self.editor_state.set_user_scale_factor(factor);
                 cx.emit(WindowEvent::SetUserScale(factor));
                 self.gui_context.request_resize();
+            }
+
+            AppEvent::ToggleTheme => {
+                let daylight = !self.daylight_theme.get();
+                self.daylight_theme.set(daylight);
+                self.params
+                    .theme_daylight
+                    .store(daylight, Ordering::Relaxed);
             }
 
             #[cfg(feature = "dynamic_eq")]
@@ -1204,6 +1220,7 @@ pub(crate) fn create(
             sheen_sat_data: sheen_sat_data.clone(),
             zoom_level: Signal::new(initial_zoom),
             editor_state: editor_state_for_data.clone(),
+            daylight_theme: Signal::new(params.theme_daylight.load(Ordering::Relaxed)),
             focused_slot: Signal::new(None),
             gui_context: gui_cx,
             factory_presets: Arc::new(presets::factory_presets()),
@@ -1225,6 +1242,7 @@ pub(crate) fn create(
         repair_module_order(cx, &params);
 
         let zoom_level_signal = cx.data::<Data>().zoom_level;
+        let daylight_theme_signal = cx.data::<Data>().daylight_theme;
         VStack::new(cx, |cx| {
             // ── Chassis header ──────────────────────────────────────────────
             // Three-zone band: brand title (left) | signal-flow hint (center,
@@ -1310,6 +1328,9 @@ pub(crate) fn create(
                 build_chain_preset_selector(cx)
                     .left(Stretch(1.0))
                     .right(Stretch(1.0));
+
+                // Theme switcher — Studio (dark) / Daylight (bright neutral).
+                create_theme_toggle(cx);
 
                 // Zoom control band — discrete 75/100/125/150/200 buttons.
                 create_zoom_controls(cx);
@@ -1425,6 +1446,7 @@ pub(crate) fn create(
         .toggle_class("zoom-125", zoom_level_signal.map(|z| *z == 125))
         .toggle_class("zoom-150", zoom_level_signal.map(|z| *z == 150))
         .toggle_class("zoom-200", zoom_level_signal.map(|z| *z == 200))
+        .toggle_class("theme-daylight", daylight_theme_signal.map(|d| *d))
         .width(Stretch(1.0))
         .height(Stretch(1.0))
         .padding(
@@ -1705,6 +1727,37 @@ fn build_chain_preset_selector(cx: &mut Context) -> Handle<'_, VStack> {
     .height(Auto)
     .width(Auto)
     .gap(Pixels(4.0))
+}
+
+// Single toggle chip for the "Studio" / "Daylight" GUI theme (issue #24).
+// Mirrors `create_zoom_controls`'s container chrome (reuses `.zoom-controls`
+// / `.zoom-label`) but is its own button since it's a two-state toggle
+// rather than a discrete set.
+fn create_theme_toggle(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        Label::new(cx, "THEME").class("zoom-label");
+        let daylight_signal = cx.data::<Data>().daylight_theme;
+        HStack::new(cx, |cx| {
+            Label::new(
+                cx,
+                daylight_signal.map(|d| if *d { "DAYLIGHT" } else { "STUDIO" }),
+            )
+            .class("theme-toggle-label");
+        })
+        .class("theme-toggle-btn")
+        .on_press(|cx| cx.emit(AppEvent::ToggleTheme))
+        .cursor(CursorIcon::Hand)
+        .height(Pixels(24.0))
+        .width(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
+    })
+    .class("zoom-controls")
+    .height(Auto)
+    .width(Auto)
+    .gap(Pixels(4.0))
+    .top(Pixels(0.0))
+    .bottom(Pixels(0.0));
 }
 
 // Discrete zoom buttons (75/100/125/150/200%). Each button emits SetZoom on

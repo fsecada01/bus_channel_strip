@@ -27,6 +27,8 @@ pub use transformer::TransformerParams;
 
 use nice_plug::prelude::*;
 #[cfg(feature = "gui")]
+use std::sync::atomic::AtomicBool;
+#[cfg(feature = "gui")]
 use std::sync::Arc;
 #[cfg(feature = "gui")]
 use vizia_plug::ViziaState;
@@ -59,6 +61,13 @@ pub struct BusChannelStripParams {
     #[cfg(feature = "gui")]
     #[persist = "editor-state"]
     pub editor_state: Arc<ViziaState>,
+
+    /// GUI theme: `false` = "Studio" (default dark), `true` = "Daylight"
+    /// (bright neutral, issue #24). Persisted so the plugin reopens in the
+    /// last-chosen theme across DAW sessions, same pattern as `editor_state`.
+    #[cfg(feature = "gui")]
+    #[persist = "ui-theme-daylight"]
+    pub theme_daylight: Arc<AtomicBool>,
 }
 
 impl Default for BusChannelStripParams {
@@ -77,6 +86,23 @@ impl Default for BusChannelStripParams {
 
             #[cfg(feature = "gui")]
             editor_state: crate::editor::default_state(),
+            #[cfg(feature = "gui")]
+            theme_daylight: Arc::new(AtomicBool::new(false)),
         }
+    }
+}
+
+#[cfg(all(test, feature = "gui"))]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// New sessions (and DAW projects saved before issue #24) must open in
+    /// the "Studio" theme, not "Daylight" — a silent default flip would
+    /// change every existing user's plugin appearance on next load.
+    #[test]
+    fn default_theme_is_studio() {
+        let params = BusChannelStripParams::default();
+        assert!(!params.theme_daylight.load(Ordering::Relaxed));
     }
 }

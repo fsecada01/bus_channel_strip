@@ -682,6 +682,32 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #ffffff;
 }
 
+/* Theme toggle chip (issue #24) — sits beside the zoom band, same dark
+   hardware-chip family as .chain-preset-btn / .preset-header-btn. */
+.theme-toggle-btn {
+    background: linear-gradient(180deg, #222730, #1b1f27);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    cursor: pointer;
+    alignment: center;
+    padding: 4px 12px;
+}
+
+.theme-toggle-btn:hover {
+    background: linear-gradient(180deg, #2c3340, #242a36);
+    border-color: rgba(180, 200, 255, 0.3);
+}
+
+.theme-toggle-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #c0c8d4;
+    letter-spacing: 0.5px;
+    text-align: center;
+    height: 14px;
+    width: Auto;
+}
+
 .master-section {
     background: linear-gradient(145deg, #333333, #3a3a3a);
     border-radius: 8px;
@@ -1501,6 +1527,239 @@ scrollbar .thumb:hover {
     }
 }
 
+/* ── Daylight theme (issue #24) ────────────────────────────────────────────
+   Toggled via `.theme-daylight` on the chassis root (same mechanism as the
+   `.zoom-*` tiers). Design approach: relight the *structural surfaces*
+   (chassis/header/rail/module cards) and their text to a bright warm-neutral
+   palette for outdoor-laptop readability, but deliberately leave every
+   clickable control chip (buttons, LEDs, sliders) in its existing dark
+   "hardware" finish — a light chassis body with dark tactile controls is a
+   real outboard-gear convention, not an oversight, and it keeps this diff to
+   the surfaces the roadmap actually calls out (§4.5) instead of reskinning
+   every micro-interaction. The brass plate is explicitly EXCLUDED per the
+   epic's sign-off (stays brass in both themes — brand identity, not theme).
+   DynEQ/Sheen back views and the spectrum placeholder keep their dark
+   "screen" treatment in both themes for the same reason real hardware LCDs
+   stay dark regardless of the faceplate color. */
+
+.theme-daylight .lunchbox-chassis {
+    background: linear-gradient(160deg, #e8e4da, #d8d2c4 60%, #e0dbd0);
+    border-color: #b6ae9c;
+}
+
+.theme-daylight .chassis-header {
+    background: linear-gradient(180deg, #f2efe6 0%, #e8e3d6 35%, #ddd7c8 75%, #d2ccbc 100%);
+    border-bottom-color: #c2baa8;
+    border-top-color: #fffdf8;
+}
+
+.theme-daylight .strip-scroll {
+    background: linear-gradient(180deg, #dcd7ca, #cec8b8 60%, #c2bcaa);
+    border-color: #b4ac9a;
+}
+
+.theme-daylight .lunchbox-slots {
+    background-color: #d2ccbc;
+}
+
+.theme-daylight .plugin-title {
+    color: #211d16;
+}
+
+.theme-daylight .master-controls {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(238, 232, 218, 0.6));
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.theme-daylight .master-label {
+    color: #3a352a;
+}
+
+.theme-daylight .master-section {
+    background: linear-gradient(145deg, #dcd6c4, #d0cab4);
+    border-color: #a89e88;
+}
+
+.theme-daylight .signal-flow-section {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(238, 232, 218, 0.55));
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+.theme-daylight .signal-flow-label {
+    color: #5c5644;
+}
+
+.theme-daylight .zoom-controls {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(238, 232, 218, 0.55));
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+.theme-daylight .zoom-label {
+    color: #5c5644;
+}
+
+.theme-daylight .library-sidebar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(236, 230, 216, 0.7));
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+.theme-daylight .library-sidebar-header {
+    color: #5c5644;
+}
+
+.theme-daylight .library-row:hover {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+
+.theme-daylight .library-row-in-rack {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.theme-daylight .preset-browser-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(236, 230, 216, 0.9));
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+.theme-daylight .preset-browser-header {
+    color: #5c5644;
+}
+
+.theme-daylight .preset-category-label {
+    color: #2f5a8c;
+}
+
+.theme-daylight .preset-row {
+    color: #3a3528;
+}
+
+.theme-daylight .preset-row:hover {
+    color: #000000;
+}
+
+.theme-daylight .preset-empty-hint {
+    color: #847c68;
+}
+
+/* Module identity cards (ADR-0009) — background relit per module, border
+   kept at the same accent hue (darkened where needed for contrast against
+   the light rail), title text switched from a light tint to a dark one. */
+
+.theme-daylight .api5500-theme {
+    background: linear-gradient(165deg, #dceaf2 0%, #cfe1ec 45%, #c2d7e6) !important;
+}
+.theme-daylight .api5500-theme .module-name {
+    color: #0b6690 !important;
+}
+
+.theme-daylight .buttercomp2-theme {
+    background: linear-gradient(165deg, #f4e6d2 0%, #ecd9c0 45%, #e2ccac) !important;
+}
+.theme-daylight .buttercomp2-theme .module-name {
+    color: #a8500c !important;
+}
+
+.theme-daylight .pultec-theme {
+    border-color: #a8860c !important;
+    background: linear-gradient(165deg, #f2ecd2 0%, #e8dfbc 45%, #ded3a6) !important;
+}
+.theme-daylight .pultec-theme .module-name {
+    color: #7a5c00 !important;
+}
+
+.theme-daylight .dynamic-eq-theme {
+    background: linear-gradient(165deg, #dcf0dc 0%, #cce6cc 45%, #bcdcbc) !important;
+}
+.theme-daylight .dynamic-eq-theme .module-name {
+    color: #1c6b1c !important;
+}
+.theme-daylight .dyneq-card-desc {
+    color: #5c6b5c;
+}
+
+.theme-daylight .transformer-theme {
+    background: linear-gradient(165deg, #f0ded2 0%, #e6ccbc 45%, #dcbaa6) !important;
+}
+.theme-daylight .transformer-theme .module-name {
+    color: #8a3c14 !important;
+}
+
+.theme-daylight .punch-theme {
+    background: linear-gradient(165deg, #f4dcde 0%, #eacace 45%, #dfb7be) !important;
+}
+.theme-daylight .punch-theme .module-name {
+    color: #a3172a !important;
+}
+
+.theme-daylight .haas-theme {
+    border-color: #57689c !important;
+    background: linear-gradient(165deg, #dfe2f0 0%, #d0d3e6 45%, #c1c5dc) !important;
+}
+.theme-daylight .haas-theme .module-name {
+    color: #374070 !important;
+}
+
+.theme-daylight .empty-theme {
+    border-color: #8a8470 !important;
+    background: linear-gradient(165deg, #e2ded2 0%, #d6d2c4 45%, #cac6b6) !important;
+}
+.theme-daylight .empty-theme .module-name {
+    color: #655f4e;
+}
+.theme-daylight .empty-theme .module-type {
+    color: #87816c;
+}
+
+/* Card content text — readable dark-on-light instead of light-on-dark. */
+.theme-daylight .module-header {
+    border-bottom-color: rgba(0, 0, 0, 0.12);
+}
+.theme-daylight .module-name {
+    color: #241f16 !important;
+}
+.theme-daylight .module-type {
+    color: #5c5644;
+}
+.theme-daylight .section-label {
+    color: #4a4434;
+}
+.theme-daylight .param-label {
+    color: #241f16;
+}
+.theme-daylight .dyneq-param-label {
+    color: #3a3528;
+}
+
+/* Focus/hover overlays that assumed a dark card underneath — flipped from a
+   white tint (invisible on a light card) to a black tint. */
+.theme-daylight .module-name-target:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+.theme-daylight .module-name-target-focused {
+    background: rgba(180, 120, 10, 0.12);
+    border-color: rgba(180, 120, 10, 0.4);
+}
+.theme-daylight .hide-btn {
+    color: #4a4438;
+}
+.theme-daylight .empty-slot-glyph {
+    color: #5c5644;
+}
+.theme-daylight .empty-slot-label {
+    color: #6c6656;
+}
+.theme-daylight .slot-empty {
+    background: linear-gradient(170deg, #e6e2d4 0%, #dad4c2 100%) !important;
+}
+.theme-daylight .slot-empty:hover {
+    background: linear-gradient(170deg, #ece8dc 0%, #e2ddce 100%) !important;
+    border-color: #8a8470 !important;
+}
+.theme-daylight .slot-empty-focused {
+    background: linear-gradient(170deg, #f0ecd6 0%, #e6e0c6 100%) !important;
+}
+
 /* Zoom: content-only scaling. vizia-plug does not support runtime host-window
    resize, so zoom buttons toggle a .zoom-N class on the chassis root and CSS
    scales fonts per level. Slot width and chassis padding are scaled from Rust
@@ -1666,5 +1925,46 @@ mod style_scale_tests {
                 }
             }
         });
+    }
+
+    /// Every module identity theme (ADR-0009's per-module color table, plus
+    /// the `.empty-theme` placeholder) must carry a `.theme-daylight`
+    /// background override (issue #24 DoD: "Daylight theme implemented,
+    /// covering all module color-coding").
+    #[test]
+    fn every_module_theme_has_a_daylight_override() {
+        const MODULE_THEME_CLASSES: &[&str] = &[
+            "api5500-theme",
+            "buttercomp2-theme",
+            "pultec-theme",
+            "dynamic-eq-theme",
+            "transformer-theme",
+            "punch-theme",
+            "haas-theme",
+            "empty-theme",
+        ];
+        for class in MODULE_THEME_CLASSES {
+            let base_selector = format!(".{class} {{");
+            assert!(
+                COMPONENT_STYLES.contains(&base_selector),
+                "expected a base rule for `.{class}`"
+            );
+            let daylight_selector = format!(".theme-daylight .{class} {{");
+            assert!(
+                COMPONENT_STYLES.contains(&daylight_selector),
+                "`.{class}` has no `.theme-daylight` background override"
+            );
+        }
+    }
+
+    /// The brass plate is explicitly excluded from theming per the issue's
+    /// sign-off (stays brass in both Studio and Daylight — brand identity,
+    /// not theme). Guards against a future edit accidentally reskinning it.
+    #[test]
+    fn brand_plate_is_not_themed() {
+        assert!(
+            !COMPONENT_STYLES.contains(".theme-daylight .brand-plate-brass"),
+            "brand plate must stay brass in both themes per the issue #24 sign-off"
+        );
     }
 }
