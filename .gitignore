@@ -43,6 +43,12 @@ site/.astro/
 # /target/bundled/*.vst3
 # /target/bundled/*.clap
 
+# Installer build outputs (built by CI / installer/*/build scripts, not source)
+installer/windows/*.msi
+installer/windows/*.wixpdb
+installer/macos/*.pkg
+installer/macos/build/
+
 # Development artifacts  
 depot_tools_clean/
 .claude/
