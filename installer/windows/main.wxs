@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Windows MSI installer (issue #26 DoD: "Windows MSI installer produced and
+  verified"). Installs the release bundle produced by `just bundle` /
+  `xtask bundle` (see justfile) into the standard per-machine plugin
+  locations, matching what `scripts/install-vst3.ps1` / `install-clap.ps1`
+  do for the dev workflow.
+
+  Build with WiX v5+ (`wix build`, https://wixtoolset.org/):
+    wix build installer/windows/main.wxs -d BundleDir=target\bundled ^
+      -d ProductVersion=1.0.0 -arch x64 -o Bus-Channel-Strip.msi
+
+  BundleDir must contain (produced by `xtask bundle`):
+    Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3
+    Bus-Channel-Strip.clap
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?ifndef ProductVersion?>
+    <?define ProductVersion="1.0.0"?>
+  <?endif?>
+  <?ifndef BundleDir?>
+    <?define BundleDir="..\..\target\bundled"?>
+  <?endif?>
+
+  <Package Name="Bus Channel Strip"
+           Manufacturer="Francis Secada"
+           Version="$(ProductVersion)"
+           UpgradeCode="8f6b6e5a-6b0e-4c8a-9c0e-2b6e6f7b5c11"
+           Language="1033"
+           Scope="perMachine"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="Bus Channel Strip VST3/CLAP plugin installer" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Bus Channel Strip is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="CommonFiles64Folder">
+      <Directory Id="VST3ROOTDIR" Name="VST3">
+        <Directory Id="VST3BUNDLEDIR" Name="Bus-Channel-Strip.vst3">
+          <Directory Id="VST3CONTENTSDIR" Name="Contents">
+            <Directory Id="VST3ARCHDIR" Name="x86_64-win">
+              <Component Id="Vst3Binary" Guid="2c3e9a3e-0a2d-4a2f-9b7a-1e3b6c9f4a01">
+                <File Id="Vst3File"
+                      Source="$(BundleDir)\Bus-Channel-Strip.vst3\Contents\x86_64-win\Bus-Channel-Strip.vst3"
+                      KeyPath="yes" />
+              </Component>
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+      <Directory Id="CLAPROOTDIR" Name="CLAP">
+        <Component Id="ClapBinary" Guid="7a1d5e4b-3f6a-4d9e-8c2a-5b0e7c6a2f02">
+          <File Id="ClapFile"
+                Source="$(BundleDir)\Bus-Channel-Strip.clap"
+                KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="ProductFeature" Title="Bus Channel Strip" Level="1">
+      <ComponentRef Id="Vst3Binary" />
+      <ComponentRef Id="ClapBinary" />
+    </Feature>
+
+  </Package>
+</Wix>

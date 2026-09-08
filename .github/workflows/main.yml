@@ -282,6 +282,55 @@ jobs:
           name: ${{ steps.archive.outputs.name }}
           path: target/bundled/${{ steps.archive.outputs.name }}
 
+      - name: Get version
+        if: matrix.target == 'x86_64-pc-windows-msvc' || matrix.os == 'macos-14'
+        id: version
+        shell: bash
+        run: echo "version=$(grep -m 1 'version' Cargo.toml | cut -d '"' -f 2)" >> "$GITHUB_OUTPUT"
+
+      # Windows MSI installer (issue #26). WiX is pinned to v5 — v7 requires
+      # accepting the Open Source Maintenance Fee EULA, which this workflow
+      # does not opt into.
+      - name: Install WiX Toolset
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: dotnet tool install --global wix --version 5.0.2 --add-source https://api.nuget.org/v3/index.json --ignore-failed-sources
+
+      - name: Build Windows MSI installer
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: bash
+        run: |
+          wix build installer/windows/main.wxs \
+            -d BundleDir="${{ github.workspace }}\target\bundled" \
+            -d ProductVersion="${{ steps.version.outputs.version }}" \
+            -arch x64 \
+            -o target/bundled/Bus-Channel-Strip-windows.msi
+          wix msi validate target/bundled/Bus-Channel-Strip-windows.msi
+
+      - name: Upload Windows MSI
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bus-Channel-Strip-windows.msi
+          path: target/bundled/Bus-Channel-Strip-windows.msi
+
+      # macOS pkg installer (issue #26). Unsigned — signing/notarization is a
+      # separate bullet on the same issue.
+      - name: Build macOS pkg installer
+        if: matrix.os == 'macos-14'
+        run: |
+          chmod +x installer/macos/build-pkg.sh
+          ./installer/macos/build-pkg.sh \
+            target/bundled \
+            "${{ steps.version.outputs.version }}" \
+            "target/bundled/Bus-Channel-Strip-${{ matrix.name }}.pkg"
+
+      - name: Upload macOS pkg
+        if: matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bus-Channel-Strip-${{ matrix.name }}.pkg
+          path: target/bundled/Bus-Channel-Strip-${{ matrix.name }}.pkg
+
       - name: Remove temporary Windows signing certificate
         if: always() && matrix.target == 'x86_64-pc-windows-msvc' && env.WIN_SIGNING_AVAILABLE == 'true'
         shell: pwsh
@@ -360,4 +409,4 @@ jobs:
 
           See the [documentation](https://fsecada01.github.io/bus_channel_strip/) for installation and usage." \
             $PRERELEASE_FLAG \
-            artifacts/*.zip artifacts/*.tar.gz
+            artifacts/*.zip artifacts/*.tar.gz artifacts/*.msi artifacts/*.pkg
