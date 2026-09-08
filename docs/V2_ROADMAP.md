@@ -1,8 +1,12 @@
 # Bus Channel Strip 2.0 — Roadmap Requirements
 
-Status: **Draft**, awaiting sign-off (2026-04-28). This is a requirements
-spec, not an implementation plan. Once approved, individual themes get
-their own `docs/*_SPEC.md` files before any code lands.
+Status: **Implemented**. All seven open questions in §9 were signed off
+2026-09-05/06 and every DSP-track and UI-track epic (#14-#25) is closed
+and merged; §5's foundation work (#26) is done except for the
+credential-blocked signing bullets (see the issue for current status).
+No standalone per-theme `docs/*_SPEC.md` files were written — decisions
+ended up tracked directly on each theme's GitHub epic/issue and, where
+warranted, an ADR (see `docs/adr/`) instead.
 
 ## 1. Goals & non-goals
 
@@ -380,12 +384,12 @@ These need a decision before any code lands:
 1. ~~**4× oversampling floor or "CPU saver" toggle?**~~ **Decided 2026-09-05: 4× floor, no toggle.** (Tracked in [#14](https://github.com/fsecada01/bus_channel_strip/issues/14).)
 2. ~~**TPT migration or fallback?**~~ **Decided 2026-09-05: hard migrate, no biquad fallback.** (Tracked in [#15](https://github.com/fsecada01/bus_channel_strip/issues/15).)
 3. ~~**Preisach hysteresis depth — single-cell or multi-cell?**~~ **Decided 2026-09-05: single-cell for v2.0.** (Tracked in [#16](https://github.com/fsecada01/bus_channel_strip/issues/16).)
-4. **TMT detuning — exposed knob or hard-coded?** (Recommendation: hard-coded at 0.3%.)
-5. **ButterComp2 adaptation — exposed knob or auto?** (Recommendation: auto with bypass.)
-6. **Resize aspect ratio — locked or free?** (Recommendation: locked.)
+4. ~~**TMT detuning — exposed knob or hard-coded?**~~ **Decided 2026-09-06: hard-coded, ±0.3% deviation, no `tmt_amount` parameter.** (Tracked in [#17](https://github.com/fsecada01/bus_channel_strip/issues/17); see ADR-0013.)
+5. ~~**ButterComp2 adaptation — exposed knob or auto?**~~ **Decided 2026-09-06: auto, no exposed knob** — program-dependent release adaptation runs always-on inside the existing envelope stages, freezing on the module's existing bypass/silence handling rather than a dedicated adaptive-specific toggle. (Tracked in [#18](https://github.com/fsecada01/bus_channel_strip/issues/18).)
+6. ~~**Resize aspect ratio — locked or free?**~~ **Decided 2026-09-06: locked** — every zoom level preserves the base window's aspect ratio exactly. (Tracked in [#20](https://github.com/fsecada01/bus_channel_strip/issues/20).)
 7. ~~**Linear-phase Pultec — ship in v2.0 or defer?**~~ **Decided 2026-09-05: ship in v2.0**, alongside the TPT rollout (all four EQ modules in one PR rather than API5500-first). (Tracked in [#15](https://github.com/fsecada01/bus_channel_strip/issues/15).)
 
-Answer the seven and I'll write the per-theme implementation specs
-(`docs/V2_TPT_FILTER_SPEC.md`, `docs/V2_HYSTERESIS_SPEC.md`,
-`docs/V2_PRESET_SYSTEM_SPEC.md`, etc.) — one per theme — before any
-code touches `src/`.
+All seven are now decided (see the strikethroughs above) — in practice
+each theme's implementation was tracked directly on its GitHub epic
+issue plus an ADR where the decision needed a durable record, rather
+than a separate spec doc per theme.
