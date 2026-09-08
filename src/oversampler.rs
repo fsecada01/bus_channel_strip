@@ -387,4 +387,151 @@ mod tests {
             os.upsample(0.0, i); // must not panic (OOB if the clamp were missing)
         }
     }
+
+    #[test]
+    fn test_bessel_i0_at_zero_is_one() {
+        // I0(0) = 1 by definition (the series' only surviving term).
+        assert!((bessel_i0(0.0) - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn test_halfband_kaiser_has_unity_dc_gain() {
+        let coeffs = design_halfband_kaiser(8.0);
+        let sum: f32 = coeffs.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1.0e-5,
+            "halfband FIR must be normalized to unity DC gain, got {sum}"
+        );
+    }
+
+    #[test]
+    fn test_halfband_kaiser_is_linear_phase_symmetric() {
+        // A Kaiser-windowed FIR is symmetric about its center tap (linear
+        // phase) — required so the cascade doesn't introduce frequency-
+        // dependent phase distortion into the oversampled signal.
+        let coeffs = design_halfband_kaiser(8.0);
+        for n in 0..HB_NUM_TAPS {
+            assert!(
+                (coeffs[n] - coeffs[HB_NUM_TAPS - 1 - n]).abs() < 1.0e-7,
+                "tap {n} ({}) should mirror tap {} ({})",
+                coeffs[n],
+                HB_NUM_TAPS - 1 - n,
+                coeffs[HB_NUM_TAPS - 1 - n]
+            );
+        }
+    }
+
+    #[test]
+    fn test_halfband_fir_reset_clears_delay_line() {
+        let coeffs = design_halfband_kaiser(8.0);
+        let mut warmed = HalfbandFir::new();
+        for _ in 0..HB_NUM_TAPS {
+            warmed.upsample_2x(1.0, &coeffs);
+        }
+        warmed.reset();
+
+        let mut fresh = HalfbandFir::new();
+        for _ in 0..HB_NUM_TAPS {
+            let a = warmed.upsample_2x(0.3, &coeffs);
+            let b = fresh.upsample_2x(0.3, &coeffs);
+            assert_eq!(
+                a, b,
+                "reset() should make state identical to a fresh instance"
+            );
+        }
+    }
+
+    #[test]
+    fn test_oversampler_factor_1_is_passthrough() {
+        let mut os = Oversampler::new_at_factor(1, 8);
+        assert_eq!(os.num_stages(), 0);
+
+        let up = os.upsample(0.42, 0).to_vec();
+        assert_eq!(
+            up,
+            vec![0.42],
+            "factor=1 upsample must pass the sample through unchanged"
+        );
+
+        let down = os.downsample(&up, 0);
+        assert_eq!(
+            down, 0.42,
+            "factor=1 downsample must pass the sample through unchanged"
+        );
+    }
+
+    #[test]
+    fn test_oversampler_dc_round_trip_converges_to_input() {
+        // Feeding a constant DC value through upsample -> downsample with no
+        // processing in between should reconstruct that DC value once the
+        // FIR cascade's delay lines have filled (steady state) — the whole
+        // point of a unity-DC-gain halfband cascade.
+        for factor in [2usize, 4, 8, 16] {
+            let mut os = Oversampler::new_at_factor(factor, 1);
+            let dc = 0.5_f32;
+            let mut last = 0.0_f32;
+            for i in 0..(HB_NUM_TAPS * 4) {
+                let up = os.upsample(dc, 0).to_vec();
+                last = os.downsample(&up, 0);
+                let _ = i;
+            }
+            assert!(
+                (last - dc).abs() < 1.0e-3,
+                "factor={factor}: steady-state DC round trip should converge to {dc}, got {last}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_oversampler_all_factors_produce_finite_output() {
+        // Exercises both the even (factor 4, 16) and odd (factor 2, 8)
+        // num_stages ping-pong buffer paths in upsample()/downsample().
+        for factor in [1usize, 2, 4, 8, 16] {
+            let mut os = Oversampler::new_at_factor(factor, 4);
+            for i in 0..4 {
+                let x = (i as f32 * 0.7).sin();
+                let up = os.upsample(x, i).to_vec();
+                assert_eq!(up.len(), factor);
+                assert!(
+                    up.iter().all(|s| s.is_finite()),
+                    "factor={factor}: NaN/Inf in upsample output"
+                );
+
+                let down = os.downsample(&up, i);
+                assert!(
+                    down.is_finite(),
+                    "factor={factor}: NaN/Inf in downsample output"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_oversampler_reset_clears_filter_state() {
+        let mut os = Oversampler::new_at_factor(4, 1);
+        for _ in 0..HB_NUM_TAPS {
+            let up = os.upsample(1.0, 0).to_vec();
+            os.downsample(&up, 0);
+        }
+        os.reset();
+
+        let mut fresh = Oversampler::new_at_factor(4, 1);
+        let up_reset = os.upsample(0.25, 0).to_vec();
+        let up_fresh = fresh.upsample(0.25, 0).to_vec();
+        assert_eq!(
+            up_reset, up_fresh,
+            "reset() should make state identical to a fresh instance"
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_upsample_only_downsample_panics() {
+        // Documented invariant: an Oversampler built via new_upsample_only
+        // never allocates a downsample buffer, so calling downsample() on it
+        // must panic rather than silently doing nothing.
+        let mut os = Oversampler::new_upsample_only(4, 8);
+        let up = os.upsample(0.1, 0).to_vec();
+        os.downsample(&up, 0);
+    }
 }
