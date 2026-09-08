@@ -225,8 +225,14 @@ jobs:
         if: matrix.os == 'macos-14' && env.APPLE_SIGNING_AVAILABLE == 'true'
         run: |
           KEYCHAIN_PATH="$RUNNER_TEMP/apple-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
           CERT_PATH="$RUNNER_TEMP/apple-cert.p12"
+          # Recorded before anything below can fail, so the always()-guarded
+          # cleanup step can find and remove both regardless of where this
+          # step errors out (e.g. a bad APPLE_CERTIFICATE_PASSWORD).
+          echo "APPLE_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_CERT_PATH=$CERT_PATH" >> "$GITHUB_ENV"
+
+          KEYCHAIN_PASSWORD="$(uuidgen)"
           echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode -o "$CERT_PATH"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -234,16 +240,18 @@ jobs:
           security import "$CERT_PATH" -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
-          echo "APPLE_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-          rm -f "$CERT_PATH"
 
       - name: Code-sign macOS plugin bundles
         if: matrix.os == 'macos-14' && env.APPLE_SIGNING_AVAILABLE == 'true'
         run: |
-          codesign --deep --force --options runtime --timestamp \
+          # No --deep: Apple discourages it beyond ad-hoc testing since it
+          # can silently skip or mis-sign nested code. Neither bundle embeds
+          # any nested frameworks/dylibs today, so a plain top-level sign is
+          # both correct and sufficient; revisit if that ever changes.
+          codesign --force --options runtime --timestamp \
             --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
             target/bundled/Bus-Channel-Strip.vst3
-          codesign --deep --force --options runtime --timestamp \
+          codesign --force --options runtime --timestamp \
             --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
             target/bundled/Bus-Channel-Strip.clap
 
@@ -281,7 +289,9 @@ jobs:
 
       - name: Remove temporary Apple signing keychain
         if: always() && matrix.os == 'macos-14' && env.APPLE_SIGNING_AVAILABLE == 'true'
-        run: security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
+        run: |
+          rm -f "$APPLE_CERT_PATH"
+          security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
 
   create-release:
     needs: build
