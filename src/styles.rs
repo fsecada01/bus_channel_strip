@@ -73,20 +73,28 @@ pub const COMPONENT_STYLES: &str = r#"
     border-color: #ffd870;
 }
 
-/* Brand text colors are tuned for the brass surface. Kept light enough that
-   even if the brass fails to render the text remains readable against the
-   dark chassis (instead of the previous near-invisible #2a1f0a). */
+/* Brand text color. Previously #1a1004 (near-black) on the theory that the
+   brass fill always renders behind it — in practice the brass fill is not
+   reliably visible (reported: the plate reads as blended into the black
+   chassis and only becomes legible on :hover/.brand-plate-active, when the
+   brighter #e8c878/#ffd870 fill and border kick in). #1a1004 has almost no
+   contrast against the dark chassis, so the brand name was unreadable
+   whenever the brass fill failed to paint. A near-white warm tone stays
+   legible against the dark chassis in that failure case, which is the
+   state users actually see; it reads a little flatter on the brass fill
+   itself, but that's the safer trade-off since the dark-chassis case is
+   the one that was actually reported as broken. */
 .chassis-brand {
     font-size: 24px;
     font-weight: 800;
-    color: #1a1004;
+    color: #f0ead6;
     letter-spacing: 2px;
 }
 
 .chassis-title {
     font-size: 20px;
     font-weight: 700;
-    color: #1a1004;
+    color: #f0ead6;
     margin-left: 24px;
 }
 

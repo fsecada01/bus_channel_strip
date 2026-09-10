@@ -127,7 +127,6 @@ impl Default for ButterComp2Params {
                     factor: FloatRange::skew_factor(-1.5),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             // VCA model parameters

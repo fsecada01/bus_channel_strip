@@ -50,7 +50,6 @@ impl Default for PultecParams {
                     factor: FloatRange::skew_factor(-1.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             // Extended to ±18 dB to match professional hardware headroom.
@@ -85,7 +84,6 @@ impl Default for PultecParams {
                     factor: FloatRange::skew_factor(-1.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             pultec_lf_cut_gain: FloatParam::new(
@@ -114,7 +112,6 @@ impl Default for PultecParams {
                     factor: FloatRange::skew_factor(-1.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             pultec_hf_boost_gain: FloatParam::new(
@@ -145,7 +142,6 @@ impl Default for PultecParams {
                     factor: FloatRange::skew_factor(-1.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             pultec_hf_cut_gain: FloatParam::new(

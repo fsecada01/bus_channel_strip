@@ -59,7 +59,6 @@ impl Default for Api5500Params {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             lf_gain: FloatParam::new(
@@ -84,7 +83,6 @@ impl Default for Api5500Params {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             lmf_gain: FloatParam::new(
@@ -120,7 +118,6 @@ impl Default for Api5500Params {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             mf_gain: FloatParam::new(
@@ -156,7 +153,6 @@ impl Default for Api5500Params {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             hmf_gain: FloatParam::new(
@@ -192,7 +188,6 @@ impl Default for Api5500Params {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             hf_gain: FloatParam::new(

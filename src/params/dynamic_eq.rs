@@ -168,7 +168,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
@@ -257,7 +256,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
@@ -276,7 +274,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
@@ -304,7 +301,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
@@ -323,7 +319,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
@@ -350,7 +345,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band3_mode: EnumParam::new("DynEQ 3 Mode", DynamicMode::CompressDownward),
@@ -368,7 +362,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
 
             #[cfg(feature = "dynamic_eq")]
@@ -395,7 +388,6 @@ impl Default for DynamicEqParams {
                     factor: FloatRange::skew_factor(-2.0),
                 },
             )
-            .with_unit(" Hz")
             .with_value_to_string(formatters::v2s_f32_hz_then_khz(0)),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band4_mode: EnumParam::new("DynEQ 4 Mode", DynamicMode::CompressDownward),

@@ -1290,14 +1290,24 @@ pub(crate) fn create(
                 // next to the brand so users always know where to look.
                 let focused_slot_signal = cx.data::<Data>().focused_slot;
                 HStack::new(cx, |cx| {
+                    // on_press is attached to the icon and label too, not
+                    // just the parent HStack: vizia's on_press only fires
+                    // when cx.current == meta.target, and the deepest
+                    // hovered view at click time is whichever child the
+                    // cursor landed on — so without this the pill only
+                    // responds to clicks in the small gap around its
+                    // children.
                     Icon::new(
                         cx,
                         IconKind::Close,
                         vg::Color::from_argb(255, 255, 176, 152),
                     )
                     .width(Pixels(10.0))
-                    .height(Pixels(10.0));
-                    Label::new(cx, "EXIT FOCUS").class("exit-focus-label");
+                    .height(Pixels(10.0))
+                    .on_press(|cx| cx.emit(AppEvent::ClearFocus));
+                    Label::new(cx, "EXIT FOCUS")
+                        .class("exit-focus-label")
+                        .on_press(|cx| cx.emit(AppEvent::ClearFocus));
                 })
                 .class("exit-focus-btn")
                 .display(focused_slot_signal.map(|f| {
@@ -1523,20 +1533,29 @@ fn build_library_sidebar(cx: &mut Context) {
 
                 HStack::new(cx, |cx| {
                     // Status dot — accent-colored if in rack, dim otherwise.
+                    // on_press is attached to both child labels AND the
+                    // parent row below: vizia's on_press only fires when
+                    // cx.current == meta.target, and the deepest hovered
+                    // view at click time is whichever label the cursor
+                    // landed on — so without this the row only responds to
+                    // clicks in the (tiny) unlabeled gap between/around the
+                    // two labels.
                     Label::new(cx, if present { "\u{25CF}" } else { "\u{25CB}" })
                         .class("library-row-dot")
                         .color(if present {
                             theme.accent_color()
                         } else {
                             Color::rgb(90, 96, 108)
-                        });
+                        })
+                        .on_press(move |cx| cx.emit(AppEvent::AddOrFocusModule(mt)));
                     Label::new(cx, tag)
                         .class("library-row-tag")
                         .color(if present {
                             theme.accent_color()
                         } else {
                             Color::rgb(140, 146, 158)
-                        });
+                        })
+                        .on_press(move |cx| cx.emit(AppEvent::AddOrFocusModule(mt)));
                 })
                 .class("library-row")
                 .toggle_class("library-row-in-rack", present)
@@ -1605,10 +1624,17 @@ fn build_preset_header_pill(cx: &mut Context) {
     });
 
     HStack::new(cx, |cx| {
-        Label::new(cx, name_memo).class("preset-name-label");
+        // on_press attached to both child labels: vizia's on_press only
+        // fires on the deepest hovered view, so without this a click
+        // landing on either label would be swallowed instead of reaching
+        // the parent's handler.
+        Label::new(cx, name_memo)
+            .class("preset-name-label")
+            .on_press(|cx| cx.emit(AppEvent::TogglePresetBrowser));
         Label::new(cx, "\u{25CF}")
             .class("preset-dirty-dot")
-            .display(dirty_memo.map(|d| if *d { Display::Flex } else { Display::None }));
+            .display(dirty_memo.map(|d| if *d { Display::Flex } else { Display::None }))
+            .on_press(|cx| cx.emit(AppEvent::TogglePresetBrowser));
     })
     .class("preset-header-btn")
     .on_press(|cx| cx.emit(AppEvent::TogglePresetBrowser))
@@ -1705,8 +1731,15 @@ fn build_chain_preset_selector(cx: &mut Context) -> Handle<'_, VStack> {
         HStack::new(cx, |cx| {
             for (i, preset) in CHAIN_PRESETS.iter().enumerate() {
                 VStack::new(cx, |cx| {
-                    Label::new(cx, preset.tag).class("chain-preset-tag");
-                    Label::new(cx, preset.name).class("chain-preset-name");
+                    // on_press attached to both labels too — vizia's
+                    // on_press only fires on the deepest hovered view, and
+                    // these two labels fill the entire clickable area.
+                    Label::new(cx, preset.tag)
+                        .class("chain-preset-tag")
+                        .on_press(move |cx| cx.emit(AppEvent::LoadChain(i)));
+                    Label::new(cx, preset.name)
+                        .class("chain-preset-name")
+                        .on_press(move |cx| cx.emit(AppEvent::LoadChain(i)));
                 })
                 .class("chain-preset-btn")
                 .on_press(move |cx| cx.emit(AppEvent::LoadChain(i)))
@@ -1738,11 +1771,15 @@ fn create_theme_toggle(cx: &mut Context) {
         Label::new(cx, "THEME").class("zoom-label");
         let daylight_signal = cx.data::<Data>().daylight_theme;
         HStack::new(cx, |cx| {
+            // on_press attached to the label too — it fills the whole
+            // clickable area, and vizia's on_press only fires on the
+            // deepest hovered view.
             Label::new(
                 cx,
                 daylight_signal.map(|d| if *d { "DAYLIGHT" } else { "STUDIO" }),
             )
-            .class("theme-toggle-label");
+            .class("theme-toggle-label")
+            .on_press(|cx| cx.emit(AppEvent::ToggleTheme));
         })
         .class("theme-toggle-btn")
         .on_press(|cx| cx.emit(AppEvent::ToggleTheme))
@@ -1770,6 +1807,9 @@ fn create_zoom_controls(cx: &mut Context) {
             let zoom_level_signal = cx.data::<Data>().zoom_level;
             for &level in &[75_u8, 100, 125, 150, 200] {
                 VStack::new(cx, |cx| {
+                    // on_press attached to the label too — it fills the
+                    // whole clickable area, and vizia's on_press only
+                    // fires on the deepest hovered view.
                     Label::new(
                         cx,
                         match level {
@@ -1780,7 +1820,8 @@ fn create_zoom_controls(cx: &mut Context) {
                             _ => "200",
                         },
                     )
-                    .class("zoom-btn-label");
+                    .class("zoom-btn-label")
+                    .on_press(move |cx| cx.emit(AppEvent::SetZoom(level)));
                 })
                 .class("zoom-btn")
                 .toggle_class(
@@ -3826,14 +3867,19 @@ fn build_dyneq_back_view(
             // Back button
             VStack::new(cx, |cx| {
                 HStack::new(cx, |cx| {
+                    // on_press attached to the icon and label too — vizia's
+                    // on_press only fires on the deepest hovered view.
                     Icon::new(
                         cx,
                         IconKind::ChevronLeft,
                         vg::Color::from_argb(255, 102, 204, 102),
                     )
                     .width(Pixels(11.0))
-                    .height(Pixels(11.0));
-                    Label::new(cx, "STRIP VIEW").class("dyneq-back-btn-label");
+                    .height(Pixels(11.0))
+                    .on_press(|cx| cx.emit(AppEvent::CloseDynEq));
+                    Label::new(cx, "STRIP VIEW")
+                        .class("dyneq-back-btn-label")
+                        .on_press(|cx| cx.emit(AppEvent::CloseDynEq));
                 })
                 .alignment(Alignment::Center)
                 .height(Pixels(16.0))
@@ -3872,7 +3918,8 @@ fn build_dyneq_back_view(
                     Label::new(cx, "ANALYZE SC")
                         .class("dyneq-auto-btn-label")
                         .height(Pixels(14.0))
-                        .width(Stretch(1.0));
+                        .width(Stretch(1.0))
+                        .on_press(|cx| cx.emit(AppEvent::RequestAnalysis));
                 })
                 .class("dyneq-auto-btn")
                 .on_press(|cx| cx.emit(AppEvent::RequestAnalysis))
@@ -3882,14 +3929,14 @@ fn build_dyneq_back_view(
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0));
 
-                VStack::new(cx, |cx| {
-                    Label::new(cx, "APPLY RESULT")
-                        .class("dyneq-apply-btn-label")
-                        .height(Pixels(14.0))
-                        .width(Stretch(1.0));
-                })
-                .class("dyneq-apply-btn")
-                .on_press(move |cx| {
+                // on_press is attached to both the label and the parent
+                // VStack: vizia's on_press only fires on the deepest
+                // hovered view, and the label fills the whole clickable
+                // area. A named closure is used (rather than inlining
+                // twice) so it can be cloned for the second attachment —
+                // it captures only ar_clone (Arc<AnalysisResult>), which is
+                // Clone, so the closure derives Clone automatically.
+                let apply_analysis = move |cx: &mut EventContext| {
                     if ar_clone.ready.load(Ordering::Acquire) {
                         let band = ar_clone.target_band.load(Ordering::Relaxed);
                         let freq = f32::from_bits(ar_clone.target_freq.load(Ordering::Relaxed));
@@ -3901,7 +3948,17 @@ fn build_dyneq_back_view(
                             threshold_db,
                         });
                     }
+                };
+                let apply_analysis_label = apply_analysis.clone();
+                VStack::new(cx, |cx| {
+                    Label::new(cx, "APPLY RESULT")
+                        .class("dyneq-apply-btn-label")
+                        .height(Pixels(14.0))
+                        .width(Stretch(1.0))
+                        .on_press(apply_analysis_label);
                 })
+                .class("dyneq-apply-btn")
+                .on_press(apply_analysis)
                 .cursor(CursorIcon::Hand)
                 .height(Pixels(32.0))
                 .width(Pixels(120.0))
@@ -4031,14 +4088,19 @@ fn build_sheen_back_view(cx: &mut Context) {
         HStack::new(cx, |cx| {
             VStack::new(cx, |cx| {
                 HStack::new(cx, |cx| {
+                    // on_press attached to the icon and label too — vizia's
+                    // on_press only fires on the deepest hovered view.
                     Icon::new(
                         cx,
                         IconKind::ChevronLeft,
                         vg::Color::from_argb(255, 232, 200, 120),
                     )
                     .width(Pixels(11.0))
-                    .height(Pixels(11.0));
-                    Label::new(cx, "STRIP VIEW").class("sheen-back-btn-label");
+                    .height(Pixels(11.0))
+                    .on_press(|cx| cx.emit(AppEvent::CloseSheen));
+                    Label::new(cx, "STRIP VIEW")
+                        .class("sheen-back-btn-label")
+                        .on_press(|cx| cx.emit(AppEvent::CloseSheen));
                 })
                 .alignment(Alignment::Center)
                 .height(Pixels(16.0))
@@ -4097,14 +4159,19 @@ fn build_sheen_back_view(cx: &mut Context) {
                     .height(Pixels(14.0))
                     .width(Stretch(1.0));
                 HStack::new(cx, |cx| {
+                    // on_press attached to the icon and label too — vizia's
+                    // on_press only fires on the deepest hovered view.
                     Icon::new(
                         cx,
                         IconKind::Restore,
                         vg::Color::from_argb(255, 200, 160, 74),
                     )
                     .width(Pixels(12.0))
-                    .height(Pixels(12.0));
-                    Label::new(cx, "RESTORE FACTORY").class("sheen-restore-label");
+                    .height(Pixels(12.0))
+                    .on_press(|cx| cx.emit(AppEvent::RestoreSheenFactory));
+                    Label::new(cx, "RESTORE FACTORY")
+                        .class("sheen-restore-label")
+                        .on_press(|cx| cx.emit(AppEvent::RestoreSheenFactory));
                 })
                 .class("sheen-restore-btn")
                 .alignment(Alignment::Center)
