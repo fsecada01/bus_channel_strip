@@ -24,6 +24,12 @@ The first seven modules occupy reorderable slots driven by the `module_order_*` 
 - ✅ SUCCESSFUL VST3 AND CLAP BUNDLE CREATION
 - 🔧 CI/CD pipeline needs bundle command fixes
 
+## Workflow: Worktrees vs. Direct Branching
+
+Default to working directly in the main repo checkout (`C:\dev\projects\vst3s\bus_channel_strip`), using plain `git branch` / `git checkout` to switch work — not a worktree.
+
+Reserve worktrees for when work genuinely needs to run in parallel (e.g. multiple subagents/sessions active on different branches at once) or when deliberately A/B-ing two approaches side by side. Outside those cases, a worktree just adds a second checkout that can silently drift out of sync with `main` (see `xtask bundle`/`deploy` resolving to the wrong checkout entirely when invoked from a nested worktree) and needs its own manual `git pull`/cleanup.
+
 ## Development Guidelines
 
 ### Audio Processing Requirements
