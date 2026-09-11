@@ -1882,7 +1882,21 @@ fn create_master_section(cx: &mut Context) {
             |p| &p.global.global_auto_gain,
         );
 
-        Label::new(cx, "MASTER").class("master-label");
+        // Explicit height is required: in morphorm, height(Auto) on a leaf
+        // node (no children) resolves to 0, not text-content height, which
+        // let this label collapse and visually bleed into the AUTO GAIN
+        // pill and the gain slider on either side of it (see components.rs
+        // PARAM_LABEL_H comment for the same rule applied elsewhere).
+        VStack::new(cx, |cx| {
+            Label::new(cx, "MASTER")
+                .class("master-label")
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
+        })
+        .height(Auto)
+        .width(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
         components::create_gain_slider(
             cx,
             "Gain",
@@ -3901,8 +3915,13 @@ fn build_dyneq_back_view(
 
             #[cfg(feature = "dynamic_eq")]
             {
+                // create_active_led_button (not create_bypass_button): the
+                // latter's .bypass-button CSS class has no :checked state
+                // styling at all, so this toggle never visually changed —
+                // matching the front-panel module strip's DynEQ bypass
+                // (green/lit = active, dark = bypassed via :checked).
                 let params = cx.data::<Data>().params.clone();
-                components::create_bypass_button(cx, "BYPASS", "dyneq_bypass", &params, |p| {
+                components::create_active_led_button(cx, "dyneq_bypass", &params, |p| {
                     &p.dynamic_eq.dyneq_bypass
                 });
             }
