@@ -1882,21 +1882,24 @@ fn create_master_section(cx: &mut Context) {
             |p| &p.global.global_auto_gain,
         );
 
-        // Explicit height is required: in morphorm, height(Auto) on a leaf
-        // node (no children) resolves to 0, not text-content height, which
-        // let this label collapse and visually bleed into the AUTO GAIN
-        // pill and the gain slider on either side of it (see components.rs
-        // PARAM_LABEL_H comment for the same rule applied elsewhere).
-        VStack::new(cx, |cx| {
-            Label::new(cx, "MASTER")
-                .class("master-label")
-                .height(Pixels(16.0))
-                .width(Stretch(1.0));
-        })
-        .height(Auto)
-        .width(Auto)
-        .top(Pixels(0.0))
-        .bottom(Pixels(0.0));
+        // Explicit height AND width are required: in morphorm, Auto on a
+        // leaf node (no children) resolves to 0 in both axes, not
+        // text-content size (see components.rs PARAM_LABEL_H comment for
+        // the same rule applied elsewhere). The first attempt at this fix
+        // only fixed the height and left width(Stretch(1.0)) on the label
+        // itself while its wrapping VStack was width(Auto) — a Stretch
+        // child inside an Auto-sized parent has nothing to stretch
+        // against and collapses to 0 width anyway, so the label's text
+        // kept painting past its (zero-width) box and bled into AUTO GAIN
+        // and the gain slider exactly as before. A fixed pixel width sized
+        // to the text, with no wrapping VStack needed since there's no
+        // control beneath it, fixes both axes.
+        Label::new(cx, "MASTER")
+            .class("master-label")
+            .height(Pixels(16.0))
+            .width(Pixels(64.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
         components::create_gain_slider(
             cx,
             "Gain",
