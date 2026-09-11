@@ -1882,18 +1882,9 @@ fn create_master_section(cx: &mut Context) {
             |p| &p.global.global_auto_gain,
         );
 
-        // Explicit height AND width are required: in morphorm, Auto on a
-        // leaf node (no children) resolves to 0 in both axes, not
-        // text-content size (see components.rs PARAM_LABEL_H comment for
-        // the same rule applied elsewhere). The first attempt at this fix
-        // only fixed the height and left width(Stretch(1.0)) on the label
-        // itself while its wrapping VStack was width(Auto) — a Stretch
-        // child inside an Auto-sized parent has nothing to stretch
-        // against and collapses to 0 width anyway, so the label's text
-        // kept painting past its (zero-width) box and bled into AUTO GAIN
-        // and the gain slider exactly as before. A fixed pixel width sized
-        // to the text, with no wrapping VStack needed since there's no
-        // control beneath it, fixes both axes.
+        // Explicit height AND width: in morphorm, Auto on a leaf node (no
+        // children) resolves to 0 in both axes, not text-content size (see
+        // components.rs PARAM_LABEL_H comment for the same rule elsewhere).
         Label::new(cx, "MASTER")
             .class("master-label")
             .height(Pixels(16.0))
