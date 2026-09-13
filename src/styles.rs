@@ -104,6 +104,7 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #d0d8e0;
     text-transform: uppercase;
     letter-spacing: 1px;
+    text-align: center;
 }
 
 /* Strip scroll container — mid-tone rail between chassis and modules.

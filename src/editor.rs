@@ -1882,15 +1882,26 @@ fn create_master_section(cx: &mut Context) {
             |p| &p.global.global_auto_gain,
         );
 
-        // Explicit height AND width: in morphorm, Auto on a leaf node (no
-        // children) resolves to 0 in both axes, not text-content size (see
-        // components.rs PARAM_LABEL_H comment for the same rule elsewhere).
-        Label::new(cx, "MASTER")
-            .class("master-label")
-            .height(Pixels(16.0))
-            .width(Pixels(64.0))
-            .top(Pixels(0.0))
-            .bottom(Pixels(0.0));
+        // Same pattern as the BYPASS label above: Stretch(1.0) on the leaf
+        // Label, inside a wrapping VStack with an explicit non-Auto
+        // width(Pixels(80.0)) — not a tight pixel width on the leaf itself.
+        // A razor-thin exact-fit box (the previous width(Pixels(64.0)))
+        // still bled at higher zoom/scale factors: text rendering doesn't
+        // scale pixel-for-pixel with a fixed logical-pixel box across scale
+        // factors (hinting/rounding), and vizia Labels don't clip overflow,
+        // so any shortfall bleeds straight into the next sibling regardless
+        // of the row's gap. A wider, proven-working box (matching BYPASS's
+        // 80px) gives enough headroom to absorb that slop at any zoom level.
+        VStack::new(cx, |cx| {
+            Label::new(cx, "MASTER")
+                .class("master-label")
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
+        })
+        .height(Auto)
+        .width(Pixels(80.0))
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
         components::create_gain_slider(
             cx,
             "Gain",
