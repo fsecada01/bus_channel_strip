@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/profiles", get(routes::profiles::list_profiles))
-        .route("/profiles/:id", get(routes::profiles::get_profile))
+        .route("/profiles/{id}", get(routes::profiles::get_profile))
         .route("/suggest", post(routes::suggest::suggest))
         .route("/health", get(health))
         .with_state(state)

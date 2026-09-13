@@ -17,16 +17,11 @@ mod biquad_sanity {
         20.0 * peak.log10()
     }
 
-    /// Regression pin for biquad 0.5.0's `from_params` frequency-normalization
-    /// bug. A +15 dB LowShelf with corner at 60 Hz, measured at 30 Hz (well
-    /// below corner), SHOULD boost by ~+15 dB. Instead, `from_params` yields
-    /// near-zero gain because it computes `f0/(2*fs)` where the cookbook calls
-    /// for `f0/(fs/2)` — the filter sits 4× below its intended corner.
-    ///
-    /// Marked `#[should_panic]` so the test fails if the upstream crate ever
-    /// fixes the bug — at which point we can retire `shaping::biquad_coeffs`.
+    /// biquad 0.5.0's `from_params` computed `f0/(2*fs)` instead of the
+    /// cookbook `f0/(fs/2)`, placing every corner 4× too low. 0.6.0 fixed it;
+    /// this guards against a regression. A +15 dB LowShelf at 60 Hz must boost
+    /// 30 Hz by ≥ +12 dB.
     #[test]
-    #[should_panic(expected = "should boost 30 Hz")]
     fn biquad_from_params_lowshelf_15db_at_30hz() {
         let sr = 48_000.0_f32;
         let coeff =

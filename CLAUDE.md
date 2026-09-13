@@ -112,7 +112,7 @@ Reserve worktrees for when work genuinely needs to run in parallel (e.g. multipl
 - `src/components.rs` - Reusable vizia UI components
 - `src/styles.rs` - CSS-like styling for vizia GUI (includes brass plate + Sheen back view themes)
 - `src/svf.rs` - TPT / zero-delay-feedback state-variable filter core (`SvfCoefficients`, `TptSvf`) — the v2.0 filter topology behind every EQ stage (API5500, Pultec, DynamicEQ, Sheen). Null-tested against the biquad reference.
-- `src/shaping.rs` - Common DSP shaping functions, the stereo `Filter` wrapper over `TptSvf`, and the `biquad_coeffs` helper (still used by ButterComp2/Transformer/Punch utility filters; works around the biquad 0.5.0 frequency-normalization bug)
+- `src/shaping.rs` - Common DSP shaping functions, the stereo `Filter` wrapper over `TptSvf`, and the `biquad_coeffs` helper (still used by ButterComp2/Transformer/Punch utility filters; normalizes against Nyquist with a below-Nyquist clamp; originally a workaround for biquad 0.5.0's `from_params` bug, fixed upstream in 0.6.0)
 - `src/spectral.rs` - FFT analysis utilities
 
 **Build System:**
@@ -154,7 +154,7 @@ Reserve worktrees for when work genuinely needs to run in parallel (e.g. multipl
 **Key Dependencies:**
 - `nih_plug` - Plugin framework
 - `vizia_plug` - vizia GUI integration for NIH-Plug (modern GUI framework)
-- `biquad` v0.5.0 - Filter implementations (updated API)
+- `biquad` v0.6.0 - Filter implementations (updated API)
 - `fundsp` - DSP utilities
 - `realfft` - FFT processing
 - `augmented-dsp-filters` - Additional filter implementations

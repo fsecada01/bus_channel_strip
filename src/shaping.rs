@@ -1,13 +1,11 @@
 use crate::svf::{SvfCoefficients, SvfType, TptSvf};
 use biquad::{Coefficients, Errors, Type};
 
-/// Workaround for biquad 0.5.0: its `Coefficients::from_params` has a
-/// frequency-normalization bug (computes `f0/(2*fs)` instead of `f0/(fs/2)`),
-/// producing a corner frequency 4× lower than requested. Every shelf/peaking
-/// filter in this project was silently being built at the wrong frequency.
-/// Use this helper instead — it calls `from_normalized_params` with the
-/// correct Nyquist=1 convention and clamps the normalized value just below
-/// Nyquist to avoid the `OutsideNyquist` error at high sample rates.
+/// Builds biquad coefficients via `from_normalized_params` (Nyquist = 1),
+/// clamping the normalized corner just below Nyquist to avoid the
+/// `OutsideNyquist` error at high sample rates. Originally a workaround for
+/// biquad 0.5.0's `from_params` normalization bug (corners 4× too low), which
+/// 0.6.0 fixed; the clamp is why this helper is kept.
 ///
 /// Since #15 the EQ modules run on `crate::svf::TptSvf`; this helper remains
 /// for the utility biquads outside the EQ path (ButterComp2 sidechain HPF,

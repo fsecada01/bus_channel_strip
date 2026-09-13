@@ -229,7 +229,7 @@ All `process()` paths are allocation-free, lock-free, panic-free, and I/O-free. 
 
 - **NIH-Plug** — plugin framework (~86 parameters, VST3 + CLAP output)
 - **vizia-plug** — GUI framework (Skia GPU backend, ECS reactive architecture); v1.0.0 uses vizia's native `on_drag` / `on_drop` API for rack drag-drop
-- **biquad 0.5.0** — filter implementations (routed through `shaping::biquad_coeffs` to work around the v0.5.0 frequency-normalization bug)
+- **biquad 0.6.0** — filter implementations (routed through `shaping::biquad_coeffs`, originally a workaround for the v0.5.0 frequency-normalization bug fixed in 0.6.0)
 - **Airwindows ButterComp2** — C++ FFI via `extern "C"` wrapper in `cpp/`
 - **realfft** — FFT for the spectral analyzer
 

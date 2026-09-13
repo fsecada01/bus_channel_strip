@@ -22,14 +22,14 @@ crate-type = ["cdylib"]
 # using nice-plug 0.2+ here would fail to compile against vizia_plug.
 nice-plug = "0.1.10"
 augmented-dsp-filters = "2.5.0"
-biquad = "0.5.0"
+biquad = "0.6.0"
 fundsp = "0.23.0"
-idsp = "0.21.0"
+idsp = "0.22.1"
 # vizia-plug for GUI integration with nice-plug
 vizia_plug = { git = "https://github.com/vizia/vizia-plug.git", optional = true }
 # Use skia-safe with features that have pre-built binaries for Windows
 # Note: x11 is Linux-only, removed for cross-platform compatibility
-atomic_float = { version = "0.1", optional = true }
+atomic_float = { version = "1.1.0", optional = true }
 realfft = "3.5.0"
 dirs = "7.0.0"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -72,5 +72,5 @@ debug = true
 strip = "none"
 
 [build-dependencies]
-cc = "1.0"
-chrono = "0.4"
+cc = "1.4.6"
+chrono = "0.4.45"

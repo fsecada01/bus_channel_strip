@@ -159,7 +159,7 @@ Use ring buffers or lock-free queues if deferred work is needed.
 
 ### Correctness First
 - Prefer `f32` over `f64` for DSP (SIMD-friendlier, cache-efficient)
-- Use the `biquad` crate v0.5.0 API: constructors require gain parameter (`Type::PeakingEQ(gain_db)`)
+- Use the `biquad` crate v0.6.0 API: constructors require gain parameter (`Type::PeakingEQ(gain_db)`)
 - FFI calls to C++ Airwindows code must be `unsafe` blocks with clear safety comments
 - Derive `Params` via NIH-Plug macros; never implement it manually
 
