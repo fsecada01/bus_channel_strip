@@ -1875,7 +1875,9 @@ fn create_master_section(cx: &mut Context) {
         .top(Pixels(0.0))
         .bottom(Pixels(0.0));
 
-        // Auto-gain compensation toggle.
+        // Auto-gain compensation toggle. create_bool_button's own wrapper
+        // uses width(Stretch(1.0)) — it requires a non-Auto parent to
+        // stretch against (see the HStack's own width below).
         components::create_bool_button(
             cx,
             "AUTO GAIN",
@@ -1886,14 +1888,7 @@ fn create_master_section(cx: &mut Context) {
 
         // Same pattern as the BYPASS label above: Stretch(1.0) on the leaf
         // Label, inside a wrapping VStack with an explicit non-Auto
-        // width(Pixels(80.0)) — not a tight pixel width on the leaf itself.
-        // A razor-thin exact-fit box (the previous width(Pixels(64.0)))
-        // still bled at higher zoom/scale factors: text rendering doesn't
-        // scale pixel-for-pixel with a fixed logical-pixel box across scale
-        // factors (hinting/rounding), and vizia Labels don't clip overflow,
-        // so any shortfall bleeds straight into the next sibling regardless
-        // of the row's gap. A wider, proven-working box (matching BYPASS's
-        // 80px) gives enough headroom to absorb that slop at any zoom level.
+        // width(Pixels(80.0)).
         VStack::new(cx, |cx| {
             Label::new(cx, "MASTER")
                 .class("master-label")
@@ -1904,6 +1899,8 @@ fn create_master_section(cx: &mut Context) {
         .width(Pixels(80.0))
         .top(Pixels(0.0))
         .bottom(Pixels(0.0));
+        // create_gain_slider's own wrapper is also width(Stretch(1.0)) —
+        // same non-Auto-parent requirement as AUTO GAIN above.
         components::create_gain_slider(
             cx,
             "Gain",
@@ -1913,6 +1910,13 @@ fn create_master_section(cx: &mut Context) {
         );
     })
     .class("master-controls")
+    // Real cause of the MASTER-label collision: this row was width(Auto),
+    // so AUTO GAIN's and the Gain slider's width(Stretch(1.0)) wrappers
+    // (from the shared create_bool_button/create_gain_slider helpers) had
+    // nothing to stretch against and collapsed to zero, letting AUTO
+    // GAIN's label bleed into MASTER's space. Needs a fixed (not Stretch)
+    // width since this is a compact pill, not a fill element.
+    .width(Pixels(470.0))
     .gap(Pixels(12.0));
 }
 
