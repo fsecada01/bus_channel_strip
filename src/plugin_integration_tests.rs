@@ -401,4 +401,59 @@ mod plugin_integration_tests {
             "Plugin instance: Pultec HF +10 dB / 8 kHz must deliver ≥ +6 dB at 8 kHz, got {gain_db:.2} dB"
         );
     }
+
+    /// The DynEQ back-view analyzer must receive audio through the real module
+    /// path — including while DynEQ is bypassed (its factory default).
+    #[cfg(feature = "dynamic_eq")]
+    #[test]
+    fn test_dyneq_analyzer_receives_audio_while_bypassed() {
+        use crate::spectral::{FFT_SIZE, SPECTRUM_BINS};
+        use nice_plug::prelude::AuxiliaryBuffers;
+
+        let sr = 48_000.0_f32;
+        let tone_hz = 3000.0_f32;
+        let expected_bin = (tone_hz * FFT_SIZE as f32 / sr).round() as usize;
+
+        let mut plugin = BusChannelStrip::default();
+        assert!(plugin.params.dynamic_eq.dyneq_bypass.value());
+
+        let fft = realfft::RealFftPlanner::<f32>::new().plan_fft_forward(FFT_SIZE);
+        plugin.fft_input = fft.make_input_vec();
+        plugin.fft_output = fft.make_output_vec();
+        plugin.fft_scratch = fft.make_scratch_vec();
+        plugin.sc_fft_input = fft.make_input_vec();
+        plugin.sc_fft_output = fft.make_output_vec();
+        plugin.fft_engine = Some(fft);
+        plugin.fft_ring = vec![0.0; FFT_SIZE];
+        plugin.sc_ring = vec![0.0; FFT_SIZE];
+        plugin.sample_rate = sr;
+        plugin.fft_window = crate::shaping::hann_window(FFT_SIZE);
+        plugin.fft_magnitude_smooth = vec![0.0; SPECTRUM_BINS];
+
+        let (mut l, mut r) = make_sine_buffer(tone_hz, sr, FFT_SIZE * 4);
+        run_pultec(&mut l, &mut r, |buf| {
+            let mut aux = AuxiliaryBuffers {
+                inputs: &mut [],
+                outputs: &mut [],
+            };
+            plugin.process_module_dynamic_eq(buf, &mut aux);
+        });
+
+        let mut bins = vec![0.0_f32; SPECTRUM_BINS];
+        assert!(
+            plugin.spectrum_data.read_into_slice(&mut bins),
+            "analyzer never published a spectrum frame"
+        );
+        let (peak_bin, &peak_mag) = bins
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap();
+        let peak_db = 20.0 * peak_mag.log10();
+        assert!(
+            peak_bin.abs_diff(expected_bin) <= 1,
+            "peak at bin {peak_bin}, expected {expected_bin}"
+        );
+        assert!(peak_db > -20.0, "peak only {peak_db:.1} dBFS");
+    }
 }
