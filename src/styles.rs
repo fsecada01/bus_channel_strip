@@ -34,13 +34,15 @@ pub const COMPONENT_STYLES: &str = r#"
 
 /* Lunchbox chassis styling — outermost frame */
 .lunchbox-chassis {
-    background: linear-gradient(160deg, #0f131a, #181d27 60%, #101418);
+    background-color: transparent;
+    background-image: linear-gradient(160deg, #0f131a, #181d27 60%, #101418);
     border: 2px solid #2a2f38;
     border-radius: 10px;
 }
 
 .chassis-header {
-    background: linear-gradient(180deg, #2d323c 0%, #24282f 35%, #1b1f27 75%, #151922 100%);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #2d323c 0%, #24282f 35%, #1b1f27 75%, #151922 100%);
     border-bottom: 2px solid #373c46;
     border-top: 1px solid #4a5162;
     padding: 12px 16px;
@@ -91,7 +93,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .master-controls {
-    background: linear-gradient(180deg, rgba(20, 24, 32, 0.55), rgba(14, 17, 22, 0.6));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(20, 24, 32, 0.55), rgba(14, 17, 22, 0.6));
     padding: 8px 12px;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.04);
@@ -111,7 +114,8 @@ pub const COMPONENT_STYLES: &str = r#"
    Slight inset gradient + darker border reads as "recessed" beneath the
    raised modules above. */
 .strip-scroll {
-    background: linear-gradient(180deg, #0c0f14, #141821 60%, #191e27);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #0c0f14, #141821 60%, #191e27);
     border: 1px solid #252a32;
     border-radius: 8px;
 }
@@ -221,7 +225,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .api5500-theme {
     border: 3px solid #40a0d0 !important;
-    background: linear-gradient(165deg, #263945 0%, #1e2d38 45%, #182530) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #263945 0%, #1e2d38 45%, #182530) !important;
 }
 .api5500-theme .module-title {
     color: #7fc8e8;
@@ -229,7 +234,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .buttercomp2-theme {
     border: 3px solid #ff9640 !important;
-    background: linear-gradient(165deg, #38281b 0%, #2b1f15 45%, #22170f) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #38281b 0%, #2b1f15 45%, #22170f) !important;
 }
 .buttercomp2-theme .module-title {
     color: #ffb070;
@@ -237,7 +243,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .pultec-theme {
     border: 3px solid #ffd700 !important;
-    background: linear-gradient(165deg, #38311e 0%, #2b2617 45%, #221e12) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #38311e 0%, #2b2617 45%, #221e12) !important;
 }
 .pultec-theme .module-title {
     color: #ffe055;
@@ -245,7 +252,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .dynamic-eq-theme {
     border: 3px solid #66cc66 !important;
-    background: linear-gradient(165deg, #263825 0%, #1c2a1c 45%, #162216) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #263825 0%, #1c2a1c 45%, #162216) !important;
 }
 .dynamic-eq-theme .module-title {
     color: #8fdf8f;
@@ -253,7 +261,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .transformer-theme {
     border: 3px solid #cc6633 !important;
-    background: linear-gradient(165deg, #33211a 0%, #261810 45%, #1d120c) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #33211a 0%, #261810 45%, #1d120c) !important;
 }
 .transformer-theme .module-title {
     color: #e08858;
@@ -261,7 +270,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .punch-theme {
     border: 3px solid #ff3344 !important;
-    background: linear-gradient(165deg, #381c1f 0%, #2a1618 45%, #20101a) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #381c1f 0%, #2a1618 45%, #20101a) !important;
 }
 .punch-theme .module-title {
     color: #ff6b78;
@@ -269,7 +279,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .haas-theme {
     border: 3px solid #8ca0d2 !important;
-    background: linear-gradient(165deg, #1e2238 0%, #181b2d 45%, #121527) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #1e2238 0%, #181b2d 45%, #121527) !important;
 }
 .haas-theme .module-title {
     color: #b4c0e4;
@@ -279,7 +290,8 @@ pub const COMPONENT_STYLES: &str = r#"
    gradient instead of reading as a separate framed block. */
 .signal-flow-section {
     padding: 8px 16px;
-    background: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.03);
 }
@@ -299,7 +311,8 @@ pub const COMPONENT_STYLES: &str = r#"
    brighter accent on hover to invite experimentation. */
 
 .chain-preset-btn {
-    background: linear-gradient(180deg, #222730, #1b1f27);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #222730, #1b1f27);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     cursor: pointer;
@@ -309,7 +322,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .chain-preset-btn:hover {
-    background: linear-gradient(180deg, #2c3340, #242a36);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #2c3340, #242a36);
     border-color: rgba(180, 200, 255, 0.3);
 }
 
@@ -354,12 +368,14 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .module-name-target:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background-color: rgba(255, 255, 255, 0.04);
+    background-image: none;
     border-color: rgba(255, 255, 255, 0.08);
 }
 
 .module-name-target-focused {
-    background: rgba(255, 220, 100, 0.06);
+    background-color: rgba(255, 220, 100, 0.06);
+    background-image: none;
     border-color: rgba(255, 220, 100, 0.25);
 }
 
@@ -367,14 +383,16 @@ pub const COMPONENT_STYLES: &str = r#"
    focus mode is active; matches the chain-preset button family but in an
    alert tone so it reads as "leave this mode". */
 .exit-focus-btn {
-    background: linear-gradient(180deg, #4a2018, #381610);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #4a2018, #381610);
     border: 1px solid rgba(255, 140, 100, 0.4);
     border-radius: 4px;
     padding: 4px 12px;
     alignment: center;
 }
 .exit-focus-btn:hover {
-    background: linear-gradient(180deg, #5c2820, #4a1d16);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #5c2820, #4a1d16);
     border-color: rgba(255, 180, 140, 0.6);
 }
 .exit-focus-label {
@@ -396,7 +414,8 @@ pub const COMPONENT_STYLES: &str = r#"
    module's accent color; available rows are muted. */
 
 .library-sidebar {
-    background: linear-gradient(180deg, rgba(20, 23, 30, 0.6), rgba(14, 16, 22, 0.7));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(20, 23, 30, 0.6), rgba(14, 16, 22, 0.7));
     border: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 6px;
     padding: 8px 4px;
@@ -415,18 +434,21 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .library-row {
     padding: 4px;
-    background: transparent;
+    background-color: transparent;
+    background-image: none;
     border: 1px solid transparent;
     border-radius: 3px;
 }
 
 .library-row:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background-color: rgba(255, 255, 255, 0.05);
+    background-image: none;
     border-color: rgba(255, 255, 255, 0.1);
 }
 
 .library-row-in-rack {
-    background: rgba(255, 255, 255, 0.03);
+    background-color: rgba(255, 255, 255, 0.03);
+    background-image: none;
 }
 
 .library-row-dot {
@@ -450,14 +472,16 @@ pub const COMPONENT_STYLES: &str = r#"
    presets by category plus a dynamic user-preset list and a save row. */
 
 .preset-header-btn {
-    background: linear-gradient(180deg, #222730, #1b1f27);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #222730, #1b1f27);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     padding: 4px 12px;
     alignment: center;
 }
 .preset-header-btn:hover {
-    background: linear-gradient(180deg, #2c3340, #242a36);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #2c3340, #242a36);
     border-color: rgba(180, 200, 255, 0.3);
 }
 .preset-name-label {
@@ -476,7 +500,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .preset-browser-panel {
-    background: linear-gradient(180deg, rgba(20, 23, 30, 0.85), rgba(14, 16, 22, 0.9));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(20, 23, 30, 0.85), rgba(14, 16, 22, 0.9));
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 6px;
     padding: 8px;
@@ -496,7 +521,8 @@ pub const COMPONENT_STYLES: &str = r#"
     alignment: center;
 }
 .preset-save-btn {
-    background: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.06);
+    background-image: none;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 3px;
     padding: 4px 8px;
@@ -506,7 +532,8 @@ pub const COMPONENT_STYLES: &str = r#"
     letter-spacing: 0.5px;
 }
 .preset-save-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background-color: rgba(255, 255, 255, 0.12);
+    background-image: none;
 }
 
 .preset-category-label {
@@ -524,11 +551,13 @@ pub const COMPONENT_STYLES: &str = r#"
     padding: 4px 8px;
     font-size: 11px;
     color: #c8d0dc;
-    background: transparent;
+    background-color: transparent;
+    background-image: none;
     border-radius: 3px;
 }
 .preset-row:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.06);
+    background-image: none;
     color: #ffffff;
 }
 
@@ -638,7 +667,8 @@ pub const COMPONENT_STYLES: &str = r#"
 
 .zoom-controls {
     padding: 4px 8px;
-    background: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.03);
 }
@@ -653,7 +683,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .zoom-btn {
-    background: linear-gradient(180deg, #222730, #1b1f27);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #222730, #1b1f27);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     cursor: pointer;
@@ -662,12 +693,14 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .zoom-btn:hover {
-    background: linear-gradient(180deg, #2a303c, #232833);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #2a303c, #232833);
     border-color: rgba(255, 255, 255, 0.12);
 }
 
 .zoom-btn-active {
-    background: linear-gradient(180deg, #3a6888, #2a4e68) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(180deg, #3a6888, #2a4e68) !important;
     border-color: rgba(138, 197, 232, 0.55) !important;
 }
 
@@ -686,7 +719,8 @@ pub const COMPONENT_STYLES: &str = r#"
 /* Theme toggle chip (issue #24) — sits beside the zoom band, same dark
    hardware-chip family as .chain-preset-btn / .preset-header-btn. */
 .theme-toggle-btn {
-    background: linear-gradient(180deg, #222730, #1b1f27);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #222730, #1b1f27);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
     cursor: pointer;
@@ -695,7 +729,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .theme-toggle-btn:hover {
-    background: linear-gradient(180deg, #2c3340, #242a36);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #2c3340, #242a36);
     border-color: rgba(180, 200, 255, 0.3);
 }
 
@@ -710,7 +745,8 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .master-section {
-    background: linear-gradient(145deg, #333333, #3a3a3a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #333333, #3a3a3a);
     border-radius: 8px;
     padding: 16px;
     margin: 8px;
@@ -786,7 +822,8 @@ pub const COMPONENT_STYLES: &str = r#"
    Kept simple and clear: dark = on/normal, green = enabled, red = bypassed.
    No box-shadow or transform (vizia-unsupported); we rely on color + border. */
 .bypass-button {
-    background: linear-gradient(145deg, #2a3038, #1f242c);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a3038, #1f242c);
     border: 1px solid #3a4050;
     border-radius: 4px;
     color: #e0e6ee;
@@ -802,30 +839,35 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .bypass-button:hover {
-    background: linear-gradient(145deg, #343b45, #272d38);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #343b45, #272d38);
     border-color: #4a5160;
 }
 
 .bypass-button.on {
-    background: linear-gradient(145deg, #226b22, #1a5c1a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #226b22, #1a5c1a);
     border-color: #3a8a3a;
     color: #ffffff;
 }
 
 .bypass-button.bypass {
-    background: linear-gradient(145deg, #6b2222, #5c1a1a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #6b2222, #5c1a1a);
     border-color: #8a3a3a;
     color: #ffffff;
 }
 
 .bypass-button:checked {
-    background: linear-gradient(145deg, #8a2a2a, #6e1f1f);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #8a2a2a, #6e1f1f);
     border-color: #d05050;
     color: #ffffff;
 }
 
 .bypass-button:checked:hover {
-    background: linear-gradient(145deg, #9a3232, #7e2626);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #9a3232, #7e2626);
     border-color: #e06060;
 }
 
@@ -835,7 +877,8 @@ pub const COMPONENT_STYLES: &str = r#"
    OFF), so the CSS applies the lit style to the UNCHECKED state and the dark
    style to :checked. Used for all module bypass toggles. */
 .active-led-button {
-    background: linear-gradient(145deg, #2c8a2c, #1e7024);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2c8a2c, #1e7024);
     border: 1px solid #4dbd4d;
     border-radius: 4px;
     color: #f5fff5;
@@ -851,18 +894,21 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .active-led-button:hover {
-    background: linear-gradient(145deg, #35a035, #24842a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #35a035, #24842a);
     border-color: #66d866;
 }
 
 .active-led-button:checked {
-    background: linear-gradient(145deg, #1c1f24, #14171c);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #1c1f24, #14171c);
     border-color: #2d3138;
     color: #6a7280;
 }
 
 .active-led-button:checked:hover {
-    background: linear-gradient(145deg, #22262c, #191d23);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #22262c, #191d23);
     border-color: #3a4050;
     color: #8a93a0;
 }
@@ -874,7 +920,8 @@ pub const COMPONENT_STYLES: &str = r#"
    (vizia CSS lacks pointer-events: none) — that's fine, double-toggle is
    harmless since it targets the same bypass param. */
 .module-led-indicator {
-    background: radial-gradient(circle at 35% 35%, #6ee46e, #2c8a2c 60%, #1e7024);
+    background-color: transparent;
+    background-image: radial-gradient(#6ee46e, #2c8a2c 60%, #1e7024);
     border: 1px solid #4dbd4d;
     border-radius: 7px;
     width: 14px;
@@ -889,7 +936,8 @@ pub const COMPONENT_STYLES: &str = r#"
     border-color: #7ce87c;
 }
 .module-led-indicator:checked {
-    background: radial-gradient(circle at 35% 35%, #2a2e36, #16181d 60%, #0d0f13);
+    background-color: transparent;
+    background-image: radial-gradient(#2a2e36, #16181d 60%, #0d0f13);
     border-color: #2d3138;
 }
 .module-led-indicator:checked:hover {
@@ -908,14 +956,16 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 14px;
     font-weight: 700;
     color: #6a7280;
-    background: transparent;
+    background-color: transparent;
+    background-image: none;
     border: 1px solid transparent;
     border-radius: 3px;
 }
 .hide-btn:hover {
     color: #e0a0a0;
     border-color: #5a3038;
-    background: rgba(200, 60, 60, 0.08);
+    background-color: rgba(200, 60, 60, 0.08);
+    background-image: none;
 }
 
 /* Eject button — header-mounted control that removes the slot's module and
@@ -927,13 +977,15 @@ pub const COMPONENT_STYLES: &str = r#"
     min-height: 20px;
     padding: 0 8px;
     gap: 4px;
-    background: rgba(60, 30, 30, 0.45);
+    background-color: rgba(60, 30, 30, 0.45);
+    background-image: none;
     border: 1px solid #5a3030;
     border-radius: 3px;
     alignment: center;
 }
 .eject-btn:hover {
-    background: rgba(180, 60, 60, 0.55);
+    background-color: rgba(180, 60, 60, 0.55);
+    background-image: none;
     border-color: #c46060;
 }
 .eject-btn-glyph {
@@ -961,7 +1013,8 @@ pub const COMPONENT_STYLES: &str = r#"
    immediately see which slots are unoccupied. */
 .empty-theme {
     border: 3px dashed #6e7480 !important;
-    background: linear-gradient(165deg, #1e2128 0%, #181a20 45%, #14161b) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #1e2128 0%, #181a20 45%, #14161b) !important;
 }
 .empty-theme .module-name {
     color: #9aa0ae;
@@ -977,15 +1030,18 @@ pub const COMPONENT_STYLES: &str = r#"
    it specifically. */
 .slot-empty {
     border-style: dashed !important;
-    background: linear-gradient(170deg, #20232a 0%, #181a20 100%) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(170deg, #20232a 0%, #181a20 100%) !important;
 }
 .slot-empty:hover {
     border-color: #c8ccd4 !important;
-    background: linear-gradient(170deg, #2a2e36 0%, #1e2026 100%) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(170deg, #2a2e36 0%, #1e2026 100%) !important;
 }
 .slot-empty-focused {
     border-color: #ffd83a !important;
-    background: linear-gradient(170deg, #2c2e2a 0%, #1f211c 100%) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(170deg, #2c2e2a 0%, #1f211c 100%) !important;
 }
 .empty-slot-glyph {
     font-size: 24px;
@@ -1035,20 +1091,23 @@ pub const COMPONENT_STYLES: &str = r#"
     font-size: 16px;
     font-weight: 700;
     color: #a0a8b8;
-    background: rgba(30, 34, 42, 0.6);
+    background-color: rgba(30, 34, 42, 0.6);
+    background-image: none;
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 4px;
 }
 .expand-btn:hover {
     color: #ffffff;
-    background: rgba(50, 58, 72, 0.8);
+    background-color: rgba(50, 58, 72, 0.8);
+    background-image: none;
     border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Band ON button. Unchecked = band DISABLED = red-tinted alert.
    :checked = band ENABLED = dark with green outline/text. */
 .on-button {
-    background: linear-gradient(145deg, #4a1f1f, #3a1818);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #4a1f1f, #3a1818);
     border: 1px solid #a04040;
     border-radius: 4px;
     color: #f0a0a0;
@@ -1063,23 +1122,27 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .on-button:hover {
-    background: linear-gradient(145deg, #5a2626, #481e1e);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #5a2626, #481e1e);
 }
 
 .on-button:checked {
-    background: linear-gradient(145deg, #1c2a1c, #142014);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #1c2a1c, #142014);
     border-color: #4dbd4d;
     color: #8fe08f;
 }
 
 .on-button:checked:hover {
-    background: linear-gradient(145deg, #223422, #1a281a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #223422, #1a281a);
     border-color: #66d866;
 }
 
 /* Band SOLO button: neutral when off, lit amber when soloed (:checked). */
 .solo-button {
-    background: linear-gradient(145deg, #2a3038, #1f242c);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a3038, #1f242c);
     border: 1px solid #3a4050;
     border-radius: 4px;
     color: #a0a8b4;
@@ -1094,25 +1157,29 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .solo-button:hover {
-    background: linear-gradient(145deg, #343b45, #272d38);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #343b45, #272d38);
     border-color: #4a5160;
 }
 
 .solo-button:checked {
-    background: linear-gradient(145deg, #b88a14, #94700e);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #b88a14, #94700e);
     border-color: #f0c040;
     color: #fff8e0;
 }
 
 .solo-button:checked:hover {
-    background: linear-gradient(145deg, #c8981c, #a47c12);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #c8981c, #a47c12);
     border-color: #ffd060;
 }
 
 /* Enhanced slider styling */
 slider {
     height: 20px;
-    background: linear-gradient(145deg, #404040, #353535);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #404040, #353535);
     border-radius: 10px;
     margin: 4px 0px;
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -1120,23 +1187,27 @@ slider {
 }
 
 slider:hover {
-    background: linear-gradient(145deg, #454545, #3a3a3a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #454545, #3a3a3a);
 }
 
 slider .track {
-    background: linear-gradient(145deg, #606060, #555555);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #606060, #555555);
     border-radius: 10px;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 slider .active {
-    background: linear-gradient(145deg, #4080ff, #3070ef);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #4080ff, #3070ef);
     border-radius: 10px;
     box-shadow: 0 0 8px rgba(64, 128, 255, 0.3);
 }
 
 slider .thumb {
-    background: linear-gradient(145deg, #ffffff, #e0e0e0);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #ffffff, #e0e0e0);
     border: 1px solid #cccccc;
     border-radius: 50%;
     width: 16px;
@@ -1146,7 +1217,8 @@ slider .thumb {
 }
 
 slider .thumb:hover {
-    background: linear-gradient(145deg, #ffffff, #f0f0f0);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #ffffff, #f0f0f0);
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.4);
     transform: scale(1.1);
 }
@@ -1177,7 +1249,8 @@ param-slider:active .value {
 /* Floating value tooltip that follows the cursor during a ParamSlider
    drag — see `components::param_slider_with_tooltip`. */
 .param-drag-tooltip {
-    background: linear-gradient(145deg, #262a32, #1a1d24);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #262a32, #1a1d24);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 4px;
     padding: 4px 8px;
@@ -1194,7 +1267,8 @@ param-slider:active .value {
 }
 
 .frequency-slider .active {
-    background: linear-gradient(145deg, #40a0d0, #3090c0);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #40a0d0, #3090c0);
 }
 
 .gain-slider {
@@ -1202,7 +1276,8 @@ param-slider:active .value {
 }
 
 .gain-slider .active {
-    background: linear-gradient(145deg, #ff9640, #ef8630);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #ff9640, #ef8630);
 }
 
 .ratio-slider {
@@ -1210,7 +1285,8 @@ param-slider:active .value {
 }
 
 .ratio-slider .active {
-    background: linear-gradient(145deg, #66cc66, #56bc56);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #66cc66, #56bc56);
 }
 
 /* Scrolling container */
@@ -1294,7 +1370,8 @@ scrollbar .thumb:hover {
 }
 
 .dyneq-open-btn {
-    background: linear-gradient(145deg, #1e3d1e, #2a5c2a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #1e3d1e, #2a5c2a);
     border: 2px solid #66cc66;
     border-radius: 6px;
     cursor: pointer;
@@ -1304,7 +1381,8 @@ scrollbar .thumb:hover {
 }
 
 .dyneq-open-btn:hover {
-    background: linear-gradient(145deg, #2a5c2a, #3a7a3a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a5c2a, #3a7a3a);
     border-color: #88ee88;
 }
 
@@ -1321,14 +1399,16 @@ scrollbar .thumb:hover {
    and band columns pop against it. Darker gradient at edges for a vignette
    feel without box-shadow. */
 .dyneq-back-view {
-    background: linear-gradient(165deg, #1e2e1e 0%, #152015 45%, #0f180f);
+    background-color: transparent;
+    background-image: linear-gradient(165deg, #1e2e1e 0%, #152015 45%, #0f180f);
     border: 2px solid #66cc66;
     border-radius: 8px;
 }
 
 /* Back button */
 .dyneq-back-btn {
-    background: linear-gradient(145deg, #2a2a2a, #333333);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a2a2a, #333333);
     border: 1px solid #66cc66;
     border-radius: 5px;
     cursor: pointer;
@@ -1338,7 +1418,8 @@ scrollbar .thumb:hover {
 }
 
 .dyneq-back-btn:hover {
-    background: linear-gradient(145deg, #333333, #444444);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #333333, #444444);
     border-color: #88ee88;
 }
 
@@ -1364,17 +1445,19 @@ scrollbar .thumb:hover {
     font-size: 11px;
     font-weight: 700;
     color: #f0c040;
-    background: rgba(240, 192, 64, 0.12);
+    background-color: rgba(240, 192, 64, 0.12);
+    background-image: none;
     border: 1px solid rgba(240, 192, 64, 0.6);
     border-radius: 4px;
-    padding-left: 10px;
-    padding-right: 10px;
-    letter-spacing: 0.6px;
+    padding-left: 8px;
+    padding-right: 8px;
+    letter-spacing: 0.5px;
 }
 
 /* Spectral analyzer placeholder */
 .dyneq-spectrum {
-    background: linear-gradient(145deg, #0d1a0d, #111f11);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #0d1a0d, #111f11);
     border: 1px solid rgba(102, 204, 102, 0.4);
     border-radius: 6px;
     display: flex;
@@ -1387,13 +1470,15 @@ scrollbar .thumb:hover {
    with brass border so the back view feels like the inside of a vintage
    compressor — not a different plugin altogether. */
 .sheen-back-view {
-    background: linear-gradient(165deg, #1d1610 0%, #14100a 45%, #0d0a06);
+    background-color: transparent;
+    background-image: linear-gradient(165deg, #1d1610 0%, #14100a 45%, #0d0a06);
     border: 2px solid #c8a04a;
     border-radius: 8px;
 }
 
 .sheen-back-btn {
-    background: linear-gradient(145deg, #2a2218, #36281c);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a2218, #36281c);
     border: 1px solid #c8a04a;
     border-radius: 5px;
     cursor: pointer;
@@ -1403,7 +1488,8 @@ scrollbar .thumb:hover {
 }
 
 .sheen-back-btn:hover {
-    background: linear-gradient(145deg, #36281c, #463420);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #36281c, #463420);
     border-color: #ffd870;
 }
 
@@ -1426,7 +1512,8 @@ scrollbar .thumb:hover {
 }
 
 .sheen-master-bypass {
-    background: linear-gradient(145deg, #2a2218, #1d1610);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a2218, #1d1610);
     border: 1px solid #806020;
     border-radius: 4px;
     color: #e8c878;
@@ -1436,20 +1523,23 @@ scrollbar .thumb:hover {
 }
 
 .sheen-master-bypass:checked {
-    background: linear-gradient(145deg, #c8a04a, #a0822e);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #c8a04a, #a0822e);
     color: #1a1206;
     border-color: #ffd870;
 }
 
 .sheen-restore-btn {
-    background: linear-gradient(145deg, #2a2218, #1d1610);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a2218, #1d1610);
     border: 1px solid #806020;
     border-radius: 4px;
     padding: 8px 12px;
 }
 
 .sheen-restore-btn:hover {
-    background: linear-gradient(145deg, #36281c, #463420);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #36281c, #463420);
 }
 
 .sheen-restore-label {
@@ -1467,7 +1557,8 @@ scrollbar .thumb:hover {
 /* Per-stage column on the Sheen back view. Wide gap, subtle internal
    panel so the five columns read as separate stages of one chain. */
 .sheen-stage-column {
-    background: linear-gradient(180deg, rgba(40, 30, 16, 0.55), rgba(24, 18, 10, 0.65));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(40, 30, 16, 0.55), rgba(24, 18, 10, 0.65));
     border: 1px solid rgba(200, 160, 74, 0.18);
     border-radius: 6px;
     padding: 12px 8px;
@@ -1499,7 +1590,8 @@ scrollbar .thumb:hover {
 }
 
 .sheen-stage-bypass {
-    background: linear-gradient(145deg, #1d1610, #14100a);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #1d1610, #14100a);
     border: 1px solid rgba(200, 160, 74, 0.28);
     border-radius: 3px;
     color: #c8a04a;
@@ -1510,7 +1602,8 @@ scrollbar .thumb:hover {
 }
 
 .sheen-stage-bypass:checked {
-    background: linear-gradient(145deg, #806020, #604818);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #806020, #604818);
     color: #1a1206;
     border-color: #c8a04a;
 }
@@ -1534,7 +1627,8 @@ scrollbar .thumb:hover {
 
 /* Per-band column in the back view */
 .dyneq-band-col {
-    background: rgba(102, 204, 102, 0.04);
+    background-color: rgba(102, 204, 102, 0.04);
+    background-image: none;
     border: 1px solid rgba(102, 204, 102, 0.15);
     border-radius: 6px;
     padding: 8px;
@@ -1599,18 +1693,21 @@ scrollbar .thumb:hover {
    stay dark regardless of the faceplate color. */
 
 .theme-daylight .lunchbox-chassis {
-    background: linear-gradient(160deg, #e8e4da, #d8d2c4 60%, #e0dbd0);
+    background-color: transparent;
+    background-image: linear-gradient(160deg, #e8e4da, #d8d2c4 60%, #e0dbd0);
     border-color: #b6ae9c;
 }
 
 .theme-daylight .chassis-header {
-    background: linear-gradient(180deg, #f2efe6 0%, #e8e3d6 35%, #ddd7c8 75%, #d2ccbc 100%);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #f2efe6 0%, #e8e3d6 35%, #ddd7c8 75%, #d2ccbc 100%);
     border-bottom-color: #c2baa8;
     border-top-color: #fffdf8;
 }
 
 .theme-daylight .strip-scroll {
-    background: linear-gradient(180deg, #dcd7ca, #cec8b8 60%, #c2bcaa);
+    background-color: transparent;
+    background-image: linear-gradient(180deg, #dcd7ca, #cec8b8 60%, #c2bcaa);
     border-color: #b4ac9a;
 }
 
@@ -1623,7 +1720,8 @@ scrollbar .thumb:hover {
 }
 
 .theme-daylight .master-controls {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(238, 232, 218, 0.6));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(238, 232, 218, 0.6));
     border-color: rgba(0, 0, 0, 0.08);
 }
 
@@ -1632,12 +1730,14 @@ scrollbar .thumb:hover {
 }
 
 .theme-daylight .master-section {
-    background: linear-gradient(145deg, #dcd6c4, #d0cab4);
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #dcd6c4, #d0cab4);
     border-color: #a89e88;
 }
 
 .theme-daylight .signal-flow-section {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(238, 232, 218, 0.55));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(238, 232, 218, 0.55));
     border-color: rgba(0, 0, 0, 0.06);
 }
 
@@ -1646,7 +1746,8 @@ scrollbar .thumb:hover {
 }
 
 .theme-daylight .zoom-controls {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(238, 232, 218, 0.55));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(238, 232, 218, 0.55));
     border-color: rgba(0, 0, 0, 0.06);
 }
 
@@ -1655,7 +1756,8 @@ scrollbar .thumb:hover {
 }
 
 .theme-daylight .library-sidebar {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(236, 230, 216, 0.7));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(236, 230, 216, 0.7));
     border-color: rgba(0, 0, 0, 0.08);
 }
 
@@ -1664,16 +1766,19 @@ scrollbar .thumb:hover {
 }
 
 .theme-daylight .library-row:hover {
-    background: rgba(0, 0, 0, 0.06);
+    background-color: rgba(0, 0, 0, 0.06);
+    background-image: none;
     border-color: rgba(0, 0, 0, 0.12);
 }
 
 .theme-daylight .library-row-in-rack {
-    background: rgba(0, 0, 0, 0.04);
+    background-color: rgba(0, 0, 0, 0.04);
+    background-image: none;
 }
 
 .theme-daylight .preset-browser-panel {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(236, 230, 216, 0.9));
+    background-color: transparent;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(236, 230, 216, 0.9));
     border-color: rgba(0, 0, 0, 0.1);
 }
 
@@ -1702,14 +1807,16 @@ scrollbar .thumb:hover {
    the light rail), title text switched from a light tint to a dark one. */
 
 .theme-daylight .api5500-theme {
-    background: linear-gradient(165deg, #dceaf2 0%, #cfe1ec 45%, #c2d7e6) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #dceaf2 0%, #cfe1ec 45%, #c2d7e6) !important;
 }
 .theme-daylight .api5500-theme .module-name {
     color: #0b6690 !important;
 }
 
 .theme-daylight .buttercomp2-theme {
-    background: linear-gradient(165deg, #f4e6d2 0%, #ecd9c0 45%, #e2ccac) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #f4e6d2 0%, #ecd9c0 45%, #e2ccac) !important;
 }
 .theme-daylight .buttercomp2-theme .module-name {
     color: #a8500c !important;
@@ -1717,14 +1824,16 @@ scrollbar .thumb:hover {
 
 .theme-daylight .pultec-theme {
     border-color: #a8860c !important;
-    background: linear-gradient(165deg, #f2ecd2 0%, #e8dfbc 45%, #ded3a6) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #f2ecd2 0%, #e8dfbc 45%, #ded3a6) !important;
 }
 .theme-daylight .pultec-theme .module-name {
     color: #7a5c00 !important;
 }
 
 .theme-daylight .dynamic-eq-theme {
-    background: linear-gradient(165deg, #dcf0dc 0%, #cce6cc 45%, #bcdcbc) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #dcf0dc 0%, #cce6cc 45%, #bcdcbc) !important;
 }
 .theme-daylight .dynamic-eq-theme .module-name {
     color: #1c6b1c !important;
@@ -1734,14 +1843,16 @@ scrollbar .thumb:hover {
 }
 
 .theme-daylight .transformer-theme {
-    background: linear-gradient(165deg, #f0ded2 0%, #e6ccbc 45%, #dcbaa6) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #f0ded2 0%, #e6ccbc 45%, #dcbaa6) !important;
 }
 .theme-daylight .transformer-theme .module-name {
     color: #8a3c14 !important;
 }
 
 .theme-daylight .punch-theme {
-    background: linear-gradient(165deg, #f4dcde 0%, #eacace 45%, #dfb7be) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #f4dcde 0%, #eacace 45%, #dfb7be) !important;
 }
 .theme-daylight .punch-theme .module-name {
     color: #a3172a !important;
@@ -1749,7 +1860,8 @@ scrollbar .thumb:hover {
 
 .theme-daylight .haas-theme {
     border-color: #57689c !important;
-    background: linear-gradient(165deg, #dfe2f0 0%, #d0d3e6 45%, #c1c5dc) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #dfe2f0 0%, #d0d3e6 45%, #c1c5dc) !important;
 }
 .theme-daylight .haas-theme .module-name {
     color: #374070 !important;
@@ -1757,7 +1869,8 @@ scrollbar .thumb:hover {
 
 .theme-daylight .empty-theme {
     border-color: #8a8470 !important;
-    background: linear-gradient(165deg, #e2ded2 0%, #d6d2c4 45%, #cac6b6) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(165deg, #e2ded2 0%, #d6d2c4 45%, #cac6b6) !important;
 }
 .theme-daylight .empty-theme .module-name {
     color: #655f4e;
@@ -1789,11 +1902,13 @@ scrollbar .thumb:hover {
 /* Focus/hover overlays that assumed a dark card underneath — flipped from a
    white tint (invisible on a light card) to a black tint. */
 .theme-daylight .module-name-target:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background-color: rgba(0, 0, 0, 0.05);
+    background-image: none;
     border-color: rgba(0, 0, 0, 0.12);
 }
 .theme-daylight .module-name-target-focused {
-    background: rgba(180, 120, 10, 0.12);
+    background-color: rgba(180, 120, 10, 0.12);
+    background-image: none;
     border-color: rgba(180, 120, 10, 0.4);
 }
 .theme-daylight .hide-btn {
@@ -1806,14 +1921,17 @@ scrollbar .thumb:hover {
     color: #6c6656;
 }
 .theme-daylight .slot-empty {
-    background: linear-gradient(170deg, #e6e2d4 0%, #dad4c2 100%) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(170deg, #e6e2d4 0%, #dad4c2 100%) !important;
 }
 .theme-daylight .slot-empty:hover {
-    background: linear-gradient(170deg, #ece8dc 0%, #e2ddce 100%) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(170deg, #ece8dc 0%, #e2ddce 100%) !important;
     border-color: #8a8470 !important;
 }
 .theme-daylight .slot-empty-focused {
-    background: linear-gradient(170deg, #f0ecd6 0%, #e6e0c6 100%) !important;
+    background-color: transparent !important;
+    background-image: linear-gradient(170deg, #f0ecd6 0%, #e6e0c6 100%) !important;
 }
 
 /* Zoom: content-only scaling. vizia-plug does not support runtime host-window

@@ -4038,12 +4038,12 @@ fn build_dyneq_back_view(
             analysis_result,
             gr_data,
         )
-            .class("dyneq-spectrum")
-            .height(Stretch(2.0))
-            .min_height(Pixels(180.0))
-            .width(Stretch(1.0))
-            .top(Pixels(0.0))
-            .bottom(Pixels(0.0));
+        .class("dyneq-spectrum")
+        .height(Stretch(2.0))
+        .min_height(Pixels(180.0))
+        .width(Stretch(1.0))
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0));
 
         // ── 4-band horizontal editor ──────────────────────────────────────────
         #[cfg(feature = "dynamic_eq")]
