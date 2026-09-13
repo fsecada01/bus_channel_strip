@@ -3802,7 +3802,7 @@ macro_rules! dyneq_band_col {
                 components::create_on_button(cx, "dyneq_band1_enabled", &params, |p| {
                     &p.dynamic_eq.$enabled
                 });
-                components::create_bypass_button(cx, "SOLO", "dyneq_band1_solo", &params, |p| {
+                components::create_solo_button(cx, "dyneq_band1_solo", &params, |p| {
                     &p.dynamic_eq.$solo
                 });
                 // Chevron toggle button — reactive label via dyneq_expand_gen signal
@@ -3939,15 +3939,25 @@ fn build_dyneq_back_view(
 
             #[cfg(feature = "dynamic_eq")]
             {
-                // create_active_led_button (not create_bypass_button): the
-                // latter's .bypass-button CSS class has no :checked state
-                // styling at all, so this toggle never visually changed —
-                // matching the front-panel module strip's DynEQ bypass
-                // (green/lit = active, dark = bypassed via :checked).
+                // Same LED convention as the front-panel module strip:
+                // green = active, dark = bypassed.
                 let params = cx.data::<Data>().params.clone();
                 components::create_active_led_button(cx, "dyneq_bypass", &params, |p| {
                     &p.dynamic_eq.dyneq_bypass
                 });
+
+                // Band EQ and SOLO are silent while bypassed — say so.
+                let params_gen_signal = cx.data::<Data>().params_gen;
+                let bypassed = Memo::<bool>::new(move |_| {
+                    params_gen_signal.get();
+                    params.dynamic_eq.dyneq_bypass.value()
+                });
+                Label::new(cx, "BYPASSED — CLICK ACTIVE TO HEAR BANDS / SOLO")
+                    .class("dyneq-bypassed-badge")
+                    .height(Pixels(28.0))
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0))
+                    .display(bypassed.map(|b| if *b { Display::Flex } else { Display::None }));
             }
 
             // ── Sidechain masking analysis controls ──────────────────────────

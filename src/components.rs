@@ -247,10 +247,8 @@ pub fn create_active_led_button<'c, 'p, F>(
     );
 }
 
-/// Band enable button. Uses the "on-button" CSS class which inverts the visual
-/// convention: the checked/lit state (param=true = enabled) appears DARK like
-/// normal operation, while the unchecked state (disabled) appears lit/red.
-/// This matches the bypass button convention where dark = normal/processing.
+/// Band enable button labelled "ON": green-outlined when enabled (:checked),
+/// red-tinted when disabled.
 pub fn create_on_button<'c, 'p, F>(
     cx: &'c mut Context,
     tooltip_id: &'static str,
@@ -262,7 +260,30 @@ pub fn create_on_button<'c, 'p, F>(
 {
     attach_tooltip(
         ParamButton::new(cx, param_map(params))
+            .with_label("ON")
             .class("on-button")
+            .height(Pixels(28.0))
+            .width(Stretch(1.0))
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
+}
+
+/// Band solo button labelled "SOLO": neutral when off, lit amber when soloed.
+pub fn create_solo_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    tooltip_id: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
+    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
+{
+    attach_tooltip(
+        ParamButton::new(cx, param_map(params))
+            .with_label("SOLO")
+            .class("solo-button")
             .height(Pixels(28.0))
             .width(Stretch(1.0))
             .top(Pixels(0.0))

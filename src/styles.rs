@@ -818,12 +818,22 @@ pub const COMPONENT_STYLES: &str = r#"
     color: #ffffff;
 }
 
+.bypass-button:checked {
+    background: linear-gradient(145deg, #8a2a2a, #6e1f1f);
+    border-color: #d05050;
+    color: #ffffff;
+}
+
+.bypass-button:checked:hover {
+    background: linear-gradient(145deg, #9a3232, #7e2626);
+    border-color: #e06060;
+}
+
 /* ── Active-LED button (module bypass) ─────────────────────────────────────
    Hardware power-LED convention: lit green when the module is processing,
    dark when bypassed. The BoolParam semantics are inverted (bypass=true means
    OFF), so the CSS applies the lit style to the UNCHECKED state and the dark
-   style to :checked. Used for all six module bypass toggles; SOLO buttons
-   keep the standard .bypass-button treatment. */
+   style to :checked. Used for all module bypass toggles. */
 .active-led-button {
     background: linear-gradient(145deg, #2c8a2c, #1e7024);
     border: 1px solid #4dbd4d;
@@ -1035,35 +1045,68 @@ pub const COMPONENT_STYLES: &str = r#"
     border-color: rgba(255, 255, 255, 0.18);
 }
 
-/* Band ON button — inverted convention vs bypass buttons.
-   :checked = param is true = band ENABLED = should look DARK (normal state).
-   Unchecked = param is false = band DISABLED = should look LIT (alert state). */
+/* Band ON button. Unchecked = band DISABLED = red-tinted alert.
+   :checked = band ENABLED = dark with green outline/text. */
 .on-button {
-    background: linear-gradient(145deg, #4a4a4a, #3a3a3a);
-    border: 1px solid #666666;
+    background: linear-gradient(145deg, #4a1f1f, #3a1818);
+    border: 1px solid #a04040;
     border-radius: 4px;
-    color: #aaaaaa;
+    color: #f0a0a0;
     padding: 8px 12px;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 700;
     text-align: center;
     cursor: pointer;
     min-width: 60px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .on-button:hover {
-    background: linear-gradient(145deg, #555555, #444444);
+    background: linear-gradient(145deg, #5a2626, #481e1e);
 }
 
-/* Checked = enabled = DARK (normal processing state, like bypass=false) */
 .on-button:checked {
-    background: linear-gradient(145deg, #3a3a3a, #2a2a2a);
-    border-color: #555555;
-    color: #888888;
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+    background: linear-gradient(145deg, #1c2a1c, #142014);
+    border-color: #4dbd4d;
+    color: #8fe08f;
+}
+
+.on-button:checked:hover {
+    background: linear-gradient(145deg, #223422, #1a281a);
+    border-color: #66d866;
+}
+
+/* Band SOLO button: neutral when off, lit amber when soloed (:checked). */
+.solo-button {
+    background: linear-gradient(145deg, #2a3038, #1f242c);
+    border: 1px solid #3a4050;
+    border-radius: 4px;
+    color: #a0a8b4;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    cursor: pointer;
+    min-width: 60px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.solo-button:hover {
+    background: linear-gradient(145deg, #343b45, #272d38);
+    border-color: #4a5160;
+}
+
+.solo-button:checked {
+    background: linear-gradient(145deg, #b88a14, #94700e);
+    border-color: #f0c040;
+    color: #fff8e0;
+}
+
+.solo-button:checked:hover {
+    background: linear-gradient(145deg, #c8981c, #a47c12);
+    border-color: #ffd060;
 }
 
 /* Enhanced slider styling */
@@ -1315,6 +1358,18 @@ scrollbar .thumb:hover {
     text-transform: uppercase;
     letter-spacing: 2px;
     text-shadow: 0 0 10px rgba(102, 204, 102, 0.4);
+}
+
+.dyneq-bypassed-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: #f0c040;
+    background: rgba(240, 192, 64, 0.12);
+    border: 1px solid rgba(240, 192, 64, 0.6);
+    border-radius: 4px;
+    padding-left: 10px;
+    padding-right: 10px;
+    letter-spacing: 0.6px;
 }
 
 /* Spectral analyzer placeholder */
