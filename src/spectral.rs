@@ -501,4 +501,67 @@ mod tests {
         // FFT_SIZE >= 2 × SPECTRUM_BINS ensures proper positive-frequency coverage
         assert!(FFT_SIZE >= SPECTRUM_BINS * 2);
     }
+
+    // ── Crossover overlay / sample-rate alignment (editor.rs SpectrumCanvas) ───
+    //
+    // SpectrumCanvas::draw() (editor.rs) places the main spectrum curve's bin i
+    // at x_frac = i / SPECTRUM_BINS. Bin i's real frequency is
+    // i * sample_rate / FFT_SIZE (the same bin->Hz formula lib.rs already uses
+    // for the sidechain-masking peak-frequency calc). The crossover-line /
+    // band-tint overlay must compute its x-position from that SAME live sample
+    // rate (spectrum_top_hz = sample_rate / 4.0, published via
+    // BusChannelStrip::spectrum_sample_rate) or it drifts out of alignment with
+    // the curve — a real bug fixed after being caught here: a prior version
+    // hardcoded spectrum_top_hz to 11025.0 (the 44.1kHz-only value), which
+    // matched the curve only when the session ran at exactly 44.1 kHz and
+    // silently misaligned at 48/96/192 kHz. These constants mirror editor.rs's
+    // local consts as of this writing — they aren't imported, since those
+    // consts are private to the draw() fn.
+
+    const MIRRORED_CROSSOVER_HZ: [f32; 3] = [500.0, 2000.0, 6000.0];
+
+    /// x-fraction where `freq_hz` actually lands on the bin-index-linear curve
+    /// at the given sample rate — the inverse of the bin->Hz formula.
+    fn true_curve_x_frac(freq_hz: f32, sample_rate: f32) -> f32 {
+        let bin_idx = freq_hz * FFT_SIZE as f32 / sample_rate;
+        bin_idx / SPECTRUM_BINS as f32
+    }
+
+    /// x-fraction the overlay draws at, mirroring editor.rs's current
+    /// (fixed) SpectrumCanvas::draw() formula: spectrum_top_hz =
+    /// published_sample_rate / 4.0, falling back to the 44.1kHz reference
+    /// when no sample rate has been published yet (<= 0.0, e.g. before the
+    /// host's first `initialize()` call).
+    fn overlay_x_frac(freq_hz: f32, published_sample_rate: f32) -> f32 {
+        let sample_rate = if published_sample_rate > 0.0 {
+            published_sample_rate
+        } else {
+            44_100.0
+        };
+        (freq_hz / (sample_rate / 4.0)).clamp(0.0, 1.0)
+    }
+
+    #[test]
+    fn test_crossover_overlay_stays_aligned_with_curve_across_sample_rates() {
+        for &sr in &[44_100.0_f32, 48_000.0, 88_200.0, 96_000.0, 192_000.0] {
+            for &f in &MIRRORED_CROSSOVER_HZ {
+                let drift = (overlay_x_frac(f, sr) - true_curve_x_frac(f, sr)).abs();
+                assert!(
+                    drift < 1e-6,
+                    "{f} Hz at {sr} Hz sample rate: overlay and curve should agree, drift={drift}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_crossover_overlay_falls_back_to_44_1khz_reference_before_sample_rate_is_published() {
+        for &f in &MIRRORED_CROSSOVER_HZ {
+            let drift = (overlay_x_frac(f, 0.0) - true_curve_x_frac(f, 44_100.0)).abs();
+            assert!(
+                drift < 1e-6,
+                "{f} Hz: unpublished sample rate should fall back to the 44.1kHz reference, drift={drift}"
+            );
+        }
+    }
 }

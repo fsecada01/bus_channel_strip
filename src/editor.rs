@@ -1167,6 +1167,7 @@ pub(crate) fn create(
     params: Arc<BusChannelStripParams>,
     editor_state: Arc<ViziaState>,
     spectrum_data: Arc<spectral::SpectrumData>,
+    spectrum_sample_rate: Arc<spectral::LevelMeterData>,
     analysis_requested: Arc<AtomicBool>,
     analysis_result: Arc<spectral::AnalysisResult>,
     gr_data: Arc<spectral::GainReductionData>,
@@ -1406,6 +1407,7 @@ pub(crate) fn create(
             build_dyneq_back_view(
                 cx,
                 spectrum_data.clone(),
+                spectrum_sample_rate.clone(),
                 analysis_result.clone(),
                 gr_data.clone(),
             );
@@ -2982,6 +2984,7 @@ fn build_dynamic_eq_controls(cx: &mut Context) {
 /// Both `display_bins` and `display_overlap` are GUI-thread-only RefCells.
 struct SpectrumCanvas {
     spectrum_data: Arc<spectral::SpectrumData>,
+    sample_rate: Arc<spectral::LevelMeterData>,
     display_bins: RefCell<Vec<f32>>,
     analysis_result: Arc<spectral::AnalysisResult>,
     display_overlap: RefCell<Vec<f32>>,
@@ -2992,11 +2995,13 @@ impl SpectrumCanvas {
     fn new(
         cx: &mut Context,
         spectrum_data: Arc<spectral::SpectrumData>,
+        sample_rate: Arc<spectral::LevelMeterData>,
         analysis_result: Arc<spectral::AnalysisResult>,
         gr_data: Arc<spectral::GainReductionData>,
     ) -> Handle<'_, Self> {
         Self {
             spectrum_data,
+            sample_rate,
             display_bins: RefCell::new(vec![0.0_f32; spectral::SPECTRUM_BINS]),
             analysis_result,
             display_overlap: RefCell::new(vec![0.0_f32; spectral::SPECTRUM_BINS]),
@@ -3060,10 +3065,19 @@ impl View for SpectrumCanvas {
         let x_step = bounds.w / n as f32;
 
         // ── Band crossover visualization ──────────────────────────────────────
-        // The spectrum covers 0..sample_rate/4 Hz across SPECTRUM_BINS bins.
-        // At the 44.1 kHz reference: 512 bins = 11025 Hz.
-        // x_frac = freq / 11025.0  (visual guide only — acceptable approximation).
-        const SPECTRUM_TOP_HZ: f32 = 11025.0;
+        // The main curve places bin i at x_frac = i / SPECTRUM_BINS, and bin i's
+        // real frequency is i * sample_rate / FFT_SIZE — so the overlay's own
+        // top-of-scale frequency must track the live sample rate (sample_rate/4
+        // here, since FFT_SIZE = 4 * SPECTRUM_BINS) or it drifts out of
+        // alignment with the curve at any rate other than 44.1 kHz (confirmed
+        // by spectral.rs's test_crossover_overlay_misaligns_with_curve_at_* tests).
+        let live_sample_rate = f32::from_bits(self.sample_rate.value.load(Ordering::Relaxed));
+        let sample_rate = if live_sample_rate > 0.0 {
+            live_sample_rate
+        } else {
+            44_100.0 // not yet published by initialize() — reference default
+        };
+        let spectrum_top_hz = sample_rate / 4.0;
         const CROSSOVER_HZ: [f32; 3] = [500.0, 2000.0, 6000.0];
         // Band colors: LOW=green, LOW-MID=sky-blue, HIGH-MID=purple, HIGH=amber
         const BAND_ARGB: [(u8, u8, u8, u8); 4] = [
@@ -3073,7 +3087,7 @@ impl View for SpectrumCanvas {
             (45, 220, 150, 50), // band4 HIGH     — amber
         ];
 
-        let cx_frac: [f32; 3] = CROSSOVER_HZ.map(|f| (f / SPECTRUM_TOP_HZ).clamp(0.0, 1.0));
+        let cx_frac: [f32; 3] = CROSSOVER_HZ.map(|f| (f / spectrum_top_hz).clamp(0.0, 1.0));
         let cx_x: [f32; 3] = cx_frac.map(|fr| bounds.x + fr * bounds.w);
 
         let band_left = [bounds.x, cx_x[0], cx_x[1], cx_x[2]];
@@ -3876,6 +3890,7 @@ macro_rules! dyneq_band_col {
 fn build_dyneq_back_view(
     cx: &mut Context,
     spectrum_data: Arc<spectral::SpectrumData>,
+    spectrum_sample_rate: Arc<spectral::LevelMeterData>,
     analysis_result: Arc<spectral::AnalysisResult>,
     gr_data: Arc<spectral::GainReductionData>,
 ) {
@@ -4002,7 +4017,13 @@ fn build_dyneq_back_view(
         // reads cx.bounds() every frame, so no additional plumbing is needed.
         // min_height guards against the canvas disappearing on very short
         // windows.
-        SpectrumCanvas::new(cx, spectrum_data, analysis_result, gr_data)
+        SpectrumCanvas::new(
+            cx,
+            spectrum_data,
+            spectrum_sample_rate,
+            analysis_result,
+            gr_data,
+        )
             .class("dyneq-spectrum")
             .height(Stretch(2.0))
             .min_height(Pixels(180.0))

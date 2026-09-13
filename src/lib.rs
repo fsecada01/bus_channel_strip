@@ -184,6 +184,11 @@ struct BusChannelStrip {
 
     /// Spectrum data shared lock-free with the GUI thread.
     spectrum_data: Arc<spectral::SpectrumData>,
+    /// audio → GUI: live sample rate, so the DynEQ spectrum canvas's
+    /// crossover-line overlay can map Hz to pixels correctly instead of
+    /// assuming a fixed 44.1 kHz (the overlay's own frequency-to-x math lives
+    /// in editor.rs's SpectrumCanvas::draw).
+    spectrum_sample_rate: Arc<spectral::LevelMeterData>,
 
     /// Pre-allocated FFT ring buffer — no audio-thread allocation.
     #[cfg(feature = "dynamic_eq")]
@@ -277,6 +282,7 @@ impl Default for BusChannelStrip {
             temp_buffer_1: Vec::new(),
             temp_buffer_2: Vec::new(),
             spectrum_data: Arc::new(spectral::SpectrumData::new()),
+            spectrum_sample_rate: Arc::new(spectral::LevelMeterData::new()),
             #[cfg(feature = "dynamic_eq")]
             fft_ring: Vec::new(),
             #[cfg(feature = "dynamic_eq")]
@@ -905,6 +911,7 @@ impl Plugin for BusChannelStrip {
             self.params.clone(),
             self.params.editor_state.clone(),
             self.spectrum_data.clone(),
+            self.spectrum_sample_rate.clone(),
             self.analysis_requested.clone(),
             self.analysis_result.clone(),
             self.gr_data.clone(),
@@ -926,6 +933,9 @@ impl Plugin for BusChannelStrip {
         // TODO: query actual sample rate from _context or BufferConfig
         // Reinitialize modules with the actual sample rate
         let sr = _buffer_config.sample_rate;
+        self.spectrum_sample_rate
+            .value
+            .store(sr.to_bits(), std::sync::atomic::Ordering::Relaxed);
         #[cfg(feature = "api5500")]
         {
             self.eq_api5500 = Api5500::new(sr);
