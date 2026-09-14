@@ -2999,10 +2999,65 @@ fn build_dynamic_eq_controls(cx: &mut Context) {
 // Spectrum Canvas — real-time lock-free spectrum display
 // ============================================================================
 
+/// Live DynEQ band settings overlaid on the analyzer.
+#[derive(Clone, Copy, Default)]
+struct BandMarker {
+    enabled: bool,
+    freq_hz: f32,
+    q: f32,
+    detector_hz: f32,
+}
+
+#[cfg(feature = "dynamic_eq")]
+fn dyneq_band_markers(params: &BusChannelStripParams) -> [BandMarker; 4] {
+    let p = &params.dynamic_eq;
+    [
+        BandMarker {
+            enabled: p.dyneq_band1_enabled.value(),
+            freq_hz: p.dyneq_band1_freq.value(),
+            q: p.dyneq_band1_q.value(),
+            detector_hz: p.dyneq_band1_detector_freq.value(),
+        },
+        BandMarker {
+            enabled: p.dyneq_band2_enabled.value(),
+            freq_hz: p.dyneq_band2_freq.value(),
+            q: p.dyneq_band2_q.value(),
+            detector_hz: p.dyneq_band2_detector_freq.value(),
+        },
+        BandMarker {
+            enabled: p.dyneq_band3_enabled.value(),
+            freq_hz: p.dyneq_band3_freq.value(),
+            q: p.dyneq_band3_q.value(),
+            detector_hz: p.dyneq_band3_detector_freq.value(),
+        },
+        BandMarker {
+            enabled: p.dyneq_band4_enabled.value(),
+            freq_hz: p.dyneq_band4_freq.value(),
+            q: p.dyneq_band4_q.value(),
+            detector_hz: p.dyneq_band4_detector_freq.value(),
+        },
+    ]
+}
+
+#[cfg(not(feature = "dynamic_eq"))]
+fn dyneq_band_markers(_params: &BusChannelStripParams) -> [BandMarker; 4] {
+    [BandMarker::default(); 4]
+}
+
+fn draw_vline(canvas: &Canvas, x: f32, top: f32, bottom: f32, paint: &vg::Paint) {
+    let mut path = vg::PathBuilder::new();
+    path.move_to((x, top));
+    path.line_to((x, bottom));
+    canvas.draw_path(&path.detach(), paint);
+}
+
 /// Reads magnitude bins from the audio thread's lock-free `SpectrumData` and
-/// redraws each frame. Also overlays the sidechain masking analysis when available.
+/// redraws each frame on a log-frequency axis, with each enabled DynEQ band's
+/// freq/Q region, centre and detector frequency drawn from the live params.
+/// Also overlays the sidechain masking analysis when available.
 /// Both `display_bins` and `display_overlap` are GUI-thread-only RefCells.
 struct SpectrumCanvas {
+    params: Arc<BusChannelStripParams>,
     spectrum_data: Arc<spectral::SpectrumData>,
     sample_rate: Arc<spectral::LevelMeterData>,
     display_bins: RefCell<Vec<f32>>,
@@ -3020,12 +3075,14 @@ struct SpectrumCanvas {
 impl SpectrumCanvas {
     fn new(
         cx: &mut Context,
+        params: Arc<BusChannelStripParams>,
         spectrum_data: Arc<spectral::SpectrumData>,
         sample_rate: Arc<spectral::LevelMeterData>,
         analysis_result: Arc<spectral::AnalysisResult>,
         gr_data: Arc<spectral::GainReductionData>,
     ) -> Handle<'_, Self> {
         Self {
+            params,
             spectrum_data,
             sample_rate,
             display_bins: RefCell::new(vec![0.0_f32; spectral::SPECTRUM_BINS]),
@@ -3166,173 +3223,146 @@ impl View for SpectrumCanvas {
             return;
         }
 
-        let x_step = bounds.w / n as f32;
+        let sample_rate = spectral::display_sample_rate(f32::from_bits(
+            self.sample_rate.value.load(Ordering::Relaxed),
+        ));
+        let bottom = bounds.y + bounds.h;
+        let x_of =
+            |freq_hz: f32| bounds.x + spectral::freq_to_x_frac(freq_hz, sample_rate) * bounds.w;
+        let columns = (bounds.w.round() as usize).max(1);
+        let column_hz = |c: usize| spectral::x_frac_to_freq(c as f32 / columns as f32, sample_rate);
+        let column_x = |c: usize| bounds.x + (c as f32 + 0.5) * bounds.w / columns as f32;
 
-        // ── Band crossover visualization ──────────────────────────────────────
-        // The main curve places bin i at x_frac = i / SPECTRUM_BINS, and bin i's
-        // real frequency is i * sample_rate / FFT_SIZE — so the overlay's own
-        // top-of-scale frequency must track the live sample rate (sample_rate/4
-        // here, since FFT_SIZE = 4 * SPECTRUM_BINS) or it drifts out of
-        // alignment with the curve at any rate other than 44.1 kHz (confirmed
-        // by spectral.rs's test_crossover_overlay_misaligns_with_curve_at_* tests).
-        let live_sample_rate = f32::from_bits(self.sample_rate.value.load(Ordering::Relaxed));
-        let sample_rate = if live_sample_rate > 0.0 {
-            live_sample_rate
-        } else {
-            44_100.0 // not yet published by initialize() — reference default
-        };
-        let spectrum_top_hz = sample_rate / 4.0;
-        const CROSSOVER_HZ: [f32; 3] = [500.0, 2000.0, 6000.0];
-        // Band colors: LOW=green, LOW-MID=sky-blue, HIGH-MID=purple, HIGH=amber
-        const BAND_ARGB: [(u8, u8, u8, u8); 4] = [
-            (45, 80, 200, 110), // band1 LOW      — green
-            (45, 60, 150, 220), // band2 LOW MID  — sky blue
-            (45, 150, 90, 220), // band3 HIGH MID — purple
-            (45, 220, 150, 50), // band4 HIGH     — amber
+        // ── Frequency grid: 100 Hz, 1 kHz, 10 kHz ───────────────────────────
+        let mut grid_paint = vg::Paint::default();
+        grid_paint.set_color(vg::Color::from_argb(40, 220, 220, 220));
+        grid_paint.set_style(vg::PaintStyle::Stroke);
+        grid_paint.set_stroke_width(1.0);
+        grid_paint.set_anti_alias(false);
+        for grid_hz in [100.0_f32, 1000.0, 10_000.0] {
+            if grid_hz < spectral::display_top_hz(sample_rate) {
+                draw_vline(canvas, x_of(grid_hz), bounds.y, bottom, &grid_paint);
+            }
+        }
+
+        // ── DynEQ band regions (freq/Q bandwidth) + GR bars ──────────────────
+        // LOW=green, LOW-MID=sky-blue, HIGH-MID=purple, HIGH=amber
+        const BAND_RGB: [(u8, u8, u8); 4] = [
+            (80, 200, 110),
+            (60, 150, 220),
+            (150, 90, 220),
+            (220, 150, 50),
         ];
-
-        let cx_frac: [f32; 3] = CROSSOVER_HZ.map(|f| (f / spectrum_top_hz).clamp(0.0, 1.0));
-        let cx_x: [f32; 3] = cx_frac.map(|fr| bounds.x + fr * bounds.w);
-
-        let band_left = [bounds.x, cx_x[0], cx_x[1], cx_x[2]];
-        let band_right = [cx_x[0], cx_x[1], cx_x[2], bounds.x + bounds.w];
-
-        // Read per-band gain reduction (Relaxed — display only, staleness fine).
-        let gr_db: [f32; 4] = [
-            f32::from_bits(self.gr_data.bands[0].load(Ordering::Relaxed)),
-            f32::from_bits(self.gr_data.bands[1].load(Ordering::Relaxed)),
-            f32::from_bits(self.gr_data.bands[2].load(Ordering::Relaxed)),
-            f32::from_bits(self.gr_data.bands[3].load(Ordering::Relaxed)),
-        ];
-
-        // Draw semi-transparent band background tints + GR bars at the top.
         const MAX_GR_DB: f32 = 24.0;
         const MAX_BAR_H: f32 = 18.0;
-        for b in 0..4_usize {
-            let (a, r, g, bl) = BAND_ARGB[b];
-            let band_w = band_right[b] - band_left[b];
+        const DASH_PX: f32 = 4.0;
+        const DASH_GAP_PX: f32 = 3.0;
+        let bands = dyneq_band_markers(&self.params);
+        for (b, band) in bands.iter().enumerate().filter(|(_, band)| band.enabled) {
+            let (r, g, bl) = BAND_RGB[b];
+            let (lo_hz, hi_hz) = spectral::bell_band_edges_hz(band.freq_hz, band.q);
+            let left = x_of(lo_hz);
+            let width = (x_of(hi_hz) - left).max(1.0);
 
-            // Subtle background tint for the band region.
             let mut tint = vg::Paint::default();
-            tint.set_color(vg::Color::from_argb(a, r, g, bl));
+            tint.set_color(vg::Color::from_argb(40, r, g, bl));
             tint.set_style(vg::PaintStyle::Fill);
-            canvas.draw_rect(
-                vg::Rect::from_xywh(band_left[b], bounds.y, band_w, bounds.h),
-                &tint,
-            );
+            canvas.draw_rect(vg::Rect::from_xywh(left, bounds.y, width, bounds.h), &tint);
 
-            // GR bar: height proportional to gain reduction amount.
-            let gr = gr_db[b].clamp(0.0, MAX_GR_DB);
+            let gr =
+                f32::from_bits(self.gr_data.bands[b].load(Ordering::Relaxed)).clamp(0.0, MAX_GR_DB);
             if gr > 0.1 {
-                let bar_h = (gr / MAX_GR_DB) * MAX_BAR_H;
-                // Alpha 220 matches `LevelMeterBar`'s fill convention (issue #22) —
-                // per-band coloring is kept since it also identifies which band.
+                // Alpha 220 matches `LevelMeterBar`'s fill convention (issue #22).
                 let mut gr_paint = vg::Paint::default();
                 gr_paint.set_color(vg::Color::from_argb(220, r, g, bl));
                 gr_paint.set_style(vg::PaintStyle::Fill);
                 canvas.draw_rect(
-                    vg::Rect::from_xywh(band_left[b], bounds.y, band_w, bar_h),
+                    vg::Rect::from_xywh(left, bounds.y, width, gr / MAX_GR_DB * MAX_BAR_H),
                     &gr_paint,
                 );
             }
         }
 
-        // Draw vertical crossover lines between bands.
-        let mut line_paint = vg::Paint::default();
-        line_paint.set_color(vg::Color::from_argb(120, 220, 220, 220));
-        line_paint.set_style(vg::PaintStyle::Stroke);
-        line_paint.set_stroke_width(1.0);
-        line_paint.set_anti_alias(false);
-        for &cx_px in &cx_x {
-            let mut vline_builder = vg::PathBuilder::new();
-            vline_builder.move_to((cx_px, bounds.y));
-            vline_builder.line_to((cx_px, bounds.y + bounds.h));
-            let vline = vline_builder.detach();
-            canvas.draw_path(&vline, &line_paint);
-        }
-
-        // ── Overlap overlay (orange) — drawn below the main spectrum fill ──
-        // Normalise to the peak overlap value so relative masking is always visible.
-        let max_overlap = overlap
-            .iter()
-            .cloned()
-            .fold(0.0_f32, f32::max)
-            .max(f32::MIN_POSITIVE);
+        // ── Overlap overlay (orange), normalised to its own peak ─────────────
+        let max_overlap = overlap.iter().copied().fold(0.0_f32, f32::max);
         if max_overlap > f32::MIN_POSITIVE * 2.0 {
             let mut ovl_builder = vg::PathBuilder::new();
-            let mut ovl_started = false;
-            for (i, &ov) in overlap.iter().enumerate() {
-                let norm = (ov / max_overlap).clamp(0.0, 1.0);
-                let x = bounds.x + i as f32 * x_step;
-                let y = bounds.y + bounds.h - norm * bounds.h;
-                if !ovl_started {
-                    ovl_builder.move_to((x, y));
-                    ovl_started = true;
-                } else {
-                    ovl_builder.line_to((x, y));
-                }
+            ovl_builder.move_to((bounds.x, bottom));
+            for c in 0..columns {
+                let mag = spectral::column_magnitude(
+                    &overlap,
+                    column_hz(c),
+                    column_hz(c + 1),
+                    sample_rate,
+                );
+                let norm = (mag / max_overlap).clamp(0.0, 1.0);
+                ovl_builder.line_to((column_x(c), bottom - norm * bounds.h));
             }
-            if ovl_started {
-                ovl_builder.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
-                ovl_builder.line_to((bounds.x, bounds.y + bounds.h));
-                ovl_builder.close();
-                let ovl_path = ovl_builder.detach();
-                let mut ovl_paint = vg::Paint::default();
-                // Semi-transparent orange — stands out clearly against the teal spectrum.
-                ovl_paint.set_color(vg::Color::from_argb(90, 255, 110, 20));
-                ovl_paint.set_style(vg::PaintStyle::Fill);
-                ovl_paint.set_anti_alias(true);
-                canvas.draw_path(&ovl_path, &ovl_paint);
-            }
+            ovl_builder.line_to((bounds.x + bounds.w, bottom));
+            ovl_builder.close();
+            let mut ovl_paint = vg::Paint::default();
+            ovl_paint.set_color(vg::Color::from_argb(90, 255, 110, 20));
+            ovl_paint.set_style(vg::PaintStyle::Fill);
+            ovl_paint.set_anti_alias(true);
+            canvas.draw_path(&ovl_builder.detach(), &ovl_paint);
         }
 
-        // ── Spectrum filled area (dBFS: −90 dB → bottom, 0 dB → top) ─────
+        // ── Spectrum fill + stroke (dBFS: −90 dB → bottom, 0 dB → top) ──────
         let mut fill_builder = vg::PathBuilder::new();
-        let mut started = false;
-        for (i, &mag) in bins.iter().enumerate() {
+        let mut line_builder = vg::PathBuilder::new();
+        fill_builder.move_to((bounds.x, bottom));
+        for c in 0..columns {
+            let mag =
+                spectral::column_magnitude(&bins, column_hz(c), column_hz(c + 1), sample_rate);
             let db = 20.0 * mag.max(1e-9_f32).log10();
             let norm = ((db + 90.0) / 90.0).clamp(0.0, 1.0);
-            let x = bounds.x + i as f32 * x_step;
-            let y = bounds.y + bounds.h - norm * bounds.h;
-            if !started {
-                fill_builder.move_to((x, y));
-                started = true;
+            let point = (column_x(c), bottom - norm * bounds.h);
+            fill_builder.line_to(point);
+            if c == 0 {
+                line_builder.move_to(point);
             } else {
-                fill_builder.line_to((x, y));
+                line_builder.line_to(point);
             }
         }
-        fill_builder.line_to((bounds.x + bounds.w, bounds.y + bounds.h));
-        fill_builder.line_to((bounds.x, bounds.y + bounds.h));
+        fill_builder.line_to((bounds.x + bounds.w, bottom));
         fill_builder.close();
-        let fill = fill_builder.detach();
         let mut fill_paint = vg::Paint::default();
         fill_paint.set_color(vg::Color::from_argb(60, 50, 180, 150));
         fill_paint.set_style(vg::PaintStyle::Fill);
         fill_paint.set_anti_alias(true);
-        canvas.draw_path(&fill, &fill_paint);
+        canvas.draw_path(&fill_builder.detach(), &fill_paint);
 
-        // ── Stroke line ──────────────────────────────────────────────────────
-        let mut line_builder = vg::PathBuilder::new();
-        let mut started = false;
-        for (i, &mag) in bins.iter().enumerate() {
-            let db = 20.0 * mag.max(1e-9_f32).log10();
-            let norm = ((db + 90.0) / 90.0).clamp(0.0, 1.0);
-            let x = bounds.x + i as f32 * x_step;
-            let y = bounds.y + bounds.h - norm * bounds.h;
-            if !started {
-                line_builder.move_to((x, y));
-                started = true;
-            } else {
-                line_builder.line_to((x, y));
-            }
-        }
-        let line = line_builder.detach();
         let mut stroke_paint = vg::Paint::default();
         stroke_paint.set_color(vg::Color::from_argb(200, 80, 220, 180));
         stroke_paint.set_style(vg::PaintStyle::Stroke);
         stroke_paint.set_stroke_width(1.5);
         stroke_paint.set_anti_alias(true);
-        canvas.draw_path(&line, &stroke_paint);
+        canvas.draw_path(&line_builder.detach(), &stroke_paint);
+
+        // ── Band centre (solid) and detector frequency (dashed) markers ──────
+        for (b, band) in bands.iter().enumerate().filter(|(_, band)| band.enabled) {
+            let (r, g, bl) = BAND_RGB[b];
+            let mut marker = vg::Paint::default();
+            marker.set_color(vg::Color::from_argb(220, r, g, bl));
+            marker.set_style(vg::PaintStyle::Stroke);
+            marker.set_stroke_width(1.0);
+            marker.set_anti_alias(false);
+            let centre_x = x_of(band.freq_hz);
+            draw_vline(canvas, centre_x, bounds.y, bottom, &marker);
+
+            let detector_x = x_of(band.detector_hz);
+            if (detector_x - centre_x).abs() >= 2.0 {
+                marker.set_color(vg::Color::from_argb(150, r, g, bl));
+                let mut dashes = vg::PathBuilder::new();
+                let mut y = bounds.y;
+                while y < bottom {
+                    dashes.move_to((detector_x, y));
+                    dashes.line_to((detector_x, (y + DASH_PX).min(bottom)));
+                    y += DASH_PX + DASH_GAP_PX;
+                }
+                canvas.draw_path(&dashes.detach(), &marker);
+            }
+        }
 
         // Always request the next frame when visible. The bounds guard above prevents
         // redraws when hidden. The has_new_data flag only tells us if the audio thread
@@ -4180,8 +4210,10 @@ fn build_dyneq_back_view(
         // reads cx.bounds() every frame, so no additional plumbing is needed.
         // min_height guards against the canvas disappearing on very short
         // windows.
+        let params = cx.data::<Data>().params.clone();
         SpectrumCanvas::new(
             cx,
+            params,
             spectrum_data,
             spectrum_sample_rate,
             analysis_result,

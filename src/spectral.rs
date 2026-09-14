@@ -11,10 +11,9 @@
 use realfft::num_complex::Complex32;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
-/// Number of frequency bins published to the GUI.
-/// With FFT_SIZE = 2048 this covers 0 … fs/4 Hz (all useful audio range
-/// at 44.1 kHz through 192 kHz sample rates).
-pub const SPECTRUM_BINS: usize = 512;
+/// Number of frequency bins published to the GUI: every positive-frequency bin of
+/// [`FFT_SIZE`], so the analyzer covers 0 … Nyquist at any sample rate.
+pub const SPECTRUM_BINS: usize = FFT_SIZE / 2;
 
 /// FFT size used in lib.rs for accumulation. Declared here so both the
 /// audio thread and spectral.rs agree on the constant.
@@ -76,6 +75,83 @@ impl Default for SpectrumData {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Analyzer display axis ─────────────────────────────────────────────────────
+
+/// Lowest frequency on the DynEQ analyzer's log-frequency axis.
+pub const DISPLAY_MIN_HZ: f32 = 20.0;
+/// Highest frequency on the analyzer's axis, when Nyquist allows it.
+pub const DISPLAY_MAX_HZ: f32 = 20_000.0;
+/// Sample rate the analyzer assumes before `initialize()` publishes the real one.
+pub const REFERENCE_SAMPLE_RATE: f32 = 44_100.0;
+
+/// The published sample rate, or [`REFERENCE_SAMPLE_RATE`] while none is published yet.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn display_sample_rate(published: f32) -> f32 {
+    if published > 0.0 {
+        published
+    } else {
+        REFERENCE_SAMPLE_RATE
+    }
+}
+
+/// Top of the analyzer axis: Nyquist, capped at [`DISPLAY_MAX_HZ`].
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn display_top_hz(sample_rate: f32) -> f32 {
+    (sample_rate * 0.5).min(DISPLAY_MAX_HZ)
+}
+
+/// Horizontal position (0 = left edge, 1 = right edge) of `freq_hz` on the log axis.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn freq_to_x_frac(freq_hz: f32, sample_rate: f32) -> f32 {
+    let span = (display_top_hz(sample_rate) / DISPLAY_MIN_HZ).ln();
+    ((freq_hz.max(DISPLAY_MIN_HZ) / DISPLAY_MIN_HZ).ln() / span).clamp(0.0, 1.0)
+}
+
+/// Inverse of [`freq_to_x_frac`].
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn x_frac_to_freq(x_frac: f32, sample_rate: f32) -> f32 {
+    DISPLAY_MIN_HZ * (display_top_hz(sample_rate) / DISPLAY_MIN_HZ).powf(x_frac.clamp(0.0, 1.0))
+}
+
+/// Fractional FFT bin index of `freq_hz`.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn hz_to_bin(freq_hz: f32, sample_rate: f32) -> f32 {
+    freq_hz * FFT_SIZE as f32 / sample_rate
+}
+
+/// Magnitude to draw for a display column spanning `lo_hz..hi_hz`: the loudest bin inside the
+/// span, or the value interpolated at the span's centre when the span falls between two bins
+/// (the low end of the log axis, where one bin covers many columns).
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn column_magnitude(bins: &[f32], lo_hz: f32, hi_hz: f32, sample_rate: f32) -> f32 {
+    let Some(last) = bins.len().checked_sub(1) else {
+        return 0.0;
+    };
+    let lo = hz_to_bin(lo_hz, sample_rate);
+    let hi = hz_to_bin(hi_hz, sample_rate);
+    let first = lo.max(0.0).ceil() as usize;
+    let end = hi.max(0.0).floor() as usize;
+    if first <= end && first <= last {
+        return bins[first..=end.min(last)]
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max);
+    }
+    let pos = (0.5 * (lo + hi)).clamp(0.0, last as f32);
+    let i = pos.floor() as usize;
+    let j = (i + 1).min(last);
+    bins[i] + (bins[j] - bins[i]) * (pos - i as f32)
+}
+
+/// Lower and upper edges of a bell band's region: `freq_hz / q` wide and geometrically
+/// centred on `freq_hz` (the standard bandwidth definition of a peaking filter's Q).
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn bell_band_edges_hz(freq_hz: f32, q: f32) -> (f32, f32) {
+    let k = 0.5 / q.max(1.0e-3);
+    let s = (1.0 + k * k).sqrt();
+    (freq_hz * (s - k), freq_hz * (s + k))
 }
 
 // ── AnalysisResult ────────────────────────────────────────────────────────────
@@ -748,72 +824,105 @@ mod tests {
 
     #[test]
     fn test_spectrum_constants_sane() {
-        assert_eq!(SPECTRUM_BINS, 512);
         assert_eq!(FFT_SIZE, 2048);
-        // FFT_SIZE >= 2 × SPECTRUM_BINS ensures proper positive-frequency coverage
-        assert!(FFT_SIZE >= SPECTRUM_BINS * 2);
+        assert_eq!(SPECTRUM_BINS, FFT_SIZE / 2);
     }
 
-    // ── Crossover overlay / sample-rate alignment (editor.rs SpectrumCanvas) ───
-    //
-    // SpectrumCanvas::draw() (editor.rs) places the main spectrum curve's bin i
-    // at x_frac = i / SPECTRUM_BINS. Bin i's real frequency is
-    // i * sample_rate / FFT_SIZE (the same bin->Hz formula lib.rs already uses
-    // for the sidechain-masking peak-frequency calc). The crossover-line /
-    // band-tint overlay must compute its x-position from that SAME live sample
-    // rate (spectrum_top_hz = sample_rate / 4.0, published via
-    // BusChannelStrip::spectrum_sample_rate) or it drifts out of alignment with
-    // the curve — a real bug fixed after being caught here: a prior version
-    // hardcoded spectrum_top_hz to 11025.0 (the 44.1kHz-only value), which
-    // matched the curve only when the session ran at exactly 44.1 kHz and
-    // silently misaligned at 48/96/192 kHz. These constants mirror editor.rs's
-    // local consts as of this writing — they aren't imported, since those
-    // consts are private to the draw() fn.
+    // ── Analyzer display axis (editor.rs SpectrumCanvas) ─────────────────────
 
-    const MIRRORED_CROSSOVER_HZ: [f32; 3] = [500.0, 2000.0, 6000.0];
-
-    /// x-fraction where `freq_hz` actually lands on the bin-index-linear curve
-    /// at the given sample rate — the inverse of the bin->Hz formula.
-    fn true_curve_x_frac(freq_hz: f32, sample_rate: f32) -> f32 {
-        let bin_idx = freq_hz * FFT_SIZE as f32 / sample_rate;
-        bin_idx / SPECTRUM_BINS as f32
-    }
-
-    /// x-fraction the overlay draws at, mirroring editor.rs's current
-    /// (fixed) SpectrumCanvas::draw() formula: spectrum_top_hz =
-    /// published_sample_rate / 4.0, falling back to the 44.1kHz reference
-    /// when no sample rate has been published yet (<= 0.0, e.g. before the
-    /// host's first `initialize()` call).
-    fn overlay_x_frac(freq_hz: f32, published_sample_rate: f32) -> f32 {
-        let sample_rate = if published_sample_rate > 0.0 {
-            published_sample_rate
-        } else {
-            44_100.0
-        };
-        (freq_hz / (sample_rate / 4.0)).clamp(0.0, 1.0)
-    }
+    const SAMPLE_RATES: [f32; 5] = [44_100.0, 48_000.0, 88_200.0, 96_000.0, 192_000.0];
 
     #[test]
-    fn test_crossover_overlay_stays_aligned_with_curve_across_sample_rates() {
-        for &sr in &[44_100.0_f32, 48_000.0, 88_200.0, 96_000.0, 192_000.0] {
-            for &f in &MIRRORED_CROSSOVER_HZ {
-                let drift = (overlay_x_frac(f, sr) - true_curve_x_frac(f, sr)).abs();
+    fn test_display_axis_round_trips() {
+        for &sr in &SAMPLE_RATES {
+            for &f in &[20.0_f32, 63.0, 200.0, 1000.0, 5000.0, 15_000.0, 20_000.0] {
+                let back = x_frac_to_freq(freq_to_x_frac(f, sr), sr);
                 assert!(
-                    drift < 1e-6,
-                    "{f} Hz at {sr} Hz sample rate: overlay and curve should agree, drift={drift}"
+                    (back / f - 1.0).abs() < 1e-3,
+                    "{f} Hz at {sr} Hz: round trip gave {back}"
                 );
             }
         }
     }
 
     #[test]
-    fn test_crossover_overlay_falls_back_to_44_1khz_reference_before_sample_rate_is_published() {
-        for &f in &MIRRORED_CROSSOVER_HZ {
-            let drift = (overlay_x_frac(f, 0.0) - true_curve_x_frac(f, 44_100.0)).abs();
+    fn test_display_axis_spans_20hz_to_20khz_or_nyquist() {
+        assert_eq!(freq_to_x_frac(DISPLAY_MIN_HZ, 48_000.0), 0.0);
+        assert!((freq_to_x_frac(DISPLAY_MAX_HZ, 48_000.0) - 1.0).abs() < 1e-6);
+        assert!((freq_to_x_frac(16_000.0, 32_000.0) - 1.0).abs() < 1e-6);
+        assert!(freq_to_x_frac(12_000.0, 48_000.0) < 0.95);
+        let low_decade = freq_to_x_frac(1000.0, 48_000.0) - freq_to_x_frac(100.0, 48_000.0);
+        let high_decade = freq_to_x_frac(10_000.0, 48_000.0) - freq_to_x_frac(1000.0, 48_000.0);
+        assert!(
+            (low_decade - high_decade).abs() < 1e-5,
+            "decades must be equally wide"
+        );
+    }
+
+    #[test]
+    fn test_display_sample_rate_falls_back_before_publication() {
+        assert_eq!(display_sample_rate(0.0), REFERENCE_SAMPLE_RATE);
+        assert_eq!(display_sample_rate(96_000.0), 96_000.0);
+    }
+
+    #[test]
+    fn test_tone_peaks_at_the_column_of_its_frequency() {
+        const WIDTH: usize = 900;
+        for &sr in &SAMPLE_RATES {
+            for &tone_bin in &[3_usize, 43, 128, 700] {
+                let tone_hz = tone_bin as f32 * sr / FFT_SIZE as f32;
+                if !(DISPLAY_MIN_HZ..=display_top_hz(sr)).contains(&tone_hz) {
+                    continue;
+                }
+                let mut bins = vec![0.0_f32; SPECTRUM_BINS];
+                bins[tone_bin] = 1.0;
+                let column_hz = |c: usize| x_frac_to_freq(c as f32 / WIDTH as f32, sr);
+                let magnitude =
+                    |c: usize| column_magnitude(&bins, column_hz(c), column_hz(c + 1), sr);
+                let peak_column = (0..WIDTH)
+                    .max_by(|&a, &b| magnitude(a).total_cmp(&magnitude(b)))
+                    .unwrap();
+                let expected = freq_to_x_frac(tone_hz, sr) * WIDTH as f32;
+                assert!(
+                    (peak_column as f32 - expected).abs() <= 1.5,
+                    "{tone_hz} Hz at {sr} Hz: peak drawn at column {peak_column}, marker at {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_column_magnitude_interpolates_between_bins() {
+        let sr = 48_000.0;
+        let hz = |bin: f32| bin * sr / FFT_SIZE as f32;
+        let mut bins = vec![0.0_f32; SPECTRUM_BINS];
+        bins[2] = 1.0;
+        let between = column_magnitude(&bins, hz(2.24), hz(2.26), sr);
+        assert!((between - 0.75).abs() < 1e-3, "got {between}");
+        assert_eq!(column_magnitude(&[], 100.0, 200.0, sr), 0.0);
+    }
+
+    #[test]
+    fn test_bell_band_edges_follow_freq_and_q() {
+        for &(f, q) in &[
+            (200.0_f32, 1.0_f32),
+            (800.0, 0.3),
+            (3000.0, 8.0),
+            (8000.0, 2.5),
+        ] {
+            let (lo, hi) = bell_band_edges_hz(f, q);
+            assert!(lo < f && f < hi, "{f} Hz must sit inside {lo}..{hi}");
             assert!(
-                drift < 1e-6,
-                "{f} Hz: unpublished sample rate should fall back to the 44.1kHz reference, drift={drift}"
+                ((lo * hi).sqrt() / f - 1.0).abs() < 1e-4,
+                "{lo}..{hi} not centred on {f}"
+            );
+            assert!(
+                ((hi - lo) - f / q).abs() < f * 1e-4,
+                "{lo}..{hi} must be f/Q wide"
             );
         }
+        let (wide_lo, wide_hi) = bell_band_edges_hz(1000.0, 0.5);
+        let (narrow_lo, narrow_hi) = bell_band_edges_hz(1000.0, 4.0);
+        assert!(wide_lo < narrow_lo && wide_hi > narrow_hi);
     }
 }
