@@ -478,4 +478,178 @@ mod plugin_integration_tests {
             "first layout must carry the stereo sidechain for VST3 hosts"
         );
     }
+
+    struct TestContext {
+        transport: nice_plug::prelude::Transport,
+    }
+
+    impl nice_plug::prelude::InitContext<BusChannelStrip> for TestContext {
+        fn plugin_api(&self) -> nice_plug::prelude::PluginApi {
+            nice_plug::prelude::PluginApi::Vst3
+        }
+        fn execute(&self, _task: ()) {}
+        fn set_latency_samples(&self, _samples: u32) {}
+        fn set_current_voice_capacity(&self, _capacity: u32) {}
+    }
+
+    impl nice_plug::prelude::ProcessContext<BusChannelStrip> for TestContext {
+        fn plugin_api(&self) -> nice_plug::prelude::PluginApi {
+            nice_plug::prelude::PluginApi::Vst3
+        }
+        fn execute_background(&self, _task: ()) {}
+        fn execute_gui(&self, _task: ()) {}
+        fn transport(&self) -> &nice_plug::prelude::Transport {
+            &self.transport
+        }
+        fn next_event(&mut self) -> Option<nice_plug::prelude::PluginNoteEvent<BusChannelStrip>> {
+            None
+        }
+        fn send_event(&mut self, _event: nice_plug::prelude::PluginNoteEvent<BusChannelStrip>) {}
+        fn set_latency_samples(&self, _samples: u32) {}
+        fn set_current_voice_capacity(&self, _capacity: u32) {}
+    }
+
+    /// Load a nice-plug state JSON (`{"params": {"id": {"f32"|"i32"|"bool": v}}}`) the way the
+    /// wrapper does: set every param by normalized value, then reset the smoothers.
+    fn apply_state_json(plugin: &BusChannelStrip, json: &str, sr: f32) {
+        let state: serde_json::Value = serde_json::from_str(json).expect("state JSON");
+        let values = state["params"].as_object().expect("params object");
+        for (id, ptr, _) in plugin.params.param_map() {
+            let Some(v) = values.get(&id) else { continue };
+            let plain = if let Some(f) = v.get("f32").and_then(|x| x.as_f64()) {
+                f as f32
+            } else if let Some(i) = v.get("i32").and_then(|x| x.as_i64()) {
+                i as f32
+            } else if let Some(b) = v.get("bool").and_then(|x| x.as_bool()) {
+                f32::from(u8::from(b))
+            } else {
+                continue;
+            };
+            // SAFETY: the pointers come from this plugin's live param_map and outlive the call.
+            unsafe {
+                let normalized = ptr.preview_normalized(plain);
+                ptr._internal_set_normalized_value(normalized);
+            }
+        }
+        for (_, ptr, _) in plugin.params.param_map() {
+            // SAFETY: as above.
+            unsafe { ptr._internal_update_smoother(sr, true) };
+        }
+    }
+
+    /// Runs the real `initialize()` + `process()` with a state exported from a DAW session and
+    /// prints the level after every slot. Set `BCS_STATE_JSON` to the decoded state JSON file.
+    #[test]
+    #[ignore = "needs BCS_STATE_JSON"]
+    fn diag_session_state_chain_levels() {
+        use crate::spectral::DIAG_STAGES;
+        use nice_plug::prelude::*;
+
+        let path = std::env::var("BCS_STATE_JSON").expect("set BCS_STATE_JSON");
+        let json = std::fs::read_to_string(path).expect("read state JSON");
+        let sr = 96_000.0_f32;
+        let block = 512_usize;
+
+        let mut plugin = BusChannelStrip::default();
+        apply_state_json(&plugin, &json, sr);
+        let layout = BusChannelStrip::AUDIO_IO_LAYOUTS[0];
+        let config = BufferConfig {
+            sample_rate: sr,
+            min_buffer_size: None,
+            max_buffer_size: block as u32,
+            process_mode: ProcessMode::Realtime,
+        };
+        let mut ctx = TestContext {
+            transport: Transport::new(sr),
+        };
+        assert!(plugin.initialize(&layout, &config, &mut ctx));
+        plugin.reset();
+        let order: Vec<usize> = plugin
+            .module_order()
+            .iter()
+            .map(|&mt| crate::module_type_index(mt))
+            .collect();
+        eprintln!(
+            "order={order:?} global_bypass={} gain={}",
+            plugin.params.global.global_bypass.value(),
+            plugin.params.global.gain.value()
+        );
+
+        let mut stage_max = [-1.0_f32; DIAG_STAGES];
+        let (mut dry_energy, mut diff_energy, mut out_peak) = (0.0_f64, 0.0_f64, 0.0_f32);
+        let mut seed = 0x1234_5678_u32;
+        let n_blocks = 3 * sr as usize / block;
+        for b in 0..n_blocks {
+            let mut l = vec![0.0_f32; block];
+            let mut r = vec![0.0_f32; block];
+            for i in 0..block {
+                let t = ((b * block + i) % (sr as usize / 2)) as f32 / sr;
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let noise = (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+                let kick = (2.0 * core::f32::consts::PI * 60.0 * t).sin();
+                let s = 0.5 * (-t * 20.0).exp() * (0.6 * kick + 0.4 * noise);
+                l[i] = s;
+                r[i] = s;
+            }
+            let dry = l.clone();
+            let mut sc_l = vec![0.0_f32; block];
+            let mut sc_r = vec![0.0_f32; block];
+            {
+                let mut main = Buffer::default();
+                let mut sc = Buffer::default();
+                // SAFETY: the slices outlive both buffers, which are dropped at the end of scope.
+                unsafe {
+                    main.set_slices(block, |ss| {
+                        ss.clear();
+                        ss.push(&mut l);
+                        ss.push(&mut r);
+                    });
+                    sc.set_slices(block, |ss| {
+                        ss.clear();
+                        ss.push(&mut sc_l);
+                        ss.push(&mut sc_r);
+                    });
+                }
+                let mut aux = AuxiliaryBuffers {
+                    inputs: std::slice::from_mut(&mut sc),
+                    outputs: &mut [],
+                };
+                plugin.process(&mut main, &mut aux, &mut ctx);
+            }
+            let (stages, _, _) = plugin.spectrum_data.take_stage_diagnostics();
+            for (m, s) in stage_max.iter_mut().zip(stages) {
+                *m = m.max(s);
+            }
+            for (o, d) in l.iter().zip(&dry) {
+                dry_energy += f64::from(d * d);
+                diff_energy += f64::from((o - d) * (o - d));
+                out_peak = out_peak.max(if o.is_finite() { o.abs() } else { f32::INFINITY });
+            }
+        }
+
+        let db = |p: f32| {
+            if p < 0.0 {
+                "skip".to_string()
+            } else {
+                format!("{:.1}", 20.0 * p.max(1e-9).log10())
+            }
+        };
+        eprintln!(
+            "host_in={} s1={} s2={} s3={} s4={} s5={} s6={} s7={} plugin_out={} sc_in={}",
+            db(stage_max[0]),
+            db(stage_max[1]),
+            db(stage_max[2]),
+            db(stage_max[3]),
+            db(stage_max[4]),
+            db(stage_max[5]),
+            db(stage_max[6]),
+            db(stage_max[7]),
+            db(stage_max[8]),
+            db(stage_max[9]),
+        );
+        let change_db = 10.0 * (diff_energy / dry_energy.max(1e-30)).log10();
+        eprintln!("out_peak={} wet_vs_dry_difference={change_db:.1} dB", db(out_peak));
+        assert!(out_peak.is_finite() && out_peak > 1e-3, "chain output is silent or non-finite");
+        assert!(change_db > -40.0, "chain output is indistinguishable from its input");
+    }
 }
