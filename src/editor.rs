@@ -4298,6 +4298,11 @@ fn build_dyneq_back_view(
                 });
                 cx.start_timer(poll);
 
+                dyneq_slider!(cx, "DETECT", "dyneq_detect_mode", |p| &p
+                    .dynamic_eq
+                    .dyneq_detect_mode)
+                .width(Pixels(90.0));
+
                 let ar_clone = analysis_result.clone();
                 VStack::new(cx, |cx| {
                     Label::new(cx, "ANALYZE SC")

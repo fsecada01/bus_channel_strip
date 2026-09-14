@@ -75,6 +75,7 @@ pub fn get(param_id: &str) -> Option<&'static str> {
 
         // ── Dynamic EQ (4-band frequency-dependent compressor/expander) ─
         "dyneq_bypass" => Some("Bypasses the entire 4-band Dynamic EQ, passing audio through this slot unprocessed."),
+        "dyneq_detect_mode" => Some("How every band measures level. RMS follows sustained energy and reads short hits low; Peak follows transients, so drum hits cross the threshold close to their real peak."),
         "dyneq_band1_freq" | "dyneq_band2_freq" | "dyneq_band3_freq" | "dyneq_band4_freq" =>
             Some("Center frequency this band's filter and level detector react around."),
         "dyneq_band1_threshold" | "dyneq_band2_threshold" | "dyneq_band3_threshold" | "dyneq_band4_threshold" =>

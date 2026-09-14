@@ -43,6 +43,11 @@ const MAX_EXPAND_BOOST_DB: f32 = 24.0;
 /// Default RANGE: the most gain change, in either direction, a band applies.
 pub const DEFAULT_RANGE_DB: f32 = 18.0;
 
+/// Ceiling on a band's total bell gain (static GAIN plus dynamic change),
+/// either direction. Keeps the SVF clear of the overflow behind the old
+/// Expand Up NaN latch.
+const MAX_BELL_DB: f32 = 24.0;
+
 /// Soft-knee gain computer (Reiss 2012). Given the detector's dB-over-threshold
 /// value, the mode, and the compression ratio, returns the gain change in dB
 /// (negative = attenuation, positive = upward expansion). The transition region
@@ -216,6 +221,23 @@ impl Default for DynamicMode {
     }
 }
 
+/// How every band's detector turns its band-passed signal into a level.
+///
+/// - `Rms` — 10 ms RMS, then attack/release. Tracks sustained energy and
+///   reads short transients low.
+/// - `Peak` — the rectified band-passed signal goes straight into
+///   attack/release, so a drum hit reads close to its peak.
+///
+/// See ADR-0016.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Enum)]
+pub enum DetectMode {
+    #[default]
+    #[name = "RMS"]
+    Rms,
+    #[name = "Peak"]
+    Peak,
+}
+
 // ── DynamicBand ───────────────────────────────────────────────────────────────
 
 struct DynamicBand {
@@ -252,7 +274,8 @@ struct DynamicBand {
     range_db: f32,
     attack_coeff: f32,
     release_coeff: f32,
-    make_up_gain: f32, // linear gain
+    static_gain_db: f32,
+    detect_mode: DetectMode,
     enabled: bool,
     solo: bool,
 }
@@ -295,7 +318,8 @@ impl DynamicBand {
             range_db: DEFAULT_RANGE_DB,
             attack_coeff: 0.0,
             release_coeff: 0.0,
-            make_up_gain: 1.0,
+            static_gain_db: 0.0,
+            detect_mode: DetectMode::default(),
             enabled: true,
             solo: false,
         }
@@ -325,7 +349,7 @@ impl DynamicBand {
         // RMS coefficient is derived from a fixed 10 ms window; recomputed here
         // in case sample_rate changes between calls (cheap, runs once per buffer).
         self.rms_coeff = (-1.0 / (RMS_WINDOW_MS * 0.001 * sr)).exp();
-        self.make_up_gain = 10.0f32.powf(p.gain_db / 20.0);
+        self.static_gain_db = p.static_gain_db;
         self.enabled = p.enabled;
         self.solo = p.solo;
 
@@ -356,16 +380,18 @@ impl DynamicBand {
     /// inter-band cascade signal), so band N's detection is not contaminated
     /// by EQ applied in bands 0..N-1.
     ///
-    /// Per channel: BPF → square → RMS lowpass (10 ms). The louder channel's
-    /// RMS then drives one attack/release smoother. The input must never be
+    /// Per channel: BPF → square → RMS lowpass (10 ms), or in
+    /// [`DetectMode::Peak`] BPF → square with no lowpass. The louder channel
+    /// then drives one attack/release smoother. The input must never be
     /// rectified before the BPF: `|x|` moves a tone's energy to DC and 2f, so
     /// the band-pass would read it 12–26 dB low.
     fn update_envelope(&mut self, l: f32, r: f32) {
         if !self.enabled {
             return;
         }
+        let peak = self.detect_mode == DetectMode::Peak;
         let rms_coeff = self.rms_coeff;
-        let mut mean_sq = 0.0_f32;
+        let mut det_sq = 0.0_f32;
         for ((filter, state), x) in self
             .detector_filter
             .iter_mut()
@@ -374,10 +400,14 @@ impl DynamicBand {
         {
             let y = filter.process(x);
             let y_sq = y * y;
-            *state = flush_denormal(y_sq + (*state - y_sq) * rms_coeff);
-            mean_sq = mean_sq.max(*state);
+            if peak {
+                det_sq = det_sq.max(y_sq);
+            } else {
+                *state = flush_denormal(y_sq + (*state - y_sq) * rms_coeff);
+                det_sq = det_sq.max(*state);
+            }
         }
-        let det = mean_sq.max(0.0).sqrt();
+        let det = det_sq.max(0.0).sqrt();
 
         if det > self.envelope {
             self.envelope = det + (self.envelope - det) * self.attack_coeff;
@@ -388,11 +418,12 @@ impl DynamicBand {
         self.trigger_peak = self.trigger_peak.max(self.envelope);
     }
 
-    /// Compute the dynamic gain from the current envelope and apply the peaking
-    /// EQ + makeup gain to both L and R channels. The same gain change is used
-    /// for both channels so stereo image is preserved. Bell coefficients are
-    /// redesigned on every sample whose gain differs from the last, so the
-    /// filter tracks the gain computer exactly; state stays per channel.
+    /// Compute the dynamic gain from the current envelope and apply the bell
+    /// (static GAIN plus that change, capped at ±[`MAX_BELL_DB`]) to both L
+    /// and R channels. The same gain is used for both channels so stereo image
+    /// is preserved. Bell coefficients are redesigned on every sample whose
+    /// gain differs from the last, so the filter tracks the gain computer
+    /// exactly; state stays per channel.
     ///
     /// `l`/`r` are the **cascade signals** from the previous band's apply_eq
     /// (or the dry module input for band 0).
@@ -410,7 +441,7 @@ impl DynamicBand {
             .clamp(-self.range_db, self.range_db);
         self.gain_reduction_db = -gain_change_db;
 
-        let bell_db = gain_change_db;
+        let bell_db = (self.static_gain_db + gain_change_db).clamp(-MAX_BELL_DB, MAX_BELL_DB);
         if self.bell_dirty || bell_db.to_bits() != self.bell_db_bits {
             let coeffs = self.bell.coefficients(bell_db);
             self.eq_filter_l.svf.update_coefficients(coeffs);
@@ -419,10 +450,7 @@ impl DynamicBand {
             self.bell_dirty = false;
         }
 
-        (
-            self.eq_filter_l.process(l) * self.make_up_gain,
-            self.eq_filter_r.process(r) * self.make_up_gain,
-        )
+        (self.eq_filter_l.process(l), self.eq_filter_r.process(r))
     }
 
     /// Convenience wrapper for tests and any caller that wants the old
@@ -496,7 +524,8 @@ pub struct DynamicBandParams {
     pub ratio: f32,        // linear, e.g. 4.0 for 4:1
     pub attack_ms: f32,
     pub release_ms: f32,
-    pub gain_db: f32, // makeup gain in dB
+    /// Bell boost or cut at `freq`, in dB, before any dynamic change.
+    pub static_gain_db: f32,
     pub enabled: bool,
     pub solo: bool,
     /// Detector listens at `freq` instead of `detector_freq`.
@@ -516,7 +545,7 @@ impl Default for DynamicBandParams {
             ratio: 4.0,
             attack_ms: 10.0,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             detector_link: true,
@@ -546,6 +575,17 @@ impl DynamicEQ {
     pub fn update_parameters(&mut self, band_params: &[DynamicBandParams; 4]) {
         for (band, p) in self.bands.iter_mut().zip(band_params) {
             band.update_parameters(p);
+        }
+    }
+
+    /// Sets every band's detector ballistics. Switching back to RMS restarts
+    /// the RMS integrators so they don't resume from a stale level.
+    pub fn set_detect_mode(&mut self, mode: DetectMode) {
+        for band in &mut self.bands {
+            if band.detect_mode != mode {
+                band.detect_mode = mode;
+                band.rms_state = [0.0; 2];
+            }
         }
     }
 
@@ -878,7 +918,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 1.0,
             release_ms: 10.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -930,7 +970,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 5.0,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: false,
             solo: false,
             ..DynamicBandParams::default()
@@ -956,7 +996,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 0.1,
             release_ms: 10.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -988,7 +1028,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 0.001,
             release_ms: 50.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1017,7 +1057,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 0.1,
             release_ms: 50.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1133,7 +1173,7 @@ mod tests {
             ratio: 1.0,
             attack_ms: 0.1,
             release_ms: 50.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1179,7 +1219,7 @@ mod tests {
             ratio: 4.0,
             attack_ms,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1204,7 +1244,7 @@ mod tests {
             ratio: 8.0,
             attack_ms: 1.0,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1268,7 +1308,7 @@ mod tests {
                 ratio: 20.0,
                 attack_ms: 1.0,
                 release_ms: 100.0,
-                gain_db: 18.0,
+                static_gain_db: 18.0,
                 enabled: true,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1300,7 +1340,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 5.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: true,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1345,7 +1385,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 5.0,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1403,7 +1443,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 5.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: false, // band 0 off
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1417,7 +1457,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 1.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: true,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1431,7 +1471,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 1.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: false,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1445,7 +1485,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 1.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: false,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1524,7 +1564,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 1.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: true,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1539,7 +1579,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 5.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: false,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1553,7 +1593,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 5.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: false,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1567,7 +1607,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 5.0,
                 release_ms: 100.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: false,
                 solo: false,
                 ..DynamicBandParams::default()
@@ -1665,7 +1705,7 @@ mod tests {
             ratio: 4.0,
             attack_ms: 5.0,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: false,
             solo: false,
             ..DynamicBandParams::default()
@@ -1701,7 +1741,7 @@ mod tests {
             ratio: 1.0,
             attack_ms: 1.0,
             release_ms: 100.0,
-            gain_db: 0.0,
+            static_gain_db: 0.0,
             enabled: true,
             solo: false,
             ..DynamicBandParams::default()
@@ -1783,7 +1823,7 @@ mod tests {
                     ratio: 4.0,
                     attack_ms: 1.0,
                     release_ms: 50.0,
-                    gain_db: 0.0,
+                    static_gain_db: 0.0,
                     enabled: true,
                     solo: false,
                     ..DynamicBandParams::default()
@@ -1915,6 +1955,118 @@ mod tests {
         );
     }
 
+    /// Steady output/input level, in dB, of a `freq` sine through band 0 alone.
+    fn steady_gain_db(params: DynamicBandParams, sr: f32, freq: f32) -> f32 {
+        let off = DynamicBandParams {
+            enabled: false,
+            ..DynamicBandParams::default()
+        };
+        let mut deq = DynamicEQ::new(sr);
+        deq.update_parameters(&[params, off, off, off]);
+        let n = 512;
+        let blocks = (sr as usize) / n;
+        let (mut energy_in, mut energy_out) = (0.0_f64, 0.0_f64);
+        for block in 0..blocks {
+            let input = sine_block(freq, sr, block * n, n, 0.1);
+            let mut l = input.clone();
+            let mut r = input.clone();
+            process_stereo_block(&mut deq, &mut l, &mut r);
+            if block >= blocks / 2 {
+                energy_in += input.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>();
+                energy_out += l.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>();
+            }
+        }
+        (10.0 * (energy_out / energy_in).log10()) as f32
+    }
+
+    #[test]
+    fn test_static_gain_is_bell_not_broadband() {
+        let sr = 48_000.0_f32;
+        let params = DynamicBandParams {
+            q: 2.0,
+            threshold_db: 0.0,
+            ratio: 1.0,
+            static_gain_db: 6.0,
+            ..DynamicBandParams::default()
+        };
+        let centre = steady_gain_db(params, sr, 1000.0);
+        assert!(
+            (centre - 6.0).abs() < 0.2,
+            "GAIN +6 dB should read +6 dB at FREQ, got {centre:.2}"
+        );
+        for far in [250.0_f32, 4000.0] {
+            let gain = steady_gain_db(params, sr, far);
+            assert!(
+                gain.abs() < 0.2,
+                "GAIN must not lift {far} Hz, two octaves from FREQ: {gain:.2} dB"
+            );
+        }
+    }
+
+    #[test]
+    fn test_bell_gain_is_capped_with_static_gain() {
+        let sr = 48_000.0_f32;
+        let mut band = DynamicBand::new(sr);
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::ExpandUpward,
+            threshold_db: -60.0,
+            ratio: 20.0,
+            attack_ms: 0.1,
+            static_gain_db: 18.0,
+            range_db: 30.0,
+            ..DynamicBandParams::default()
+        });
+        for _ in 0..4800 {
+            band.process_sample(0.9);
+        }
+        assert_eq!(
+            band.eq_filter_l.svf.coefficients(),
+            band.bell.coefficients(MAX_BELL_DB),
+            "static GAIN plus Expand Up must stop at {MAX_BELL_DB} dB"
+        );
+    }
+
+    /// Loudest trigger reading, in dB, for a 3 kHz burst decaying with a 3 ms
+    /// time constant.
+    fn burst_trigger_db(mode: DetectMode) -> f32 {
+        let sr = 48_000.0_f32;
+        let n = 256;
+        let mut deq = DynamicEQ::new(sr);
+        deq.set_detect_mode(mode);
+        deq.update_parameters(
+            &[DynamicBandParams {
+                freq: 3000.0,
+                threshold_db: 0.0,
+                ratio: 1.0,
+                attack_ms: 0.1,
+                ..DynamicBandParams::default()
+            }; 4],
+        );
+        let mut loudest = TRIGGER_FLOOR_DB;
+        for block in 0..40 {
+            let mut l: Vec<f32> = (block * n..block * n + n)
+                .map(|i| {
+                    let t = i as f32 / sr;
+                    0.8 * (-t / 0.003).exp() * (std::f32::consts::TAU * 3000.0 * t).sin()
+                })
+                .collect();
+            let mut r = l.clone();
+            process_stereo_block(&mut deq, &mut l, &mut r);
+            loudest = loudest.max(deq.take_trigger_levels_db()[0]);
+        }
+        loudest
+    }
+
+    #[test]
+    fn test_peak_mode_reads_transient_higher_than_rms() {
+        let peak = burst_trigger_db(DetectMode::Peak);
+        let rms = burst_trigger_db(DetectMode::Rms);
+        assert!(
+            peak >= rms + 6.0,
+            "Peak should read a short hit well above RMS: peak {peak:.1} dB, rms {rms:.1} dB"
+        );
+    }
+
     #[test]
     fn test_dynamic_eq_reset_clears_all_bands() {
         let mut deq = DynamicEQ::new(44100.0);
@@ -1929,7 +2081,7 @@ mod tests {
                 ratio: 4.0,
                 attack_ms: 0.1,
                 release_ms: 10.0,
-                gain_db: 0.0,
+                static_gain_db: 0.0,
                 enabled: true,
                 solo: false,
                 ..DynamicBandParams::default()

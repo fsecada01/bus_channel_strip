@@ -1,13 +1,16 @@
 use nice_plug::prelude::*;
 
 #[cfg(feature = "dynamic_eq")]
-use crate::dynamic_eq::DynamicMode;
+use crate::dynamic_eq::{DetectMode, DynamicMode};
 
 #[derive(Params)]
 pub struct DynamicEqParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_bypass"]
     pub dyneq_bypass: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_detect_mode"]
+    pub dyneq_detect_mode: EnumParam<DetectMode>,
 
     // Band 1 (Low) - 200Hz default
     #[cfg(feature = "dynamic_eq")]
@@ -180,6 +183,8 @@ impl Default for DynamicEqParams {
             #[cfg(feature = "dynamic_eq")]
             // Dynamic EQ Parameters
             dyneq_bypass: BoolParam::new("DynEQ Bypass", true),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_detect_mode: EnumParam::new("DynEQ Detect", DetectMode::Rms),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 1 (Low) - 200Hz

@@ -89,12 +89,13 @@ The table below shows Band 1 parameters. Bands 2–4 follow identical structure 
 | Parameter Name | ID | Range | Default | Unit | Notes |
 |---------------|-----|-------|---------|------|-------|
 | DynEQ Bypass | `dyneq_bypass` | on/off | off | — | Bypasses entire Dynamic EQ module |
+| DynEQ Detect | `dyneq_detect_mode` | enum | RMS | — | `RMS` or `Peak` detector ballistics for all bands. Peak reads short hits close to their peak |
 | DynEQ 1 Freq | `dyneq_band1_freq` | 20–2000 | 200 | Hz | Band 1 center frequency. Skewed range |
 | DynEQ 1 Thresh | `dyneq_band1_threshold` | -60 to 0 | -18 | dB | Detection threshold |
 | DynEQ 1 Ratio | `dyneq_band1_ratio` | 1–20 | 4 | — | Compression ratio. Skewed range |
 | DynEQ 1 Attack | `dyneq_band1_attack` | 0.1–200 | 10 | ms | Attack time. Skewed range |
 | DynEQ 1 Release | `dyneq_band1_release` | 1–2000 | 100 | ms | Release time. Skewed range |
-| DynEQ 1 Gain | `dyneq_band1_gain` | -18 to +18 | 0 | dB | Band gain |
+| DynEQ 1 Gain | `dyneq_band1_gain` | -18 to +18 | 0 | dB | Static bell boost/cut at Freq, added to the dynamic change (total capped at ±24 dB) |
 | DynEQ 1 Q | `dyneq_band1_q` | 0.3–8 | 1 | — | Band Q. Skewed range |
 | DynEQ 1 On | `dyneq_band1_enabled` | on/off | on | — | Enable/disable this band |
 | DynEQ 1 Detector Freq | `dyneq_band1_detector_freq` | 20–2000 | 200 | Hz | Detector frequency, used only while Det Link is off |

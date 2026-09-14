@@ -572,7 +572,7 @@ impl BusChannelStrip {
                 ratio: self.params.dynamic_eq.dyneq_band1_ratio.value(),
                 attack_ms: self.params.dynamic_eq.dyneq_band1_attack.value(),
                 release_ms: self.params.dynamic_eq.dyneq_band1_release.value(),
-                gain_db: self.params.dynamic_eq.dyneq_band1_gain.value(),
+                static_gain_db: self.params.dynamic_eq.dyneq_band1_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band1_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band1_solo.value(),
                 detector_link: self.params.dynamic_eq.dyneq_band1_detector_link.value(),
@@ -587,7 +587,7 @@ impl BusChannelStrip {
                 ratio: self.params.dynamic_eq.dyneq_band2_ratio.value(),
                 attack_ms: self.params.dynamic_eq.dyneq_band2_attack.value(),
                 release_ms: self.params.dynamic_eq.dyneq_band2_release.value(),
-                gain_db: self.params.dynamic_eq.dyneq_band2_gain.value(),
+                static_gain_db: self.params.dynamic_eq.dyneq_band2_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band2_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band2_solo.value(),
                 detector_link: self.params.dynamic_eq.dyneq_band2_detector_link.value(),
@@ -602,7 +602,7 @@ impl BusChannelStrip {
                 ratio: self.params.dynamic_eq.dyneq_band3_ratio.value(),
                 attack_ms: self.params.dynamic_eq.dyneq_band3_attack.value(),
                 release_ms: self.params.dynamic_eq.dyneq_band3_release.value(),
-                gain_db: self.params.dynamic_eq.dyneq_band3_gain.value(),
+                static_gain_db: self.params.dynamic_eq.dyneq_band3_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band3_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band3_solo.value(),
                 detector_link: self.params.dynamic_eq.dyneq_band3_detector_link.value(),
@@ -617,13 +617,15 @@ impl BusChannelStrip {
                 ratio: self.params.dynamic_eq.dyneq_band4_ratio.value(),
                 attack_ms: self.params.dynamic_eq.dyneq_band4_attack.value(),
                 release_ms: self.params.dynamic_eq.dyneq_band4_release.value(),
-                gain_db: self.params.dynamic_eq.dyneq_band4_gain.value(),
+                static_gain_db: self.params.dynamic_eq.dyneq_band4_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band4_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band4_solo.value(),
                 detector_link: self.params.dynamic_eq.dyneq_band4_detector_link.value(),
                 range_db: self.params.dynamic_eq.dyneq_band4_range.value(),
             },
         ];
+        self.dynamic_eq
+            .set_detect_mode(self.params.dynamic_eq.dyneq_detect_mode.value());
         self.dynamic_eq.update_parameters(&dyneq_params);
 
         if !self.params.dynamic_eq.dyneq_bypass.value() {
