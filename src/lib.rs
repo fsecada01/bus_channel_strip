@@ -622,7 +622,12 @@ impl BusChannelStrip {
             .iter()
             .flat_map(|ch| ch.iter())
             .fold(0.0_f32, |m, s| m.max(s.abs()));
-        self.spectrum_data.note_block(diag_peak);
+        let diag_non_finite = buffer
+            .as_slice_immutable()
+            .iter()
+            .flat_map(|ch| ch.iter())
+            .any(|s| !s.is_finite());
+        self.spectrum_data.note_block(diag_peak, diag_non_finite);
 
         // Accumulate post-DynEQ samples into the FFT ring buffer.
         // All buffers are pre-allocated in initialize() — no audio-thread alloc.

@@ -243,9 +243,8 @@ impl TptSvf {
         self.coeffs
     }
 
-    /// Integrator state `(ic1eq, ic2eq)` — exposed for state-preservation
-    /// tests; production code has no reason to read it.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Integrator state `(ic1eq, ic2eq)` — read by state-preservation tests
+    /// and by callers that recover from non-finite state.
     pub fn state(&self) -> (f32, f32) {
         (self.ic1eq, self.ic2eq)
     }

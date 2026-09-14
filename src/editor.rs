@@ -3068,15 +3068,18 @@ impl View for SpectrumCanvas {
         let now = Instant::now();
         if now.duration_since(self.diag_last_log.get()).as_secs_f32() >= 2.0 {
             self.diag_last_log.set(now);
-            let (blocks, frames_written, peak) = self.spectrum_data.take_diagnostics();
+            let (blocks, frames_written, peak, non_finite_blocks) =
+                self.spectrum_data.take_diagnostics();
             let max_bin = bins.iter().copied().fold(0.0_f32, f32::max);
             let line = format!(
                 "draws={} new_frames_read={} audio_blocks={} fft_frames_written={} \
-                 post_dyneq_peak_dbfs={:.1} max_display_bin_db={:.1} bounds={:.0}x{:.0} sr={}\n",
+                 non_finite_blocks={} post_dyneq_peak_dbfs={:.1} max_display_bin_db={:.1} \
+                 bounds={:.0}x{:.0} sr={}\n",
                 self.diag_draws.get(),
                 self.diag_new_frames.get(),
                 blocks,
                 frames_written,
+                non_finite_blocks,
                 20.0 * peak.max(1e-9).log10(),
                 20.0 * max_bin.max(1e-9).log10(),
                 bounds.w,

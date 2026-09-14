@@ -32,6 +32,7 @@ pub struct SpectrumData {
     diag_blocks: AtomicU32,
     diag_frames_written: AtomicU32,
     diag_peak_since_read: AtomicU32,
+    diag_non_finite_blocks: AtomicU32,
 }
 
 impl SpectrumData {
@@ -42,6 +43,7 @@ impl SpectrumData {
             diag_blocks: AtomicU32::new(0),
             diag_frames_written: AtomicU32::new(0),
             diag_peak_since_read: AtomicU32::new(0.0_f32.to_bits()),
+            diag_non_finite_blocks: AtomicU32::new(0),
         }
     }
 
@@ -59,9 +61,13 @@ impl SpectrumData {
     }
 
     /// **Audio thread only.** TEMPORARY diagnostic: count a processed block
-    /// and fold its peak into the running max.
-    pub fn note_block(&self, peak: f32) {
+    /// and fold its peak into the running max. `peak` ignores NaN, so
+    /// non-finite blocks are counted separately.
+    pub fn note_block(&self, peak: f32, non_finite: bool) {
         self.diag_blocks.fetch_add(1, Ordering::Relaxed);
+        if non_finite {
+            self.diag_non_finite_blocks.fetch_add(1, Ordering::Relaxed);
+        }
         let _ =
             self.diag_peak_since_read
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
@@ -70,8 +76,8 @@ impl SpectrumData {
     }
 
     /// **GUI thread only.** TEMPORARY diagnostic: `(blocks, frames_written,
-    /// peak_since_last_call)`; resets the peak.
-    pub fn take_diagnostics(&self) -> (u32, u32, f32) {
+    /// peak_since_last_call, non_finite_blocks)`; resets the peak.
+    pub fn take_diagnostics(&self) -> (u32, u32, f32, u32) {
         (
             self.diag_blocks.load(Ordering::Relaxed),
             self.diag_frames_written.load(Ordering::Relaxed),
@@ -79,6 +85,7 @@ impl SpectrumData {
                 self.diag_peak_since_read
                     .swap(0.0_f32.to_bits(), Ordering::Relaxed),
             ),
+            self.diag_non_finite_blocks.load(Ordering::Relaxed),
         )
     }
 

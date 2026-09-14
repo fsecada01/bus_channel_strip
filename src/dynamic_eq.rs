@@ -34,6 +34,11 @@ const RMS_WINDOW_MS: f32 = 10.0;
 // dynamic processing.
 const KNEE_WIDTH_DB: f32 = 6.0;
 
+/// Ceiling on the Expand Up boost. Uncapped, the gain computer asks for
+/// `(ratio - 1) × over_db` — over +1000 dB at ratio 20 with a low threshold —
+/// which overflows the bell filter to inf and latches NaN into its state.
+const MAX_EXPAND_BOOST_DB: f32 = 24.0;
+
 /// Soft-knee gain computer (Reiss 2012). Given the detector's dB-over-threshold
 /// value, the mode, and the compression ratio, returns the gain change in dB
 /// (negative = attenuation, positive = upward expansion). The transition region
@@ -58,10 +63,10 @@ fn compute_gain_change_db(over_db: f32, mode: DynamicMode, ratio: f32) -> f32 {
             if over_db <= -half_knee {
                 0.0
             } else if over_db >= half_knee {
-                slope * over_db
+                (slope * over_db).min(MAX_EXPAND_BOOST_DB)
             } else {
                 let x = over_db + half_knee;
-                slope * x * x / (2.0 * KNEE_WIDTH_DB)
+                (slope * x * x / (2.0 * KNEE_WIDTH_DB)).min(MAX_EXPAND_BOOST_DB)
             }
         }
         DynamicMode::Gate => {
@@ -427,6 +432,38 @@ impl DynamicBand {
         self.eq_filter_r.reset();
         // Intentionally keep sidechain_filter and solo_filter state to avoid clicks.
     }
+
+    /// Clears state poisoned by a non-finite sample. NaN or inf in an SVF
+    /// integrator or the envelope never decays, so without this one bad host
+    /// block silences the band — and everything after it — until reload.
+    /// The EQ filters go back to flat to match `last_gain_change_db = 0`.
+    fn recover_if_non_finite(&mut self) {
+        let filters_finite = [
+            &self.sidechain_filter,
+            &self.eq_filter_l,
+            &self.eq_filter_r,
+            &self.solo_filter_l,
+            &self.solo_filter_r,
+        ]
+        .iter()
+        .all(|f| {
+            let (s1, s2) = f.svf.state();
+            s1.is_finite() && s2.is_finite()
+        });
+        if filters_finite
+            && self.envelope.is_finite()
+            && self.rms_state.is_finite()
+            && self.gain_reduction_db.is_finite()
+        {
+            return;
+        }
+        self.reset();
+        self.eq_filter_l = BandFilter::new();
+        self.eq_filter_r = BandFilter::new();
+        self.sidechain_filter.reset();
+        self.solo_filter_l.reset();
+        self.solo_filter_r.reset();
+    }
 }
 
 // ── Public API types ──────────────────────────────────────────────────────────
@@ -557,6 +594,10 @@ impl DynamicEQ {
             if num_channels >= 2 {
                 channels[1][i] = r_out;
             }
+        }
+
+        for band in &mut self.bands {
+            band.recover_if_non_finite();
         }
     }
 
@@ -1130,6 +1171,109 @@ mod tests {
                 "DynamicBand output must be finite at {i}: {out}"
             );
         }
+    }
+
+    #[test]
+    fn test_expand_up_boost_is_capped() {
+        for ratio in [2.0_f32, 4.0, 20.0] {
+            for over_db in [0.0_f32, 2.9, 3.0, 10.0, 60.0, 200.0] {
+                let gc = compute_gain_change_db(over_db, DynamicMode::ExpandUpward, ratio);
+                assert!(
+                    gc <= MAX_EXPAND_BOOST_DB,
+                    "Expand Up boost must not exceed {MAX_EXPAND_BOOST_DB} dB: ratio={ratio}, over_db={over_db}, got {gc}"
+                );
+            }
+        }
+    }
+
+    fn process_stereo_block(deq: &mut DynamicEQ, l: &mut [f32], r: &mut [f32]) {
+        let n = l.len();
+        let mut buf = Buffer::default();
+        unsafe {
+            buf.set_slices(n, |ss| {
+                ss.clear();
+                ss.push(l);
+                ss.push(r);
+            });
+        }
+        deq.process(&mut buf);
+    }
+
+    fn sine_block(freq_hz: f32, sr: f32, start: usize, n: usize, amp: f32) -> Vec<f32> {
+        (start..start + n)
+            .map(|i| (std::f32::consts::TAU * freq_hz * i as f32 / sr).sin() * amp)
+            .collect()
+    }
+
+    /// Regression (2026-09-13): all bands in Expand Up at ratio 20 with a -60 dB threshold drove
+    /// the bell filters to inf, latched NaN into their state and silenced the plugin in Reaper.
+    #[test]
+    fn test_dynamic_eq_extreme_expand_up_stays_finite() {
+        let sr = 96_000.0_f32;
+        let n = 4096;
+        let mut deq = DynamicEQ::new(sr);
+        deq.update_parameters(
+            &[DynamicBandParams {
+                mode: DynamicMode::ExpandUpward,
+                detector_freq: 1000.0,
+                freq: 1000.0,
+                q: 1.0,
+                threshold_db: -60.0,
+                ratio: 20.0,
+                attack_ms: 1.0,
+                release_ms: 100.0,
+                gain_db: 18.0,
+                enabled: true,
+                solo: false,
+            }; 4],
+        );
+        for block in 0..20 {
+            let mut l = sine_block(1000.0, sr, block * n, n, 0.9);
+            let mut r = l.clone();
+            process_stereo_block(&mut deq, &mut l, &mut r);
+            assert!(
+                l.iter().chain(r.iter()).all(|s| s.is_finite()),
+                "Expand Up output went non-finite in block {block}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_dynamic_eq_recovers_after_non_finite_input_block() {
+        let sr = 48_000.0_f32;
+        let n = 1024;
+        let mut deq = DynamicEQ::new(sr);
+        deq.update_parameters(
+            &[DynamicBandParams {
+                mode: DynamicMode::CompressDownward,
+                detector_freq: 1000.0,
+                freq: 1000.0,
+                q: 1.0,
+                threshold_db: -30.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 100.0,
+                gain_db: 0.0,
+                enabled: true,
+                solo: false,
+            }; 4],
+        );
+
+        let mut l = vec![f32::NAN; n];
+        let mut r = vec![f32::NAN; n];
+        process_stereo_block(&mut deq, &mut l, &mut r);
+
+        let mut l = sine_block(1000.0, sr, 0, n, 0.5);
+        let mut r = l.clone();
+        process_stereo_block(&mut deq, &mut l, &mut r);
+        assert!(
+            l.iter().chain(r.iter()).all(|s| s.is_finite()),
+            "a single non-finite host block must not latch NaN into later blocks"
+        );
+        assert!(
+            deq.get_gain_reduction_db().iter().all(|gr| gr.is_finite()),
+            "gain reduction must recover too"
+        );
     }
 
     // ── DynamicEQ public API ──────────────────────────────────────────────────
