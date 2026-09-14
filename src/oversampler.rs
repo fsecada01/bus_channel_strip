@@ -2,13 +2,21 @@
 //! the saturation-bearing modules (Transformer, Pultec tube stage, FET
 //! all-buttons). Each 2× stage is a 23-tap Kaiser-windowed halfband FIR
 //! (β=8.0). Cascaded log₂(factor) times for 2×/4×/8×/16×.
+//! [`Oversampler::new_steep`] swaps the first stage for a 127-tap filter.
 //!
 //! The implementation is strictly audio-thread safe: filter state is
-//! fixed-size `[f32; HB_NUM_TAPS]`, and the only heap usage is a pair of
+//! fixed-size arrays, and the only heap usage is a pair of
 //! `Vec<f32>` scratch buffers pre-allocated at construction time.
 
 pub const HB_NUM_TAPS: usize = 23;
 pub const MAX_OS_STAGES: usize = 4; // 2^4 = 16× max
+
+/// Taps of the first (base ↔ 2×) stage of a [`Oversampler::new_steep`] cascade. That stage alone
+/// sets the passband edge and the rejection of images folding back into the audio band; 127 taps
+/// at β=9 keep 44.1 kHz flat to 20 kHz with images landing in 0–20 kHz attenuated ~90 dB, where
+/// the 23-tap stage is −6 dB at 20 kHz and lets images through at −11 dB.
+pub const STEEP_HB_NUM_TAPS: usize = 127;
+const STEEP_HB_BETA: f32 = 9.0;
 
 /// Modified Bessel function of the first kind, order 0.
 /// Series expansion — called at init time only.
@@ -32,13 +40,18 @@ fn bessel_i0(x: f32) -> f32 {
 /// / boxcar which rejects barely anything). Coefficients are normalized to
 /// unity DC gain.
 pub fn design_halfband_kaiser(beta: f32) -> [f32; HB_NUM_TAPS] {
-    let mut coeffs = [0.0_f32; HB_NUM_TAPS];
-    let m = (HB_NUM_TAPS - 1) as f32;
-    let center = (HB_NUM_TAPS - 1) / 2;
+    design_halfband_kaiser_taps(beta)
+}
+
+/// [`design_halfband_kaiser`] for any odd tap count `N`.
+pub fn design_halfband_kaiser_taps<const N: usize>(beta: f32) -> [f32; N] {
+    let mut coeffs = [0.0_f32; N];
+    let m = (N - 1) as f32;
+    let center = (N - 1) / 2;
     let denom = bessel_i0(beta);
     let pi = core::f32::consts::PI;
 
-    for n in 0..HB_NUM_TAPS {
+    for n in 0..N {
         let offset = n as i32 - center as i32;
 
         let ideal = if offset == 0 {
@@ -70,85 +83,74 @@ pub fn design_halfband_kaiser(beta: f32) -> [f32; HB_NUM_TAPS] {
     coeffs
 }
 
-/// Single halfband FIR stage: holds a circular delay line over HB_NUM_TAPS
+/// Single halfband FIR stage: holds a circular delay line over `N`
 /// samples at the filter's operating rate (the higher of the two rates the
 /// stage bridges).
 #[derive(Clone)]
-pub struct HalfbandFir {
-    delay: [f32; HB_NUM_TAPS],
+pub struct HalfbandFir<const N: usize = HB_NUM_TAPS> {
+    delay: [f32; N],
     pos: usize,
 }
 
-impl HalfbandFir {
+impl<const N: usize> HalfbandFir<N> {
     pub fn new() -> Self {
         Self {
-            delay: [0.0; HB_NUM_TAPS],
+            delay: [0.0; N],
             pos: 0,
         }
     }
 
     pub fn reset(&mut self) {
-        self.delay = [0.0; HB_NUM_TAPS];
+        self.delay = [0.0; N];
         self.pos = 0;
     }
 
     #[inline]
-    fn convolve(&self, coeffs: &[f32; HB_NUM_TAPS]) -> f32 {
+    fn convolve(&self, coeffs: &[f32; N]) -> f32 {
         let mut sum = 0.0_f32;
         let mut read = self.pos;
-        for k in 0..HB_NUM_TAPS {
+        for k in 0..N {
             sum += coeffs[k] * self.delay[read];
-            read = if read == 0 { HB_NUM_TAPS - 1 } else { read - 1 };
+            read = if read == 0 { N - 1 } else { read - 1 };
         }
         sum
+    }
+
+    #[inline]
+    fn advance(&mut self) {
+        self.pos = if self.pos + 1 == N { 0 } else { self.pos + 1 };
     }
 
     /// 2× upsample of one input sample → two output samples.
     /// Zero-stuff + FIR filter + ×2 gain compensation for the zero-stuff energy loss.
     #[inline]
-    pub fn upsample_2x(&mut self, x: f32, coeffs: &[f32; HB_NUM_TAPS]) -> (f32, f32) {
+    pub fn upsample_2x(&mut self, x: f32, coeffs: &[f32; N]) -> (f32, f32) {
         self.delay[self.pos] = x;
         let y0 = self.convolve(coeffs);
-        self.pos = if self.pos + 1 == HB_NUM_TAPS {
-            0
-        } else {
-            self.pos + 1
-        };
+        self.advance();
 
         self.delay[self.pos] = 0.0;
         let y1 = self.convolve(coeffs);
-        self.pos = if self.pos + 1 == HB_NUM_TAPS {
-            0
-        } else {
-            self.pos + 1
-        };
+        self.advance();
 
         (y0 * 2.0, y1 * 2.0)
     }
 
     /// 2× downsample of two input samples → one output sample.
     #[inline]
-    pub fn downsample_2x(&mut self, y0: f32, y1: f32, coeffs: &[f32; HB_NUM_TAPS]) -> f32 {
+    pub fn downsample_2x(&mut self, y0: f32, y1: f32, coeffs: &[f32; N]) -> f32 {
         self.delay[self.pos] = y0;
         let x = self.convolve(coeffs);
-        self.pos = if self.pos + 1 == HB_NUM_TAPS {
-            0
-        } else {
-            self.pos + 1
-        };
+        self.advance();
 
         self.delay[self.pos] = y1;
-        self.pos = if self.pos + 1 == HB_NUM_TAPS {
-            0
-        } else {
-            self.pos + 1
-        };
+        self.advance();
 
         x
     }
 }
 
-impl Default for HalfbandFir {
+impl<const N: usize> Default for HalfbandFir<N> {
     fn default() -> Self {
         Self::new()
     }
@@ -166,6 +168,12 @@ pub struct Oversampler {
     hb_coeffs: [f32; HB_NUM_TAPS],
     up_stages: [HalfbandFir; MAX_OS_STAGES],
     down_stages: [HalfbandFir; MAX_OS_STAGES],
+    /// When set, `steep_up`/`steep_down` replace `up_stages[0]`/`down_stages[0]`.
+    steep_first_stage: bool,
+    /// All zeros unless `steep_first_stage`.
+    steep_coeffs: [f32; STEEP_HB_NUM_TAPS],
+    steep_up: HalfbandFir<STEEP_HB_NUM_TAPS>,
+    steep_down: HalfbandFir<STEEP_HB_NUM_TAPS>,
     upsample_buffer: Vec<f32>,
     /// Empty (no allocation) for an `Oversampler` built via
     /// `new_upsample_only` — such an instance must never call `downsample`.
@@ -180,6 +188,10 @@ impl Oversampler {
             max_factor,
             num_stages: 0,
             hb_coeffs: design_halfband_kaiser(8.0),
+            steep_first_stage: false,
+            steep_coeffs: [0.0; STEEP_HB_NUM_TAPS],
+            steep_up: HalfbandFir::new(),
+            steep_down: HalfbandFir::new(),
             up_stages: [
                 HalfbandFir::new(),
                 HalfbandFir::new(),
@@ -205,6 +217,15 @@ impl Oversampler {
     /// switched to via `set_factor`, not just its starting factor.
     pub fn new(max_factor: usize, max_block_size: usize) -> Self {
         Self::new_inner(max_factor, max_block_size, true)
+    }
+
+    /// Like [`Oversampler::new`], but with a [`STEEP_HB_NUM_TAPS`]-tap first stage: flat to
+    /// 20 kHz and far stronger image rejection, for ~52 extra base-rate samples of latency.
+    pub fn new_steep(max_factor: usize, max_block_size: usize) -> Self {
+        let mut os = Self::new_inner(max_factor, max_block_size, true);
+        os.steep_first_stage = true;
+        os.steep_coeffs = design_halfband_kaiser_taps(STEEP_HB_BETA);
+        os
     }
 
     /// Construct an `Oversampler` already set to `factor`. Equivalent to
@@ -238,15 +259,37 @@ impl Oversampler {
             _ => 0,
         };
         if new_num_stages != self.num_stages {
-            for s in &mut self.up_stages {
-                s.reset();
-            }
-            for s in &mut self.down_stages {
-                s.reset();
-            }
+            self.reset_stages();
         }
         self.factor = factor;
         self.num_stages = new_num_stages;
+    }
+
+    fn reset_stages(&mut self) {
+        for s in self.up_stages.iter_mut().chain(self.down_stages.iter_mut()) {
+            s.reset();
+        }
+        self.steep_up.reset();
+        self.steep_down.reset();
+    }
+
+    /// Group delay of an `upsample` → `downsample` round trip at the current factor, in
+    /// base-rate samples. Fractional at 4× and above (e.g. 16.5 for the standard 4× cascade).
+    pub fn latency_samples(&self) -> f32 {
+        if self.num_stages == 0 {
+            return 0.0;
+        }
+        let first_taps = if self.steep_first_stage {
+            STEEP_HB_NUM_TAPS
+        } else {
+            HB_NUM_TAPS
+        };
+        // Each 2× stage delays by (taps − 1) / 2 samples at its upper rate on the way up and
+        // again on the way down.
+        (first_taps - 1) as f32 * 0.5
+            + (1..self.num_stages)
+                .map(|stage| (HB_NUM_TAPS - 1) as f32 / (1 << (stage + 1)) as f32)
+                .sum::<f32>()
     }
 
     #[allow(dead_code)]
@@ -278,19 +321,20 @@ impl Oversampler {
         let mut count = 1_usize;
 
         for stage_idx in 0..self.num_stages {
-            let stage = &mut self.up_stages[stage_idx];
-            if stage_idx % 2 == 0 {
-                for i in 0..count {
-                    let (y0, y1) = stage.upsample_2x(buf_a[i], &self.hb_coeffs);
-                    buf_b[2 * i] = y0;
-                    buf_b[2 * i + 1] = y1;
-                }
+            let steep = stage_idx == 0 && self.steep_first_stage;
+            let (src, dst) = if stage_idx % 2 == 0 {
+                (&buf_a, &mut buf_b)
             } else {
-                for i in 0..count {
-                    let (y0, y1) = stage.upsample_2x(buf_b[i], &self.hb_coeffs);
-                    buf_a[2 * i] = y0;
-                    buf_a[2 * i + 1] = y1;
-                }
+                (&buf_b, &mut buf_a)
+            };
+            for i in 0..count {
+                let (y0, y1) = if steep {
+                    self.steep_up.upsample_2x(src[i], &self.steep_coeffs)
+                } else {
+                    self.up_stages[stage_idx].upsample_2x(src[i], &self.hb_coeffs)
+                };
+                dst[2 * i] = y0;
+                dst[2 * i + 1] = y1;
             }
             count *= 2;
         }
@@ -319,20 +363,21 @@ impl Oversampler {
         buf_a[..count].copy_from_slice(processed);
 
         for stage_idx in 0..self.num_stages {
-            let stage = &mut self.down_stages[self.num_stages - 1 - stage_idx];
-            let new_count = count / 2;
-            if stage_idx % 2 == 0 {
-                for i in 0..new_count {
-                    let y0 = buf_a[2 * i];
-                    let y1 = buf_a[2 * i + 1];
-                    buf_b[i] = stage.downsample_2x(y0, y1, &self.hb_coeffs);
-                }
+            let stage = self.num_stages - 1 - stage_idx;
+            let steep = stage == 0 && self.steep_first_stage;
+            let (src, dst) = if stage_idx % 2 == 0 {
+                (&buf_a, &mut buf_b)
             } else {
-                for i in 0..new_count {
-                    let y0 = buf_b[2 * i];
-                    let y1 = buf_b[2 * i + 1];
-                    buf_a[i] = stage.downsample_2x(y0, y1, &self.hb_coeffs);
-                }
+                (&buf_b, &mut buf_a)
+            };
+            let new_count = count / 2;
+            for i in 0..new_count {
+                let (y0, y1) = (src[2 * i], src[2 * i + 1]);
+                dst[i] = if steep {
+                    self.steep_down.downsample_2x(y0, y1, &self.steep_coeffs)
+                } else {
+                    self.down_stages[stage].downsample_2x(y0, y1, &self.hb_coeffs)
+                };
             }
             count = new_count;
         }
@@ -347,12 +392,7 @@ impl Oversampler {
     }
 
     pub fn reset(&mut self) {
-        for s in &mut self.up_stages {
-            s.reset();
-        }
-        for s in &mut self.down_stages {
-            s.reset();
-        }
+        self.reset_stages();
         self.downsample_buffer.fill(0.0);
     }
 }
@@ -522,6 +562,92 @@ mod tests {
             up_reset, up_fresh,
             "reset() should make state identical to a fresh instance"
         );
+    }
+
+    fn round_trip_impulse_response(os: &mut Oversampler, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|n| {
+                let up = os.upsample(if n == 0 { 1.0 } else { 0.0 }, 0).to_vec();
+                os.downsample(&up, 0)
+            })
+            .collect()
+    }
+
+    /// |H| in dB of an impulse response at `freq_hz`.
+    fn response_db(ir: &[f32], freq_hz: f32, sample_rate: f32) -> f32 {
+        let w = core::f32::consts::TAU * freq_hz / sample_rate;
+        let (re, im) = ir
+            .iter()
+            .enumerate()
+            .fold((0.0_f64, 0.0_f64), |(re, im), (n, &h)| {
+                let phase = (w * n as f32) as f64;
+                (re + h as f64 * phase.cos(), im - h as f64 * phase.sin())
+            });
+        (10.0 * (re * re + im * im).log10()) as f32
+    }
+
+    #[test]
+    fn test_latency_samples_matches_round_trip_group_delay() {
+        for steep in [false, true] {
+            for factor in [1usize, 2, 4, 8, 16] {
+                let mut os = if steep {
+                    Oversampler::new_steep(factor, 1)
+                } else {
+                    Oversampler::new(factor, 1)
+                };
+                os.set_factor(factor);
+                // A linear-phase cascade's impulse response is symmetric about its group delay,
+                // so its centroid is exactly that delay.
+                let ir = round_trip_impulse_response(&mut os, 400);
+                let centroid = ir
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &h)| n as f32 * h)
+                    .sum::<f32>()
+                    / ir.iter().sum::<f32>();
+                assert!(
+                    (centroid - os.latency_samples()).abs() < 0.01,
+                    "steep={steep} {factor}x: latency_samples() = {} but group delay is {centroid}",
+                    os.latency_samples()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_steep_first_stage_is_flat_to_20khz_at_44k() {
+        let sr = 44_100.0;
+        for factor in [2usize, 4, 16] {
+            let mut os = Oversampler::new_steep(factor, 1);
+            os.set_factor(factor);
+            let ir = round_trip_impulse_response(&mut os, 400);
+            for freq in [1000.0, 16_000.0, 19_000.0, 20_000.0] {
+                let db = response_db(&ir, freq, sr);
+                assert!(db.abs() < 0.1, "{factor}x at {freq} Hz: {db:.3} dB");
+            }
+        }
+    }
+
+    #[test]
+    fn test_steep_first_stage_rejects_images_that_would_fold_into_the_audio_band() {
+        // At 2× of 44.1 kHz, 26 kHz sits above base Nyquist and would fold to 18.1 kHz.
+        let rate_2x = 88_200.0_f32;
+        let tone = 26_000.0_f32;
+        let settle = STEEP_HB_NUM_TAPS * 2;
+        let mut os = Oversampler::new_steep(2, 1);
+        os.set_factor(2);
+        let mut sum_sq = 0.0_f32;
+        let mut count = 0;
+        for n in 0..4000 {
+            let phase = |k: usize| (core::f32::consts::TAU * tone * k as f32 / rate_2x).sin();
+            let y = os.downsample(&[phase(2 * n), phase(2 * n + 1)], 0);
+            if n >= settle {
+                sum_sq += y * y;
+                count += 1;
+            }
+        }
+        let rms_db = 10.0 * (sum_sq / count as f32).log10() + 3.01;
+        assert!(rms_db < -70.0, "image leaked through at {rms_db:.1} dB");
     }
 
     #[test]

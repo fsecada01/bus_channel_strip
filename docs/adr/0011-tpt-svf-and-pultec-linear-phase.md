@@ -32,7 +32,7 @@ API5500 also gained a `reset()` it never had (a real gap surfaced during review,
 
 **Harder:**
 - The FIR kernel design (`design_kernel`) is a second, more expensive code path that must stay allocation-free and throttled — any future stage added to Pultec's chain needs its coefficients folded into `stage_coefficients()` and accounted for in the kernel designer.
-- Latency reporting is now stateful across `process()` calls (`pultec_reported_latency`) rather than a pure function of the current block; changes to the dispatch/bypass logic in `lib.rs` must keep `process_bypassed()`'s fallback drain in sync with whatever determines latency.
+- Latency reporting is now stateful across `process()` calls (`reported_latency`, which since ADR-0005's 2026-09-14 amendment also carries Punch's alignment delay) rather than a pure function of the current block; changes to the dispatch/bypass logic in `lib.rs` must keep `process_bypassed()`'s fallback drain in sync with whatever determines latency.
 
 **Unchanged:**
 - Parameter ranges and IDs — this is a topology swap under the hood, not a preset-breaking change.

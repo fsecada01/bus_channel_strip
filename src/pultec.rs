@@ -744,7 +744,7 @@ impl PultecEQ {
     /// delay, so the dry signal is delayed by exactly that amount while the
     /// convolver keeps running, ready to un-bypass with a warm history.
     ///
-    /// Also called (see `sync_pultec_latency` in `lib.rs`) when Pultec isn't
+    /// Also called (see `sync_latency` in `lib.rs`) when Pultec isn't
     /// an active chain slot at all — ADR-0011. Keeps the FIR draining so the
     /// signal always carries the delay the plugin reported to the host.
     pub fn process_bypassed(&mut self, buffer: &mut Buffer) {

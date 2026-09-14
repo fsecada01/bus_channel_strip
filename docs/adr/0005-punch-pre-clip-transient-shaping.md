@@ -43,3 +43,17 @@ A real bug surfaced this decision's importance directly: an earlier implementati
 
 **Unchanged:**
 - Signal-chain position is user-configurable via the module reorder system; the spec's own recommendation (end of chain, after Transformer) is a default, not an enforced constraint.
+
+## Amendment (2026-09-14): aligned, reported oversampling latency
+
+User report: Punch sounded worse at higher oversampling factors. Measurement found two causes, neither of them aliasing (4×, 8× and 16× null to −60 dB against each other once time-aligned):
+
+- **Unaligned, unreported delay.** The halfband cascade delays the wet path by 16.5 / 19.25 / 20.625 samples at 4× / 8× / 16× — fractional, factor-dependent, never reported to the host, and not applied to the dry path. At any mix below 100% that comb-filtered (first notch 1.3 kHz at 4×, 44.1 kHz), and the notches moved with the factor; at 100% the whole bus shifted against the rest of the session.
+- **Top-end loss from the 23-tap first stage**, shared by every factor above 1×: −0.75 dB at 16 kHz and −6 dB at 20 kHz at 44.1 kHz, with images folding back into the audio band only ~11 dB down.
+
+Changes:
+- Punch uses `Oversampler::new_steep`: a 127-tap (β = 9) first stage, flat to 20 kHz at 44.1 kHz with ~90 dB rejection of images that would fold into 0–20 kHz. Later stages keep the 23-tap filter.
+- The wet path is padded in the oversampled domain to exactly `PUNCH_LATENCY_SAMPLES` (74) at every factor including 1×, and the dry path is delayed by the same amount.
+- The plugin reports those 74 samples while Punch is engaged (`punch_bypass` off), following ADR-0011's param-tracking rule: when Punch is engaged but out of the rack, or the plugin is globally bypassed, `process_bypassed` keeps delaying the signal so the reported latency stays true.
+
+Migration: no parameter IDs changed. Sessions with Punch engaged now report 74 samples (~1.7 ms at 44.1 kHz) of extra latency, and parallel (mix < 100%) settings sound fuller because the comb filtering is gone. Toggling Punch's bypass changes the reported latency, which the host re-compensates.

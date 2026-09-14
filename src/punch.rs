@@ -15,7 +15,7 @@
 //!                    (parallel blend)
 //! ```
 
-use crate::oversampler::Oversampler;
+use crate::oversampler::{Oversampler, HB_NUM_TAPS, STEEP_HB_NUM_TAPS};
 use crate::shaping::biquad_coeffs;
 // Shared with `TruePeakData`'s GUI-facing floor so the two can never drift.
 use crate::spectral::TRUE_PEAK_FLOOR_DB;
@@ -27,6 +27,57 @@ use nice_plug::prelude::Enum;
 /// (DC-blocking only). Simon-Phillips-style parallel drum submix typically
 /// sets this between 120 Hz and 400 Hz to leave low end to the dry path.
 const WET_HPF_MIN_HZ: f32 = 20.0;
+
+/// Delay an engaged Punch adds, identical at every oversampling factor: the steep oversampler's
+/// longest round trip (16×) rounded up to a whole sample. The wet path is padded up to it and the
+/// dry path delayed by it, so parallel blends stay phase-aligned and the host can compensate.
+pub const PUNCH_LATENCY_SAMPLES: usize = (STEEP_HB_NUM_TAPS - 1) / 2 + (HB_NUM_TAPS - 1) / 2;
+
+/// Fixed-capacity integer delay line aligning Punch's wet and dry paths.
+#[derive(Clone, Copy)]
+struct AlignmentDelay {
+    buf: [f32; PUNCH_LATENCY_SAMPLES],
+    len: usize,
+    pos: usize,
+}
+
+impl AlignmentDelay {
+    fn new(len: usize) -> Self {
+        Self {
+            buf: [0.0; PUNCH_LATENCY_SAMPLES],
+            len: len.min(PUNCH_LATENCY_SAMPLES),
+            pos: 0,
+        }
+    }
+
+    fn set_len(&mut self, len: usize) {
+        let len = len.min(PUNCH_LATENCY_SAMPLES);
+        if len != self.len {
+            self.len = len;
+            self.reset();
+        }
+    }
+
+    fn reset(&mut self) {
+        self.buf = [0.0; PUNCH_LATENCY_SAMPLES];
+        self.pos = 0;
+    }
+
+    #[inline]
+    fn process(&mut self, input: f32) -> f32 {
+        if self.len == 0 {
+            return input;
+        }
+        let output = self.buf[self.pos];
+        self.buf[self.pos] = input;
+        self.pos = if self.pos + 1 == self.len {
+            0
+        } else {
+            self.pos + 1
+        };
+        output
+    }
+}
 
 // ============================================================================
 // Clipping Mode Enum
@@ -400,6 +451,10 @@ pub struct PunchModule {
     transient_detector_r: TransientDetector,
     oversampler_l: Oversampler,
     oversampler_r: Oversampler,
+    /// Oversampled-rate padding topping the wet path's delay up to [`PUNCH_LATENCY_SAMPLES`].
+    wet_align: [AlignmentDelay; 2],
+    /// Base-rate [`PUNCH_LATENCY_SAMPLES`] delay on the dry path (and on the bypass drain).
+    dry_align: [AlignmentDelay; 2],
 
     // Parallel-path HPF — applied to the clipped/shaped wet signal only so
     // Simon-Phillips-style drum submix blends punch/attack energy on top of
@@ -450,8 +505,11 @@ impl PunchModule {
             // Initialize per-channel state
             transient_detector_l: TransientDetector::new(sample_rate),
             transient_detector_r: TransientDetector::new(sample_rate),
-            oversampler_l: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
-            oversampler_r: Oversampler::new(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
+            oversampler_l: Oversampler::new_steep(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
+            oversampler_r: Oversampler::new_steep(Self::MAX_OS_FACTOR, Self::MAX_BLOCK_SIZE),
+            // Oversamplers start at 1×, where the wet path needs the full padding.
+            wet_align: [AlignmentDelay::new(PUNCH_LATENCY_SAMPLES); 2],
+            dry_align: [AlignmentDelay::new(PUNCH_LATENCY_SAMPLES); 2],
 
             wet_hpf_l: DirectForm1::<f32>::new(hpf_coeffs),
             wet_hpf_r: DirectForm1::<f32>::new(hpf_coeffs),
@@ -517,6 +575,12 @@ impl PunchModule {
         let os_factor = self.oversampling.factor();
         self.oversampler_l.set_factor(os_factor);
         self.oversampler_r.set_factor(os_factor);
+        let padding = ((PUNCH_LATENCY_SAMPLES as f32 - self.oversampler_l.latency_samples())
+            * os_factor as f32)
+            .round() as usize;
+        for align in &mut self.wet_align {
+            align.set_len(padding);
+        }
 
         // Update transient detectors at NATIVE sample rate.
         // Detection now runs pre-oversampling, so time constants are calibrated
@@ -573,7 +637,7 @@ impl PunchModule {
 
                 // 1. Apply input gain
                 let gained = sample * self.input_gain;
-                let dry = gained;
+                let dry = self.dry_align[ch_idx].process(gained);
 
                 let (oversampler, transient_detector) = if ch_idx == 0 {
                     (&mut self.oversampler_l, &mut self.transient_detector_l)
@@ -620,7 +684,7 @@ impl PunchModule {
                         max_gr = max_gr.max(gr);
                     }
 
-                    temp_os_buffer[os_idx] = clipped;
+                    temp_os_buffer[os_idx] = self.wet_align[ch_idx].process(clipped);
                 }
 
                 let processed = oversampler.downsample(&temp_os_buffer[..os_factor], sample_idx);
@@ -660,12 +724,26 @@ impl PunchModule {
             self.current_transient_activity * 0.9 + max_transient * 0.1;
     }
 
+    /// Delay `buffer` by [`PUNCH_LATENCY_SAMPLES`] without processing it, keeping the latency
+    /// reported for an engaged Punch honest while it is out of the rack or the whole plugin is
+    /// bypassed. Shares the dry-path delay line, so moving between the two paths is seamless.
+    pub fn process_bypassed(&mut self, buffer: &mut Buffer) {
+        for (align, samples) in self.dry_align.iter_mut().zip(buffer.as_slice().iter_mut()) {
+            for sample in samples.iter_mut() {
+                *sample = align.process(*sample);
+            }
+        }
+    }
+
     /// Reset all internal state
     pub fn reset(&mut self) {
         self.transient_detector_l.reset();
         self.transient_detector_r.reset();
         self.oversampler_l.reset();
         self.oversampler_r.reset();
+        for align in self.wet_align.iter_mut().chain(self.dry_align.iter_mut()) {
+            align.reset();
+        }
         self.current_gain_reduction = 0.0;
         self.current_transient_activity = 0.0;
         self.true_peak_l.reset();
@@ -1234,6 +1312,141 @@ mod tests {
         assert!(
             h_sb < 0.1,
             "|H(0.8π)| should be in stopband (<0.1), got {h_sb}"
+        );
+    }
+
+    const ALL_FACTORS: [OversamplingFactor; 4] = [
+        OversamplingFactor::X1,
+        OversamplingFactor::X4,
+        OversamplingFactor::X8,
+        OversamplingFactor::X16,
+    ];
+
+    /// Punch with a 0 dB ceiling and no transient shaping, so quiet signals pass unclipped.
+    fn transparent_punch(sr: f32, oversampling: OversamplingFactor, mix: f32) -> PunchModule {
+        let mut punch = PunchModule::new(sr);
+        punch.update_parameters(
+            0.0,
+            ClipMode::Hard,
+            0.0,
+            oversampling,
+            0.0,
+            0.0,
+            5.0,
+            100.0,
+            0.5,
+            0.0,
+            0.0,
+            mix,
+            WET_HPF_MIN_HZ,
+        );
+        punch
+    }
+
+    /// Runs `input` through both channels and returns the left output.
+    fn run(punch: &mut PunchModule, input: &[f32], bypassed: bool) -> Vec<f32> {
+        let mut l = input.to_vec();
+        let mut r = input.to_vec();
+        {
+            let mut buf = Buffer::default();
+            unsafe {
+                buf.set_slices(input.len(), |ss| {
+                    ss.clear();
+                    ss.push(&mut l);
+                    ss.push(&mut r);
+                });
+            }
+            if bypassed {
+                punch.process_bypassed(&mut buf);
+            } else {
+                punch.process(&mut buf);
+            }
+        }
+        l
+    }
+
+    fn sine(amp: f32, freq: f32, sr: f32, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|n| amp * (core::f32::consts::TAU * freq * n as f32 / sr).sin())
+            .collect()
+    }
+
+    fn rms(x: &[f32]) -> f32 {
+        (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt()
+    }
+
+    #[test]
+    fn test_impulse_lands_at_reported_latency_for_every_factor() {
+        for factor in ALL_FACTORS {
+            let mut punch = transparent_punch(48_000.0, factor, 1.0);
+            let mut input = vec![0.0; 1024];
+            input[10] = 0.25;
+            let out = run(&mut punch, &input, false);
+            let peak = out
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+                .unwrap()
+                .0;
+            assert_eq!(
+                peak,
+                10 + PUNCH_LATENCY_SAMPLES,
+                "{}x: impulse peak landed at {peak}",
+                factor.factor()
+            );
+        }
+    }
+
+    #[test]
+    fn test_parallel_blend_does_not_comb_filter() {
+        // 1336 Hz was the first comb notch of the unaligned 4× path (16.5 samples at 44.1 kHz).
+        let sr = 44_100.0;
+        for factor in ALL_FACTORS {
+            for freq in [1000.0, 1336.0, 2909.0, 9000.0] {
+                let mut punch = transparent_punch(sr, factor, 0.5);
+                let input = sine(0.03, freq, sr, 8192);
+                let out = run(&mut punch, &input, false);
+                let gain_db = 20.0 * (rms(&out[2048..]) / rms(&input[2048..])).log10();
+                assert!(
+                    gain_db.abs() < 0.5,
+                    "{}x at {freq} Hz: 50% blend changed the level by {gain_db:.2} dB",
+                    factor.factor()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_oversampled_wet_path_is_flat_to_19khz_at_44k() {
+        let sr = 44_100.0;
+        for factor in [
+            OversamplingFactor::X4,
+            OversamplingFactor::X8,
+            OversamplingFactor::X16,
+        ] {
+            for freq in [16_000.0, 19_000.0] {
+                let mut punch = transparent_punch(sr, factor, 1.0);
+                let input = sine(0.03, freq, sr, 8192);
+                let out = run(&mut punch, &input, false);
+                let gain_db = 20.0 * (rms(&out[2048..]) / rms(&input[2048..])).log10();
+                assert!(
+                    gain_db.abs() < 0.3,
+                    "{}x at {freq} Hz: {gain_db:.2} dB",
+                    factor.factor()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bypassed_drain_delays_by_reported_latency() {
+        let mut punch = transparent_punch(48_000.0, OversamplingFactor::X8, 1.0);
+        let input: Vec<f32> = (1..=512).map(|n| n as f32 / 512.0).collect();
+        let out = run(&mut punch, &input, true);
+        assert!(out[..PUNCH_LATENCY_SAMPLES].iter().all(|&s| s == 0.0));
+        assert_eq!(
+            &out[PUNCH_LATENCY_SAMPLES..],
+            &input[..input.len() - PUNCH_LATENCY_SAMPLES]
         );
     }
 }
