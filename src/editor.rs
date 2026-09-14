@@ -3865,12 +3865,10 @@ impl View for SheenResponseStrip {
 // through generics without 10 type parameters. A macro gives us a single layout
 // definition that expands per band at compile time.
 //
-// Dynamic spacing: the band column VStack is height(Stretch(1.0)) and fills
-// the remaining height in the back view after the header and spectrum canvas.
-// Each child uses top(Stretch(1.0)) so available space is distributed evenly
-// above each item — controls breathe when the window is tall and compress when
-// it is short, never clipping. This is morphorm's equivalent of CSS
-// `justify-content: space-around` on a fixed-height flex column.
+// Sizing: band columns are height(Auto) with fixed gaps, so a column grows when
+// its Tier 2 controls are expanded and the spectrum canvas (the only Stretch
+// item in the back view) gives up the space. A fixed Stretch share for the
+// band row clipped expanded bands off the bottom of the window.
 //
 // dyneq_slider! inlines a compact (13px label / 16px slider) param row without
 // the fixed top/bottom Pixels(0.0) that shared helpers impose. It shares the
@@ -3905,12 +3903,13 @@ macro_rules! dyneq_slider {
         .class("param-control")
         .width(Stretch(1.0))
         .height(Auto)
-        // top(Stretch) distributes free space above this item.
-        // bottom(Pixels(0)) avoids double-counting (adjacent tops handle the gap).
-        .top(Stretch(1.0))
+        .top(Pixels(0.0))
         .bottom(Pixels(0.0))
     }};
 }
+
+/// Vertical gap between rows inside a DynEQ band column.
+const DYNEQ_ROW_GAP_PX: f32 = 4.0;
 
 macro_rules! dyneq_band_col {
     ($cx:expr, $title:literal,
@@ -3963,7 +3962,7 @@ macro_rules! dyneq_band_col {
                     .bottom(Pixels(0.0));
                 }
             })
-            .top(Stretch(1.0))
+            .top(Pixels(0.0))
             .bottom(Pixels(0.0))
             .width(Stretch(1.0))
             .height(Auto);
@@ -4000,6 +3999,7 @@ macro_rules! dyneq_band_col {
                         })
                         .width(Stretch(1.0))
                         .height(Auto)
+                        .gap(Pixels(DYNEQ_ROW_GAP_PX))
                         .top(Pixels(0.0))
                         .bottom(Pixels(0.0));
                     }
@@ -4007,10 +4007,9 @@ macro_rules! dyneq_band_col {
             }
         })
         .class("dyneq-band-col")
-        // Stretch(1.0): band column fills remaining height after header + spectrum.
-        // No gap needed — spacing is entirely from top(Stretch(1.0)) on children.
-        .height(Stretch(1.0))
+        .height(Auto)
         .width(Stretch(1.0))
+        .gap(Pixels(DYNEQ_ROW_GAP_PX))
         .top(Pixels(0.0))
         .bottom(Pixels(0.0))
     };
@@ -4205,9 +4204,9 @@ fn build_dyneq_back_view(
         .bottom(Pixels(0.0));
 
         // ── Real-time spectral analyzer with masking overlay ──────────────────
-        // Uses Stretch so the canvas grows with the back-view container as the
-        // plugin window is resized by the host. SpectrumCanvas::draw already
-        // reads cx.bounds() every frame, so no additional plumbing is needed.
+        // The only Stretch item in the back view: it takes whatever height the
+        // header and the content-sized band row leave, shrinking when bands
+        // are expanded. SpectrumCanvas::draw reads cx.bounds() every frame.
         // min_height guards against the canvas disappearing on very short
         // windows.
         let params = cx.data::<Data>().params.clone();
@@ -4220,7 +4219,7 @@ fn build_dyneq_back_view(
             gr_data,
         )
         .class("dyneq-spectrum")
-        .height(Stretch(2.0))
+        .height(Stretch(1.0))
         .min_height(Pixels(180.0))
         .width(Stretch(1.0))
         .top(Pixels(0.0))
@@ -4228,9 +4227,8 @@ fn build_dyneq_back_view(
 
         // ── 4-band horizontal editor ──────────────────────────────────────────
         #[cfg(feature = "dynamic_eq")]
-        // height(Stretch(1.0)): HStack fills remaining back-view height after
-        // the header row and spectrum canvas, giving band columns a concrete
-        // height to stretch into for dynamic spacing to work.
+        // height(Auto): the row is as tall as its tallest (possibly expanded)
+        // band column; columns top-align so collapsed bands don't float.
         HStack::new(cx, |cx| {
             dyneq_band_col!(
                 cx,
@@ -4296,8 +4294,9 @@ fn build_dyneq_back_view(
                 3
             );
         })
-        .height(Stretch(1.0))
+        .height(Auto)
         .width(Stretch(1.0))
+        .alignment(Alignment::TopLeft)
         .gap(Pixels(12.0))
         .top(Pixels(0.0))
         .bottom(Pixels(0.0));
