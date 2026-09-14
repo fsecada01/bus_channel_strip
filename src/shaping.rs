@@ -21,6 +21,12 @@ pub fn biquad_coeffs(
     Coefficients::<f32>::from_normalized_params(filter_type, normalized, q)
 }
 
+/// Coefficient for the one-pole smoother `y += (x - y) * coeff`, reaching ~63 % of a step
+/// after `time_s` seconds at `sample_rate`.
+pub fn one_pole_coeff(time_s: f32, sample_rate: f32) -> f32 {
+    1.0 - (-1.0 / (time_s * sample_rate).max(1.0)).exp()
+}
+
 /// Symmetric (periodic-off) Hann window of length `len`:
 /// `w[n] = 0.5 * (1 - cos(2*pi*n / (len-1)))`. Shared by every FFT-windowing
 /// call site (spectral analysis, the Pultec linear-phase FIR designer) so

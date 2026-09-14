@@ -222,7 +222,9 @@ impl SheenModule {
             width_hpf: TptSvf::new(hpf_coeff),
             width_shelf: TptSvf::new(shelf_coeff),
             warmth_os: [make_warmth_os(), make_warmth_os()],
-            warmth_hysteresis: [HysteresisCell::new(), HysteresisCell::new()],
+            warmth_hysteresis: std::array::from_fn(|_| {
+                HysteresisCell::new(sample_rate * OS_FACTOR as f32)
+            }),
             warmth_was_active: false,
             tape_mode: false,
             body_db: 1.0,
@@ -959,14 +961,16 @@ mod tests {
     #[test]
     fn sheen_reset_clears_warmth_hysteresis_state() {
         let mut sheen = SheenModule::new(SR);
-        // Pin the play operator away from zero.
         sheen.warmth_hysteresis[0].process(0.9, 0.6);
         sheen.reset();
-        let probe = sheen.warmth_hysteresis[0].process(0.01, 0.6);
-        assert!(
-            (probe - 0.0).abs() < 1.0e-6,
-            "warmth hysteresis state not cleared by reset: {probe}"
-        );
+        let mut fresh = HysteresisCell::new(SR * OS_FACTOR as f32);
+        for &x in &[0.01_f32, 0.3, -0.2] {
+            assert_eq!(
+                sheen.warmth_hysteresis[0].process(x, 0.6),
+                fresh.process(x, 0.6),
+                "warmth hysteresis state not cleared by reset"
+            );
+        }
     }
 
     // ── #22 WARMTH saturation meter ─────────────────────────────────────────

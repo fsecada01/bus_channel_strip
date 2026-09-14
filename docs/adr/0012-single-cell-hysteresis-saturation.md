@@ -33,3 +33,15 @@ Both modules flush their hysteresis cells' state on `reset()`. Sheen's WARMTH de
 
 **Unchanged:**
 - Parameter IDs for every existing Transformer/Sheen control. The two new BoolParams are additive.
+
+## Amendment (2026-09-14): level-relative loop width
+
+User report: Console/Tape produced severe distortion at saturation values above 0.1 on both input and output stages. Root cause was the absolute half-width `r = 0.15 * amount`: it acts as a dead band, so any signal smaller than `r` was held flat (silence below roughly -29 dBFS at saturation 0.59) and everything else got crossover-style distortion. THD for a -24 dBFS sine at saturation 0.1 measured -27 dB.
+
+Changes:
+- `HysteresisCell` now scales `r` by a per-cell peak follower (100 ms release): `r = 0.06 * amount * peak`. The loop has the same shape at any level. The cell takes the rate it is clocked at in `new`, and clamps the tracked level so NaN input cannot latch it.
+- Transformer applies hysteresis to the wet path only (`saturate_by_model(dry, wet_in, ..)`); the dry share of the blend no longer carries the loop's lag.
+- Transformer's loading compressor has per-channel state, a 150 ms detector release and 20 ms gain smoothing (it previously used a shared stereo envelope with a ~0.5 ms release, which gain-modulated at waveform rate). It now runs even when saturation is below 0.01.
+- The Modern curve is `d / sqrt(1 + k·d²)`, which is monotonic (the old `d / (1 + k·d²)` folded back).
+
+Migration: existing sessions using Transformer will sound cleaner at low and moderate saturation, and `transformer_hysteresis_bypass = true` is no longer bit-identical to v1.0 because the compressor changed. Sheen's opt-in tape mode picks up the same level-relative cell. No parameter IDs changed.
