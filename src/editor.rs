@@ -1134,10 +1134,9 @@ fn module_type_subtitle(mt: ModuleType) -> &'static str {
 ///   Total                      ≈ 1296 px → rounded up to 1300
 ///
 /// At higher zoom levels the slot width grows (BASE × zoom/100) and the
-/// chassis padding grows linearly as well; within a session the window
-/// stays fixed and users scroll horizontally to reveal off-screen slots
-/// (see `AppEvent::SetZoom` for why real resize only lands on the next
-/// editor open). Mini-map height (28 px) and chain-preset row height
+/// chassis padding grows linearly as well; the host window is resized to
+/// match (see `AppEvent::SetZoom`) and the strip ScrollView reveals any
+/// slots that still fall off-screen. Mini-map height (28 px) and chain-preset row height
 /// bumped HEIGHT to 860 to keep the rack body roughly the same vertical
 /// footprint as before the redesign.
 ///
@@ -1150,8 +1149,8 @@ pub(crate) fn default_state() -> Arc<ViziaState> {
     // restored from the saved session before the editor is first spawned,
     // so the real host window opens at the last-chosen zoom's size
     // (`window_sizing::window_size_for_zoom`) instead of always resetting
-    // to the 1300x860 default. Within a single open session, zoom is still
-    // a live CSS-only rescale — see `AppEvent::SetZoom` for why.
+    // to the 1300x860 default. Within a session, `AppEvent::SetZoom`
+    // resizes the host window live.
     ViziaState::new_with_default_scale_factor(
         || {
             (
@@ -1235,6 +1234,21 @@ pub(crate) fn create(
             preset_save_name: Signal::new(String::new()),
         }
         .build(cx);
+
+        // vizia_baseview's first frame resizes the window to the unscaled base
+        // size, ignoring the persisted user scale, which leaves the rack's
+        // ScrollView clipped until the zoom is changed. Re-apply the scale
+        // once that first frame has run.
+        let initial_scale = editor_state_for_data.user_scale_factor();
+        if initial_scale != 1.0 {
+            let delay = Duration::from_millis(50);
+            let timer = cx.add_timer(delay, Some(delay), move |cx, action| {
+                if let TimerAction::Tick(_) = action {
+                    cx.emit(WindowEvent::SetUserScale(initial_scale));
+                }
+            });
+            cx.start_timer(timer);
+        }
 
         // Heal duplicate module_order_* assignments left over from sessions
         // saved under an older schema (fewer slots). When slot N defaults to
