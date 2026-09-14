@@ -456,4 +456,26 @@ mod plugin_integration_tests {
         );
         assert!(peak_db > -20.0, "peak only {peak_db:.1} dBFS");
     }
+
+    /// nice-plug's VST3 wrapper exposes only the first `AUDIO_IO_LAYOUTS` entry and cannot switch
+    /// to a layout with a different bus count, so the sidechain must be in the first layout or
+    /// VST3 hosts never see the DynEQ sidechain input.
+    #[test]
+    fn test_first_audio_io_layout_exposes_stereo_sidechain() {
+        use nice_plug::prelude::Plugin;
+        let first = BusChannelStrip::AUDIO_IO_LAYOUTS
+            .first()
+            .expect("at least one audio IO layout");
+        assert_eq!(first.main_input_channels.map(|c| c.get()), Some(2));
+        assert_eq!(first.main_output_channels.map(|c| c.get()), Some(2));
+        assert_eq!(
+            first
+                .aux_input_ports
+                .iter()
+                .map(|c| c.get())
+                .collect::<Vec<_>>(),
+            vec![2],
+            "first layout must carry the stereo sidechain for VST3 hosts"
+        );
+    }
 }

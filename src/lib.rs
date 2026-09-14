@@ -873,23 +873,22 @@ impl Plugin for BusChannelStrip {
     // Version with build date suffix provided by build.rs
     const VERSION: &'static str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("BUILD_DATE"));
 
-    // The first audio IO layout is used as the default. The other layouts may be selected either
-    // explicitly or automatically by the host or the user depending on the plugin API/backend.
+    /// The sidechain layout must come first: nice-plug's VST3 wrapper exposes only the first
+    /// layout's bus count and never switches to a layout with a different number of buses, so a
+    /// sidechain layout listed later is unreachable in VST3 hosts. An unrouted sidechain arrives
+    /// as silence and `process_module_dynamic_eq` handles that.
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
-        // Default: stereo in/out, no sidechain required (backward-compatible).
-        AudioIOLayout {
-            main_input_channels: NonZeroU32::new(2),
-            main_output_channels: NonZeroU32::new(2),
-            aux_input_ports: &[],
-            aux_output_ports: &[],
-            names: PortNames::const_default(),
-        },
-        // Optional: stereo main + stereo sidechain for masking analysis.
-        // Select this layout in Reaper via the plugin's I/O panel.
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(2),
             main_output_channels: NonZeroU32::new(2),
             aux_input_ports: &[new_nonzero_u32(2)],
+            aux_output_ports: &[],
+            names: PortNames::const_default(),
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            aux_input_ports: &[],
             aux_output_ports: &[],
             names: PortNames::const_default(),
         },
