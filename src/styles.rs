@@ -1455,6 +1455,16 @@ scrollbar .thumb:hover {
     background-image: linear-gradient(145deg, #152a15, #1e3d1e);
 }
 
+/* ANALYZE SC while the audio thread is learning */
+.dyneq-auto-btn.learning {
+    background-image: linear-gradient(145deg, #34501e, #4a7a2a);
+    border-color: #ccee66;
+}
+
+.dyneq-auto-btn.learning .dyneq-auto-btn-label {
+    color: #ddff88;
+}
+
 .dyneq-auto-btn-label {
     font-size: 12px;
     font-weight: 700;
@@ -1499,6 +1509,41 @@ scrollbar .thumb:hover {
 .dyneq-analysis-status {
     font-size: 11px;
     color: #9fcf9f;
+}
+
+/* Per-band sidechain-analysis suggestion strip */
+.dyneq-suggestion-strip {
+    background-color: #1a2a1a;
+    border: 1px solid #3d5d3d;
+    border-radius: 3px;
+    padding-left: 4px;
+    padding-right: 2px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+}
+
+.dyneq-suggestion-text {
+    font-size: 10px;
+    color: #9fcf9f;
+}
+
+.dyneq-use-btn {
+    background-color: #2a5c2a;
+    border: 1px solid #66cc66;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.dyneq-use-btn:hover {
+    background-color: #3a7a3a;
+    border-color: #88ee88;
+}
+
+.dyneq-use-btn-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #88ee88;
+    text-align: center;
 }
 
 /* A control whose value is currently ignored (DET FREQ while LINK is on). */

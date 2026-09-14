@@ -92,16 +92,15 @@ pub enum AppEvent {
     /// Set the chassis zoom level (percentage: 75, 100, 125, 150, 200).
     /// Applied via toggle_class on the chassis root; CSS scales content widths.
     SetZoom(u8),
-    /// Request a one-shot sidechain masking analysis from the audio thread.
+    /// Start a sidechain masking analysis (learned over `spectral::LEARN_SECONDS`).
     #[cfg(feature = "dynamic_eq")]
     RequestAnalysis,
-    /// Apply analysis results to the appropriate DynEQ band parameters.
+    /// Apply one band's analysis suggestion (0–3) to that DynEQ band.
     #[cfg(feature = "dynamic_eq")]
-    ApplyAnalysis {
-        band: u32,
-        freq: f32,
-        threshold_db: f32,
-    },
+    ApplySuggestion { band: usize },
+    /// Apply every available analysis suggestion.
+    #[cfg(feature = "dynamic_eq")]
+    ApplyAllSuggestions,
     /// Show/hide the preset browser panel. Wired to the header's preset-name
     /// pill (issue #21) — distinct from `LoadChain`, which only rewrites
     /// routing: this loads a *full* plugin preset (all ~152 params).
@@ -210,6 +209,81 @@ pub struct Data {
     pub loaded_preset: Signal<Option<Arc<Preset>>>,
     /// Live text of the "save current as" textbox in the preset browser.
     pub preset_save_name: Signal<String>,
+}
+
+/// One host automation gesture setting `ptr` to `normalized`.
+#[cfg(feature = "dynamic_eq")]
+fn set_param_normalized(cx: &mut EventContext, ptr: ParamPtr, normalized: f32) {
+    cx.emit(RawParamEvent::BeginSetParameter(ptr));
+    cx.emit(RawParamEvent::SetParameterNormalized(ptr, normalized));
+    cx.emit(RawParamEvent::EndSetParameter(ptr));
+}
+
+#[cfg(feature = "dynamic_eq")]
+impl Data {
+    /// Write the analysis suggestion of each band in `mask` (bit b = band b) to its FREQ, Q and
+    /// THRESH, turn its DET LINK on, and mark it applied. Does nothing unless suggestions are
+    /// showing (status Ready or Applied).
+    fn apply_suggestions(&self, cx: &mut EventContext, mask: u8) {
+        let result = &self.analysis_result;
+        if !matches!(
+            result.status(),
+            spectral::AnalysisStatus::Ready | spectral::AnalysisStatus::Applied
+        ) {
+            return;
+        }
+        let p = &self.params.dynamic_eq;
+        let bands = [
+            (
+                &p.dyneq_band1_freq,
+                &p.dyneq_band1_q,
+                &p.dyneq_band1_threshold,
+                &p.dyneq_band1_detector_link,
+            ),
+            (
+                &p.dyneq_band2_freq,
+                &p.dyneq_band2_q,
+                &p.dyneq_band2_threshold,
+                &p.dyneq_band2_detector_link,
+            ),
+            (
+                &p.dyneq_band3_freq,
+                &p.dyneq_band3_q,
+                &p.dyneq_band3_threshold,
+                &p.dyneq_band3_detector_link,
+            ),
+            (
+                &p.dyneq_band4_freq,
+                &p.dyneq_band4_q,
+                &p.dyneq_band4_threshold,
+                &p.dyneq_band4_detector_link,
+            ),
+        ];
+        let mut applied = 0_u8;
+        for (b, ((freq, q, threshold, link), slot)) in
+            bands.iter().zip(&result.suggestions).enumerate()
+        {
+            if mask & (1 << b) == 0 {
+                continue;
+            }
+            let Some(s) = slot.load() else {
+                continue;
+            };
+            set_param_normalized(cx, freq.as_ptr(), freq.preview_normalized(s.freq_hz));
+            set_param_normalized(cx, q.as_ptr(), q.preview_normalized(s.q));
+            set_param_normalized(
+                cx,
+                threshold.as_ptr(),
+                threshold.preview_normalized(s.threshold_db),
+            );
+            set_param_normalized(cx, link.as_ptr(), 1.0);
+            applied |= 1 << b;
+        }
+        if applied != 0 {
+            result.applied_bands.fetch_or(applied, Ordering::Relaxed);
+            result.set_status(spectral::AnalysisStatus::Applied);
+        }
+    }
 }
 
 impl Model for Data {
@@ -370,48 +444,12 @@ impl Model for Data {
             }
 
             #[cfg(feature = "dynamic_eq")]
-            AppEvent::ApplyAnalysis {
-                band,
-                freq,
-                threshold_db,
-            } => {
-                self.analysis_result
-                    .set_status(spectral::AnalysisStatus::Applied);
-
-                let (freq_ptr, thresh_ptr) = match *band {
-                    0 => (
-                        self.params.dynamic_eq.dyneq_band1_freq.as_ptr(),
-                        self.params.dynamic_eq.dyneq_band1_threshold.as_ptr(),
-                    ),
-                    1 => (
-                        self.params.dynamic_eq.dyneq_band2_freq.as_ptr(),
-                        self.params.dynamic_eq.dyneq_band2_threshold.as_ptr(),
-                    ),
-                    2 => (
-                        self.params.dynamic_eq.dyneq_band3_freq.as_ptr(),
-                        self.params.dynamic_eq.dyneq_band3_threshold.as_ptr(),
-                    ),
-                    _ => (
-                        self.params.dynamic_eq.dyneq_band4_freq.as_ptr(),
-                        self.params.dynamic_eq.dyneq_band4_threshold.as_ptr(),
-                    ),
-                };
-
-                // Safety: ParamPtr is obtained from self.params (Arc'd, outlives the editor).
-                let freq_norm = unsafe { freq_ptr.preview_normalized(*freq) };
-                let thresh_norm = unsafe { thresh_ptr.preview_normalized(*threshold_db) };
-
-                cx.emit(RawParamEvent::BeginSetParameter(freq_ptr));
-                cx.emit(RawParamEvent::SetParameterNormalized(freq_ptr, freq_norm));
-                cx.emit(RawParamEvent::EndSetParameter(freq_ptr));
-
-                cx.emit(RawParamEvent::BeginSetParameter(thresh_ptr));
-                cx.emit(RawParamEvent::SetParameterNormalized(
-                    thresh_ptr,
-                    thresh_norm,
-                ));
-                cx.emit(RawParamEvent::EndSetParameter(thresh_ptr));
+            AppEvent::ApplySuggestion { band } => {
+                self.apply_suggestions(cx, 1 << (*band).min(3));
             }
+
+            #[cfg(feature = "dynamic_eq")]
+            AppEvent::ApplyAllSuggestions => self.apply_suggestions(cx, 0b1111),
 
             AppEvent::AddOrFocusModule(mt) => {
                 if let Some(slot) = slot_containing(&self.params, *mt) {
@@ -3060,6 +3098,20 @@ fn draw_vline(canvas: &Canvas, x: f32, top: f32, bottom: f32, paint: &vg::Paint)
     canvas.draw_path(&path.detach(), paint);
 }
 
+/// Vertical dashed line at `x` from `top` to `bottom`.
+fn draw_dashed_vline(canvas: &Canvas, x: f32, top: f32, bottom: f32, paint: &vg::Paint) {
+    const DASH_PX: f32 = 4.0;
+    const DASH_GAP_PX: f32 = 3.0;
+    let mut dashes = vg::PathBuilder::new();
+    let mut y = top;
+    while y < bottom {
+        dashes.move_to((x, y));
+        dashes.line_to((x, (y + DASH_PX).min(bottom)));
+        y += DASH_PX + DASH_GAP_PX;
+    }
+    canvas.draw_path(&dashes.detach(), paint);
+}
+
 /// Reads magnitude bins from the audio thread's lock-free `SpectrumData` and
 /// redraws each frame on a log-frequency axis, with each enabled DynEQ band's
 /// freq/Q region, centre and detector frequency drawn from the live params.
@@ -3264,8 +3316,6 @@ impl View for SpectrumCanvas {
         ];
         const MAX_GR_DB: f32 = 24.0;
         const MAX_BAR_H: f32 = 18.0;
-        const DASH_PX: f32 = 4.0;
-        const DASH_GAP_PX: f32 = 3.0;
         let bands = dyneq_band_markers(&self.params);
         for (b, band) in bands.iter().enumerate().filter(|(_, band)| band.enabled) {
             let (r, g, bl) = BAND_RGB[b];
@@ -3362,14 +3412,29 @@ impl View for SpectrumCanvas {
             let detector_x = x_of(band.detector_hz);
             if !band.detector_linked && (detector_x - centre_x).abs() >= 2.0 {
                 marker.set_color(vg::Color::from_argb(150, r, g, bl));
-                let mut dashes = vg::PathBuilder::new();
-                let mut y = bounds.y;
-                while y < bottom {
-                    dashes.move_to((detector_x, y));
-                    dashes.line_to((detector_x, (y + DASH_PX).min(bottom)));
-                    y += DASH_PX + DASH_GAP_PX;
+                draw_dashed_vline(canvas, detector_x, bounds.y, bottom, &marker);
+            }
+        }
+
+        // ── Sidechain-analysis suggestions: dashed edges of each region ──────
+        if matches!(
+            self.analysis_result.status(),
+            spectral::AnalysisStatus::Ready | spectral::AnalysisStatus::Applied
+        ) {
+            for (b, slot) in self.analysis_result.suggestions.iter().enumerate() {
+                let Some(suggestion) = slot.load() else {
+                    continue;
+                };
+                let (r, g, bl) = BAND_RGB[b];
+                let mut edge = vg::Paint::default();
+                edge.set_color(vg::Color::from_argb(190, r, g, bl));
+                edge.set_style(vg::PaintStyle::Stroke);
+                edge.set_stroke_width(1.0);
+                edge.set_anti_alias(false);
+                let (lo_hz, hi_hz) = spectral::bell_band_edges_hz(suggestion.freq_hz, suggestion.q);
+                for hz in [lo_hz, hi_hz] {
+                    draw_dashed_vline(canvas, x_of(hz), bounds.y, bottom, &edge);
                 }
-                canvas.draw_path(&dashes.detach(), &marker);
             }
         }
 
@@ -4025,7 +4090,7 @@ macro_rules! dyneq_band_col {
      $freq:ident, $thresh:ident, $ratio:ident,
      $q:ident, $mode:ident, $atk:ident, $rel:ident, $gain:ident,
      $range:ident, $link:ident, $det_freq:ident,
-     $gr_data:expr, $band_idx:literal) => {
+     $gr_data:expr, $suggestion:expr, $band_idx:literal) => {
         VStack::new($cx, |cx| {
             // Band header: title + ON/SOLO buttons + chevron expand toggle
             HStack::new(cx, |cx| {
@@ -4075,6 +4140,47 @@ macro_rules! dyneq_band_col {
             .bottom(Pixels(0.0))
             .width(Stretch(1.0))
             .height(Auto);
+
+            // Sidechain-analysis suggestion strip, built only while this
+            // band has a suggestion waiting to be applied.
+            {
+                let suggestion = $suggestion;
+                Binding::new(cx, suggestion, move |cx| {
+                    let Some(s) = suggestion.get() else {
+                        return;
+                    };
+                    HStack::new(cx, |cx| {
+                        Label::new(cx, spectral::suggestion_text(&s))
+                            .class("dyneq-suggestion-text")
+                            .height(Pixels(16.0))
+                            .width(Stretch(1.0))
+                            .top(Pixels(0.0))
+                            .bottom(Pixels(0.0));
+                        VStack::new(cx, |cx| {
+                            Label::new(cx, "USE")
+                                .class("dyneq-use-btn-label")
+                                .height(Pixels(12.0))
+                                .width(Stretch(1.0))
+                                .on_press(|cx| {
+                                    cx.emit(AppEvent::ApplySuggestion { band: $band_idx })
+                                });
+                        })
+                        .class("dyneq-use-btn")
+                        .on_press(|cx| cx.emit(AppEvent::ApplySuggestion { band: $band_idx }))
+                        .cursor(CursorIcon::Hand)
+                        .width(Pixels(40.0))
+                        .height(Pixels(16.0))
+                        .top(Pixels(0.0))
+                        .bottom(Pixels(0.0));
+                    })
+                    .class("dyneq-suggestion-strip")
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .gap(Pixels(6.0))
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
+                });
+            }
 
             // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
             dyneq_slider!(cx, "MODE", "dyneq_band1_mode", |p| &p.dynamic_eq.$mode);
@@ -4190,6 +4296,12 @@ fn build_dyneq_back_view(
 ) {
     let dyneq_open_signal = cx.data::<Data>().dyneq_open;
     VStack::new(cx, |cx| {
+        // Per-band analysis suggestion still waiting to be applied; set by the header's poll
+        // timer, read by each band column's suggestion strip.
+        #[cfg(feature = "dynamic_eq")]
+        let suggestion_signals: [Signal<Option<spectral::BandSuggestion>>; 4] =
+            std::array::from_fn(|_| Signal::new(None));
+
         // ── Back-view header ──────────────────────────────────────────────────
         HStack::new(cx, |cx| {
             // Back button
@@ -4251,11 +4363,12 @@ fn build_dyneq_back_view(
             }
 
             // ── Sidechain masking analysis controls ──────────────────────────
-            // ANALYZE SC arms the audio thread to analyse the next FFT frame;
-            // APPLY RESULT programs the suggested DynEQ band. A polling timer
-            // mirrors the shared status into the status line and APPLY's
-            // `ready` class. It must stay the editor's only vizia timer:
-            // `start_timer` hangs the host when another timer is running.
+            // ANALYZE SC starts a learning window on the audio thread; APPLY
+            // ALL programs every suggested band (each band column also has
+            // its own USE). A polling timer mirrors the shared status into
+            // the status line, the button classes and the per-band
+            // suggestion signals. It must stay the editor's only vizia
+            // timer: `start_timer` hangs the host when another timer runs.
             #[cfg(feature = "dynamic_eq")]
             {
                 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -4264,11 +4377,12 @@ fn build_dyneq_back_view(
                 let status_text = Signal::new(spectral::analysis_status_text(
                     spectral::AnalysisStatus::Idle,
                     false,
+                    0.0,
                     0,
-                    0.0,
-                    0.0,
+                    0,
                 ));
                 let apply_ready = Signal::new(false);
+                let learning = Signal::new(false);
                 let poll_result = analysis_result.clone();
                 let pending_ticks = std::cell::Cell::new(0_u32);
                 let poll = cx.add_timer(POLL_INTERVAL, None, move |_, action| {
@@ -4281,19 +4395,49 @@ fn build_dyneq_back_view(
                     } else {
                         0
                     });
+                    let timed_out = pending_ticks.get() > TIMEOUT_TICKS;
+                    let applied = poll_result.applied_bands.load(Ordering::Relaxed);
+                    let showing = matches!(
+                        status,
+                        spectral::AnalysisStatus::Ready | spectral::AnalysisStatus::Applied
+                    );
+                    let (mut suggested, mut unapplied) = (0_usize, 0_usize);
+                    for (b, (signal, slot)) in suggestion_signals
+                        .iter()
+                        .zip(&poll_result.suggestions)
+                        .enumerate()
+                    {
+                        let suggestion = slot.load().filter(|_| showing);
+                        suggested += usize::from(suggestion.is_some());
+                        let waiting = suggestion.filter(|_| applied & (1 << b) == 0);
+                        unapplied += usize::from(waiting.is_some());
+                        if signal.get() != waiting {
+                            signal.set(waiting);
+                        }
+                    }
                     let text = spectral::analysis_status_text(
                         status,
-                        pending_ticks.get() > TIMEOUT_TICKS,
-                        poll_result.target_band.load(Ordering::Relaxed),
-                        f32::from_bits(poll_result.target_freq.load(Ordering::Relaxed)),
-                        f32::from_bits(poll_result.target_threshold_db.load(Ordering::Relaxed)),
+                        timed_out,
+                        poll_result.progress(),
+                        suggested,
+                        applied,
                     );
                     if status_text.get() != text {
                         status_text.set(text);
                     }
-                    let ready = status == spectral::AnalysisStatus::Ready;
+                    let ready = unapplied > 0;
                     if apply_ready.get() != ready {
                         apply_ready.set(ready);
+                    }
+                    let busy = !timed_out
+                        && matches!(
+                            status,
+                            spectral::AnalysisStatus::Pending
+                                | spectral::AnalysisStatus::Learning
+                                | spectral::AnalysisStatus::Finalizing
+                        );
+                    if learning.get() != busy {
+                        learning.set(busy);
                     }
                 });
                 cx.start_timer(poll);
@@ -4303,7 +4447,9 @@ fn build_dyneq_back_view(
                     .dyneq_detect_mode)
                 .width(Pixels(90.0));
 
-                let ar_clone = analysis_result.clone();
+                // on_press is attached to both the label and the parent
+                // VStack: vizia's on_press only fires on the deepest hovered
+                // view, and the label fills the whole clickable area.
                 VStack::new(cx, |cx| {
                     Label::new(cx, "ANALYZE SC")
                         .class("dyneq-auto-btn-label")
@@ -4312,6 +4458,7 @@ fn build_dyneq_back_view(
                         .on_press(|cx| cx.emit(AppEvent::RequestAnalysis));
                 })
                 .class("dyneq-auto-btn")
+                .toggle_class("learning", learning.map(|l| *l))
                 .on_press(|cx| cx.emit(AppEvent::RequestAnalysis))
                 .cursor(CursorIcon::Hand)
                 .height(Pixels(32.0))
@@ -4319,37 +4466,16 @@ fn build_dyneq_back_view(
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0));
 
-                // on_press is attached to both the label and the parent
-                // VStack: vizia's on_press only fires on the deepest
-                // hovered view, and the label fills the whole clickable
-                // area. A named closure is used (rather than inlining
-                // twice) so it can be cloned for the second attachment —
-                // it captures only ar_clone (Arc<AnalysisResult>), which is
-                // Clone, so the closure derives Clone automatically.
-                let apply_analysis = move |cx: &mut EventContext| {
-                    if ar_clone.status() == spectral::AnalysisStatus::Ready {
-                        let band = ar_clone.target_band.load(Ordering::Relaxed);
-                        let freq = f32::from_bits(ar_clone.target_freq.load(Ordering::Relaxed));
-                        let threshold_db =
-                            f32::from_bits(ar_clone.target_threshold_db.load(Ordering::Relaxed));
-                        cx.emit(AppEvent::ApplyAnalysis {
-                            band,
-                            freq,
-                            threshold_db,
-                        });
-                    }
-                };
-                let apply_analysis_label = apply_analysis.clone();
                 VStack::new(cx, |cx| {
-                    Label::new(cx, "APPLY RESULT")
+                    Label::new(cx, "APPLY ALL")
                         .class("dyneq-apply-btn-label")
                         .height(Pixels(14.0))
                         .width(Stretch(1.0))
-                        .on_press(apply_analysis_label);
+                        .on_press(|cx| cx.emit(AppEvent::ApplyAllSuggestions));
                 })
                 .class("dyneq-apply-btn")
                 .toggle_class("ready", apply_ready.map(|r| *r))
-                .on_press(apply_analysis)
+                .on_press(|cx| cx.emit(AppEvent::ApplyAllSuggestions))
                 .cursor(CursorIcon::Hand)
                 .height(Pixels(32.0))
                 .width(Pixels(120.0))
@@ -4416,6 +4542,7 @@ fn build_dyneq_back_view(
                 dyneq_band1_detector_link,
                 dyneq_band1_detector_freq,
                 band_gr_data,
+                suggestion_signals[0],
                 0
             );
 
@@ -4436,6 +4563,7 @@ fn build_dyneq_back_view(
                 dyneq_band2_detector_link,
                 dyneq_band2_detector_freq,
                 band_gr_data,
+                suggestion_signals[1],
                 1
             );
 
@@ -4456,6 +4584,7 @@ fn build_dyneq_back_view(
                 dyneq_band3_detector_link,
                 dyneq_band3_detector_freq,
                 band_gr_data,
+                suggestion_signals[2],
                 2
             );
 
@@ -4476,6 +4605,7 @@ fn build_dyneq_back_view(
                 dyneq_band4_detector_link,
                 dyneq_band4_detector_freq,
                 band_gr_data,
+                suggestion_signals[3],
                 3
             );
         })

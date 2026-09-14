@@ -45,7 +45,7 @@ use pultec::PultecEQ;
 #[cfg(feature = "dynamic_eq")]
 mod dynamic_eq;
 #[cfg(feature = "dynamic_eq")]
-use dynamic_eq::{DynamicBandParams, DynamicEQ};
+use dynamic_eq::{DynamicBandParams, DynamicEQ, DynamicMode};
 
 #[cfg(feature = "transformer")]
 mod transformer;
@@ -210,10 +210,11 @@ struct BusChannelStrip {
     #[cfg(feature = "dynamic_eq")]
     fft_magnitude_smooth: Vec<f32>,
 
-    // ── Sidechain masking analysis (Strategy A — one-shot, UI-triggered) ──────
+    // ── Sidechain masking analysis (ANALYZE SC, learned over LEARN_SECONDS) ───
     /// Circular ring buffer for the sidechain mono mix-down.
     #[cfg(feature = "dynamic_eq")]
     sc_ring: Vec<f32>,
+    /// Write position shared by `sc_ring` and `learn_main_ring`.
     #[cfg(feature = "dynamic_eq")]
     sc_ring_pos: usize,
     /// Windowed sidechain snapshot for FFT (pre-allocated in initialize()).
@@ -222,9 +223,15 @@ struct BusChannelStrip {
     /// Sidechain FFT output (pre-allocated, same size as fft_output).
     #[cfg(feature = "dynamic_eq")]
     sc_fft_output: Vec<realfft::num_complex::Complex<f32>>,
-    /// Sample rate cached from initialize() for FFT bin → Hz conversion.
+    /// Pre-DynEQ main mono mix-down, so learned thresholds don't read the band's own compression.
     #[cfg(feature = "dynamic_eq")]
-    sample_rate: f32,
+    learn_main_ring: Vec<f32>,
+    #[cfg(feature = "dynamic_eq")]
+    learn_main_input: Vec<f32>,
+    #[cfg(feature = "dynamic_eq")]
+    learn_main_output: Vec<realfft::num_complex::Complex<f32>>,
+    #[cfg(feature = "dynamic_eq")]
+    learner: spectral::MaskingLearner,
     /// GUI → audio: GUI sets true to request an analysis on the next FFT frame.
     analysis_requested: Arc<std::sync::atomic::AtomicBool>,
     /// audio → GUI: results of the last masking analysis.
@@ -309,7 +316,13 @@ impl Default for BusChannelStrip {
             #[cfg(feature = "dynamic_eq")]
             sc_fft_output: Vec::new(),
             #[cfg(feature = "dynamic_eq")]
-            sample_rate: 44100.0,
+            learn_main_ring: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            learn_main_input: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            learn_main_output: Vec::new(),
+            #[cfg(feature = "dynamic_eq")]
+            learner: spectral::MaskingLearner::default(),
             analysis_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             analysis_result: Arc::new(spectral::AnalysisResult::new()),
             gr_data: Arc::new(spectral::GainReductionData::new()),
@@ -537,29 +550,59 @@ impl BusChannelStrip {
         }
     }
 
+    /// Mean of `channels` at sample `index`; 0 when no channel has that sample.
+    #[cfg(feature = "dynamic_eq")]
+    fn mono_sample(channels: &[&mut [f32]], index: usize) -> f32 {
+        let (sum, count) = channels
+            .iter()
+            .filter_map(|channel| channel.get(index))
+            .fold((0.0_f32, 0_u32), |(sum, count), &x| (sum + x, count + 1));
+        if count == 0 {
+            0.0
+        } else {
+            sum / count as f32
+        }
+    }
+
+    /// Each DynEQ band's FREQ span, current FREQ and mode direction, for the masking learner.
+    #[cfg(feature = "dynamic_eq")]
+    fn dyneq_band_ranges(&self) -> [spectral::BandRange; 4] {
+        let p = &self.params.dynamic_eq;
+        let range = |freq: &FloatParam, mode: &EnumParam<DynamicMode>| spectral::BandRange {
+            min_hz: freq.preview_plain(0.0),
+            max_hz: freq.preview_plain(1.0),
+            current_hz: freq.value(),
+            downward: mode.value() == DynamicMode::CompressDownward,
+        };
+        [
+            range(&p.dyneq_band1_freq, &p.dyneq_band1_mode),
+            range(&p.dyneq_band2_freq, &p.dyneq_band2_mode),
+            range(&p.dyneq_band3_freq, &p.dyneq_band3_mode),
+            range(&p.dyneq_band4_freq, &p.dyneq_band4_mode),
+        ]
+    }
+
     #[cfg(feature = "dynamic_eq")]
     fn process_module_dynamic_eq(&mut self, buffer: &mut Buffer, aux: &mut AuxiliaryBuffers) {
-        // Sidechain ring accumulation — runs regardless of bypass so the
-        // ANALYZE SC feature always reflects the live sidechain.
-        if !aux.inputs.is_empty() {
-            for channel_samples in aux.inputs[0].iter_samples() {
-                let mut mono = 0.0_f32;
-                let mut n = 0_usize;
-                for s in channel_samples {
-                    mono += *s;
-                    n += 1;
-                }
-                if n > 0 {
-                    mono /= n as f32;
-                }
-                self.sc_ring[self.sc_ring_pos] = mono;
+        use std::sync::atomic::Ordering;
+
+        // Pre-DynEQ main and sidechain rings — run regardless of bypass so
+        // ANALYZE SC always reflects the live signals.
+        if self.sc_ring.len() == spectral::FFT_SIZE
+            && self.learn_main_ring.len() == spectral::FFT_SIZE
+        {
+            let main = buffer.as_slice_immutable();
+            let sidechain = aux.inputs.first().map(|sc| sc.as_slice_immutable());
+            for i in 0..buffer.samples() {
+                self.learn_main_ring[self.sc_ring_pos] = Self::mono_sample(main, i);
+                self.sc_ring[self.sc_ring_pos] =
+                    sidechain.map_or(0.0, |sc| Self::mono_sample(sc, i));
                 self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
             }
-        } else {
-            for _ in 0..buffer.samples() {
-                self.sc_ring[self.sc_ring_pos] = 0.0;
-                self.sc_ring_pos = (self.sc_ring_pos + 1) % spectral::FFT_SIZE;
-            }
+        }
+        if self.analysis_requested.swap(false, Ordering::Relaxed) {
+            self.learner.arm();
+            self.analysis_result.begin_learning();
         }
 
         let dyneq_params = [
@@ -697,61 +740,52 @@ impl BusChannelStrip {
                             &self.fft_magnitude_smooth[..spectral::SPECTRUM_BINS],
                         );
 
-                        use std::sync::atomic::Ordering;
-                        if self.analysis_requested.swap(false, Ordering::Relaxed) {
-                            for i in 0..spectral::FFT_SIZE {
+                        if self.learner.is_learning() {
+                            for (i, ((main_dst, sc_dst), &win)) in self
+                                .learn_main_input
+                                .iter_mut()
+                                .zip(self.sc_fft_input.iter_mut())
+                                .zip(self.fft_window.iter())
+                                .enumerate()
+                            {
                                 let ring_idx = (self.sc_ring_pos + i) % spectral::FFT_SIZE;
-                                self.sc_fft_input[i] = self.sc_ring[ring_idx] * self.fft_window[i];
+                                *main_dst = self.learn_main_ring[ring_idx] * win;
+                                *sc_dst = self.sc_ring[ring_idx] * win;
                             }
-                            if fft
+                            let main_ok = fft
+                                .process_with_scratch(
+                                    &mut self.learn_main_input,
+                                    &mut self.learn_main_output,
+                                    &mut self.fft_scratch,
+                                )
+                                .is_ok();
+                            let sc_ok = fft
                                 .process_with_scratch(
                                     &mut self.sc_fft_input,
                                     &mut self.sc_fft_output,
                                     &mut self.fft_scratch,
                                 )
-                                .is_ok()
-                            {
-                                let dyneq = &self.params.dynamic_eq;
-                                let band_freqs = [
-                                    dyneq.dyneq_band1_freq.value(),
-                                    dyneq.dyneq_band2_freq.value(),
-                                    dyneq.dyneq_band3_freq.value(),
-                                    dyneq.dyneq_band4_freq.value(),
-                                ];
-                                let result = &self.analysis_result;
-                                let status = match spectral::compute_masking(
-                                    &self.fft_output,
-                                    &self.sc_fft_output,
-                                    self.sample_rate,
-                                    band_freqs,
-                                    &result.overlap_bins,
-                                ) {
-                                    spectral::MaskingOutcome::Suggestion {
-                                        band,
-                                        freq_hz,
-                                        threshold_db,
-                                    } => {
-                                        result.target_band.store(band, Ordering::Relaxed);
-                                        result
-                                            .target_freq
-                                            .store(freq_hz.to_bits(), Ordering::Relaxed);
-                                        result
-                                            .target_threshold_db
-                                            .store(threshold_db.to_bits(), Ordering::Relaxed);
-                                        spectral::AnalysisStatus::Ready
-                                    }
-                                    spectral::MaskingOutcome::NoSidechain => {
-                                        spectral::AnalysisStatus::NoSidechain
-                                    }
-                                    spectral::MaskingOutcome::NoOverlap => {
-                                        spectral::AnalysisStatus::NoOverlap
-                                    }
-                                };
-                                result.set_status(status);
+                                .is_ok();
+                            if main_ok && sc_ok {
+                                self.learner
+                                    .push_frame(&self.learn_main_output, &self.sc_fft_output);
+                                self.analysis_result.set_progress(self.learner.progress());
+                                if self.learner.is_finalizing() {
+                                    self.analysis_result
+                                        .set_status(spectral::AnalysisStatus::Finalizing);
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
+
+        if self.learner.is_finalizing() {
+            let bands = self.dyneq_band_ranges();
+            if let Some(outcome) = self.learner.finalize_step(&bands) {
+                self.analysis_result
+                    .publish(&outcome, self.learner.overlap_score());
             }
         }
     }
@@ -1032,12 +1066,15 @@ impl Plugin for BusChannelStrip {
             // Sidechain analysis buffers (same FFT size, separate allocation).
             self.sc_fft_input = fft.make_input_vec();
             self.sc_fft_output = fft.make_output_vec();
+            self.learn_main_input = fft.make_input_vec();
+            self.learn_main_output = fft.make_output_vec();
             self.fft_engine = Some(fft);
             self.fft_ring = vec![0.0_f32; spectral::FFT_SIZE];
             self.fft_ring_pos = 0;
             self.sc_ring = vec![0.0_f32; spectral::FFT_SIZE];
+            self.learn_main_ring = vec![0.0_f32; spectral::FFT_SIZE];
             self.sc_ring_pos = 0;
-            self.sample_rate = sr;
+            self.learner = spectral::MaskingLearner::new(sr);
             self.fft_window = shaping::hann_window(spectral::FFT_SIZE);
             self.fft_magnitude_smooth = vec![0.0_f32; spectral::SPECTRUM_BINS];
         }

@@ -426,7 +426,7 @@ mod plugin_integration_tests {
         plugin.fft_engine = Some(fft);
         plugin.fft_ring = vec![0.0; FFT_SIZE];
         plugin.sc_ring = vec![0.0; FFT_SIZE];
-        plugin.sample_rate = sr;
+        plugin.learn_main_ring = vec![0.0; FFT_SIZE];
         plugin.fft_window = crate::shaping::hann_window(FFT_SIZE);
         plugin.fft_magnitude_smooth = vec![0.0; SPECTRUM_BINS];
 
@@ -641,17 +641,19 @@ mod plugin_integration_tests {
         );
     }
 
-    /// ANALYZE SC end to end through `process()`: a 1 kHz sidechain tone yields a Ready
-    /// suggestion on the band nearest 1 kHz; a silent sidechain yields NoSidechain instead of
+    /// ANALYZE SC end to end through `process()`: after the learning window, a 1 kHz sidechain
+    /// tone yields a Ready suggestion at 1 kHz on band 2 (the band whose FREQ range contains
+    /// 1 kHz and whose default FREQ is nearest); a silent sidechain yields NoSidechain instead of
     /// a bogus suggestion.
     #[test]
     fn test_sidechain_analysis_reports_status() {
-        use crate::spectral::AnalysisStatus;
+        use crate::spectral::{AnalysisStatus, LEARN_SECONDS};
         use nice_plug::prelude::*;
         use std::sync::atomic::Ordering;
 
         let sr = 48_000.0_f32;
         let block = 512_usize;
+        let blocks = (LEARN_SECONDS * sr / block as f32).ceil() as usize + 16;
         let tone = |i: usize| (core::f32::consts::TAU * 1000.0 * i as f32 / sr).sin();
 
         let run = |sidechain_amp: f32| {
@@ -679,7 +681,7 @@ mod plugin_integration_tests {
 
             plugin.analysis_result.set_status(AnalysisStatus::Pending);
             plugin.analysis_requested.store(true, Ordering::Relaxed);
-            for b in 0..20 {
+            for b in 0..blocks {
                 let mut l: Vec<f32> = (0..block).map(|i| 0.5 * tone(b * block + i)).collect();
                 let mut r = l.clone();
                 let mut sc_l: Vec<f32> = (0..block)
@@ -708,36 +710,26 @@ mod plugin_integration_tests {
                 plugin.process(&mut main, &mut aux, &mut ctx);
             }
 
-            let dyneq = &plugin.params.dynamic_eq;
-            let band_freqs = [
-                dyneq.dyneq_band1_freq.value(),
-                dyneq.dyneq_band2_freq.value(),
-                dyneq.dyneq_band3_freq.value(),
-                dyneq.dyneq_band4_freq.value(),
-            ];
             let result = &plugin.analysis_result;
             (
                 result.status(),
-                result.target_band.load(Ordering::Relaxed),
-                f32::from_bits(result.target_freq.load(Ordering::Relaxed)),
-                band_freqs,
+                std::array::from_fn::<_, 4, _>(|b| result.suggestions[b].load()),
             )
         };
 
-        let (status, band, freq, band_freqs) = run(0.3);
+        let (status, suggestions) = run(0.3);
         assert_eq!(status, AnalysisStatus::Ready);
-        assert!((freq - 1000.0).abs() < sr / 2048.0, "suggested {freq} Hz");
-        let nearest = (0..4)
-            .min_by(|&a, &b| {
-                (freq / band_freqs[a])
-                    .ln()
-                    .abs()
-                    .total_cmp(&(freq / band_freqs[b]).ln().abs())
-            })
-            .unwrap() as u32;
-        assert_eq!(band, nearest, "band freqs {band_freqs:?}");
+        let suggestion =
+            suggestions[1].unwrap_or_else(|| panic!("no band 2 suggestion: {suggestions:?}"));
+        assert!(
+            (suggestion.freq_hz - 1000.0).abs() < sr / 2048.0,
+            "suggested {} Hz",
+            suggestion.freq_hz
+        );
+        assert_eq!(suggestions.iter().flatten().count(), 1, "{suggestions:?}");
 
-        let (status, ..) = run(0.0);
+        let (status, suggestions) = run(0.0);
         assert_eq!(status, AnalysisStatus::NoSidechain);
+        assert!(suggestions.iter().all(Option::is_none));
     }
 }

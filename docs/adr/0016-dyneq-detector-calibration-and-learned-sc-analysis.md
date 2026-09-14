@@ -1,6 +1,6 @@
 # ADR-0016: DynEQ Detector Calibration and Learned Sidechain Analysis
 
-**Status**: Accepted — detector, bell, LINK, RANGE, trigger meter, static GAIN and DETECT implemented; learned analysis (Analyzer v2) accepted, implemented separately
+**Status**: Accepted — implemented (detector, bell, LINK, RANGE, trigger meter, static GAIN, DETECT, learned analysis)
 
 **Deciders**: Project (Claude Code orchestration session), 2026-09-14
 
@@ -30,7 +30,7 @@ Three complaints about the Dynamic EQ on a drum bus traced back to measurable de
 
 **WARMTH domain guard.** The Inflator input is clamped to [−1.5, 1.0], the polynomial's own f′ = 0 points, so the curve stays monotonic and is sample-identical inside that range.
 
-**Learned sidechain analysis (Analyzer v2).** ANALYZE SC learns for 3 s of FFT frames instead of one, scoring only frames where the sidechain is present (at least 8). A smoothed (±1/6 octave) main×sidechain overlap score is searched greedily for up to four peaks within 24 dB of the largest, each assigned to the band whose FREQ range contains it (nearest current FREQ breaks ties), with Q from the −3 dB width clamped to [0.7, 4]. Each band's threshold comes from the main input's level history through that band's detector response: 90th percentile − 6 dB for Compress Down, 50th percentile + 3 dB for Expand Up and Gate, clamped to [−60, 0]. The work lives in a pre-allocated `spectral::MaskingLearner`, finalized one bounded step per block. The GUI offers a per-band suggestion with USE and an APPLY ALL, which write FREQ, Q, THRESH and turn LINK on.
+**Learned sidechain analysis (Analyzer v2).** ANALYZE SC learns for 3 s of FFT frames instead of one, scoring only frames where the sidechain is present (at least 8). A smoothed (±1/6 octave) main×sidechain overlap score is searched for up to four peaks within 24 dB of the largest, each excluding ±1/3 octave around it. Peaks are then assigned to distinct bands whose FREQ range contains them by trying every assignment (at most 5⁴): most peaks placed, then strongest, then least octave distance from each band's current FREQ. A greedy first-come assignment would let a loud 200 Hz snare take band 1 and leave a 60 Hz kick nowhere to go. Q comes from the score's −3 dB width, clamped to [0.7, 4]; the centre frequency comes from the sidechain spectrum alone near the peak, because the main input's spectral tilt drags low peaks by a large fraction of an octave. Each band's threshold comes from the main input's level history through that band's detector response: 90th percentile − 6 dB for Compress Down, 50th percentile + 3 dB for Expand Up and Gate, clamped to [−60, 0]. The main input is taken *before* the Dynamic EQ, so suggestions don't read the bands' own gain reduction and drift lower on every re-analysis. The work lives in a pre-allocated `spectral::MaskingLearner`, finalized one bounded step per block. The GUI offers a per-band suggestion with USE and an APPLY ALL, which write FREQ, Q, THRESH and turn LINK on.
 
 A true sidechain *trigger* per band is deferred: it changes `process`'s signature and adds four controls, and the per-channel detector above is the seam it would use.
 

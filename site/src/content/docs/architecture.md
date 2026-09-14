@@ -155,8 +155,8 @@ let gain = self.params.gain.smoothed.next(); // lock-free smoothed read
 // GUI → audio: request a sidechain analysis
 self.analysis_requested.store(true, Ordering::Relaxed);
 
-// Audio → GUI: signal completion
-self.analysis_result.ready.store(true, Ordering::Release);
+// Audio → GUI: publish suggestions, then the status (Release ordering, written last)
+self.analysis_result.publish(&outcome, self.learner.overlap_score());
 ```
 
 `std::sync::Mutex` is forbidden on the audio thread. All shared state uses `AtomicF32`, `AtomicBool`, or `AtomicU32` with appropriate ordering guarantees.
@@ -169,7 +169,7 @@ The spectrum analyzer feeds the GUI's frequency display using a lock-free ring b
 2. **FFT** — When the ring is full, `realfft` computes the magnitude spectrum. Results are stored as `AtomicU32` (raw `f32` bits) in `SpectrumData`.
 3. **GUI thread** — The vizia canvas reads `SpectrumData` bins with `Acquire` ordering and draws the spectrum line.
 
-The sidechain masking analysis follows the same pattern: `sc_ring` holds a sidechain snapshot, the analysis is triggered by an `AtomicBool` flag from the GUI, and results are delivered back via `AnalysisResult` with Release/Acquire ordering.
+The sidechain masking analysis follows the same pattern. `sc_ring` and `learn_main_ring` hold the sidechain and the pre-Dynamic-EQ main input. An `AtomicBool` flag from the GUI arms `spectral::MaskingLearner`, which scores 3 s of frames and then finalizes one bounded step per block. Up to four band suggestions come back via `AnalysisResult` with Release/Acquire ordering.
 
 ## Feature Flag Topology
 
