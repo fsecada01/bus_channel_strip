@@ -19,11 +19,6 @@ pub const SPECTRUM_BINS: usize = 512;
 /// audio thread and spectral.rs agree on the constant.
 pub const FFT_SIZE: usize = 2048;
 
-/// TEMPORARY diagnostic stage slots: 0 = host input, 1..=7 = after each rack
-/// slot, 8 = plugin output, 9 = sidechain input.
-pub const DIAG_STAGES: usize = 10;
-const DIAG_STAGE_NOT_RUN: f32 = -1.0;
-
 /// Lock-free spectrum data shared between the audio thread (writer)
 /// and the GUI thread (reader).
 pub struct SpectrumData {
@@ -31,16 +26,6 @@ pub struct SpectrumData {
     bins: Vec<AtomicU32>,
     /// Audio thread sets this after writing; GUI clears it after reading.
     dirty: AtomicBool,
-    /// TEMPORARY diagnostic (analyzer blank in Reaper, 2026-09-13): blocks
-    /// seen by the DynEQ module, FFT frames published, and the post-DynEQ
-    /// peak since the GUI last read it. Remove once root-caused.
-    diag_blocks: AtomicU32,
-    diag_frames_written: AtomicU32,
-    diag_peak_since_read: AtomicU32,
-    diag_non_finite_blocks: AtomicU32,
-    diag_stage_peaks: [AtomicU32; DIAG_STAGES],
-    diag_layout: AtomicU32,
-    diag_order: AtomicU32,
 }
 
 impl SpectrumData {
@@ -48,15 +33,6 @@ impl SpectrumData {
         Self {
             bins: (0..SPECTRUM_BINS).map(|_| AtomicU32::new(0)).collect(),
             dirty: AtomicBool::new(false),
-            diag_blocks: AtomicU32::new(0),
-            diag_frames_written: AtomicU32::new(0),
-            diag_peak_since_read: AtomicU32::new(0.0_f32.to_bits()),
-            diag_non_finite_blocks: AtomicU32::new(0),
-            diag_stage_peaks: std::array::from_fn(|_| {
-                AtomicU32::new(DIAG_STAGE_NOT_RUN.to_bits())
-            }),
-            diag_layout: AtomicU32::new(0),
-            diag_order: AtomicU32::new(0),
         }
     }
 
@@ -68,69 +44,8 @@ impl SpectrumData {
             // Safety: mag is a valid f32; storing its bits is always defined.
             self.bins[i].store(mag.to_bits(), Ordering::Relaxed);
         }
-        self.diag_frames_written.fetch_add(1, Ordering::Relaxed);
         // Release fence: all bin stores above are visible before this store.
         self.dirty.store(true, Ordering::Release);
-    }
-
-    /// **Audio thread only.** TEMPORARY diagnostic: count a processed block
-    /// and fold its peak into the running max. `peak` ignores NaN, so
-    /// non-finite blocks are counted separately.
-    pub fn note_block(&self, peak: f32, non_finite: bool) {
-        self.diag_blocks.fetch_add(1, Ordering::Relaxed);
-        if non_finite {
-            self.diag_non_finite_blocks.fetch_add(1, Ordering::Relaxed);
-        }
-        let _ =
-            self.diag_peak_since_read
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
-                    (peak > f32::from_bits(bits)).then(|| peak.to_bits())
-                });
-    }
-
-    /// **GUI thread only.** TEMPORARY diagnostic: `(blocks, frames_written,
-    /// peak_since_last_call, non_finite_blocks)`; resets the peak.
-    pub fn take_diagnostics(&self) -> (u32, u32, f32, u32) {
-        (
-            self.diag_blocks.load(Ordering::Relaxed),
-            self.diag_frames_written.load(Ordering::Relaxed),
-            f32::from_bits(
-                self.diag_peak_since_read
-                    .swap(0.0_f32.to_bits(), Ordering::Relaxed),
-            ),
-            self.diag_non_finite_blocks.load(Ordering::Relaxed),
-        )
-    }
-
-    /// **Audio thread only.** TEMPORARY diagnostic: fold a stage's peak into
-    /// its running max.
-    pub fn note_stage_peak(&self, stage: usize, peak: f32) {
-        if let Some(slot) = self.diag_stage_peaks.get(stage) {
-            let _ = slot.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
-                (peak > f32::from_bits(bits)).then(|| peak.to_bits())
-            });
-        }
-    }
-
-    /// **Audio thread only.** TEMPORARY diagnostic: packed IO layout and slot order.
-    pub fn note_layout(&self, layout: u32, order: u32) {
-        self.diag_layout.store(layout, Ordering::Relaxed);
-        self.diag_order.store(order, Ordering::Relaxed);
-    }
-
-    /// **GUI thread only.** TEMPORARY diagnostic: `(stage_peaks, layout,
-    /// order)`; a stage peak below zero means the stage did not run.
-    pub fn take_stage_diagnostics(&self) -> ([f32; DIAG_STAGES], u32, u32) {
-        (
-            std::array::from_fn(|i| {
-                f32::from_bits(
-                    self.diag_stage_peaks[i]
-                        .swap(DIAG_STAGE_NOT_RUN.to_bits(), Ordering::Relaxed),
-                )
-            }),
-            self.diag_layout.load(Ordering::Relaxed),
-            self.diag_order.load(Ordering::Relaxed),
-        )
     }
 
     /// **GUI thread only.** Copy magnitude values into `out` if new data

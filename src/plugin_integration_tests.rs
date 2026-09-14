@@ -538,11 +538,11 @@ mod plugin_integration_tests {
     }
 
     /// Runs the real `initialize()` + `process()` with a state exported from a DAW session and
-    /// prints the level after every slot. Set `BCS_STATE_JSON` to the decoded state JSON file.
+    /// checks the chain output is audible and differs from its input. Set `BCS_STATE_JSON` to the
+    /// decoded state JSON file.
     #[test]
     #[ignore = "needs BCS_STATE_JSON"]
-    fn diag_session_state_chain_levels() {
-        use crate::spectral::DIAG_STAGES;
+    fn test_session_state_chain_is_audible() {
         use nice_plug::prelude::*;
 
         let path = std::env::var("BCS_STATE_JSON").expect("set BCS_STATE_JSON");
@@ -575,7 +575,6 @@ mod plugin_integration_tests {
             plugin.params.global.gain.value()
         );
 
-        let mut stage_max = [-1.0_f32; DIAG_STAGES];
         let (mut dry_energy, mut diff_energy, mut out_peak) = (0.0_f64, 0.0_f64, 0.0_f32);
         let mut seed = 0x1234_5678_u32;
         let n_blocks = 3 * sr as usize / block;
@@ -616,10 +615,6 @@ mod plugin_integration_tests {
                 };
                 plugin.process(&mut main, &mut aux, &mut ctx);
             }
-            let (stages, _, _) = plugin.spectrum_data.take_stage_diagnostics();
-            for (m, s) in stage_max.iter_mut().zip(stages) {
-                *m = m.max(s);
-            }
             for (o, d) in l.iter().zip(&dry) {
                 dry_energy += f64::from(d * d);
                 diff_energy += f64::from((o - d) * (o - d));
@@ -627,28 +622,11 @@ mod plugin_integration_tests {
             }
         }
 
-        let db = |p: f32| {
-            if p < 0.0 {
-                "skip".to_string()
-            } else {
-                format!("{:.1}", 20.0 * p.max(1e-9).log10())
-            }
-        };
-        eprintln!(
-            "host_in={} s1={} s2={} s3={} s4={} s5={} s6={} s7={} plugin_out={} sc_in={}",
-            db(stage_max[0]),
-            db(stage_max[1]),
-            db(stage_max[2]),
-            db(stage_max[3]),
-            db(stage_max[4]),
-            db(stage_max[5]),
-            db(stage_max[6]),
-            db(stage_max[7]),
-            db(stage_max[8]),
-            db(stage_max[9]),
-        );
         let change_db = 10.0 * (diff_energy / dry_energy.max(1e-30)).log10();
-        eprintln!("out_peak={} wet_vs_dry_difference={change_db:.1} dB", db(out_peak));
+        eprintln!(
+            "out_peak={:.1} dBFS wet_vs_dry_difference={change_db:.1} dB",
+            20.0 * out_peak.max(1e-9).log10()
+        );
         assert!(out_peak.is_finite() && out_peak > 1e-3, "chain output is silent or non-finite");
         assert!(change_db > -40.0, "chain output is indistinguishable from its input");
     }
