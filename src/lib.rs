@@ -616,6 +616,14 @@ impl BusChannelStrip {
             }
         }
 
+        // TEMPORARY diagnostic — see SpectrumData::note_block.
+        let diag_peak = buffer
+            .as_slice_immutable()
+            .iter()
+            .flat_map(|ch| ch.iter())
+            .fold(0.0_f32, |m, s| m.max(s.abs()));
+        self.spectrum_data.note_block(diag_peak);
+
         // Accumulate post-DynEQ samples into the FFT ring buffer.
         // All buffers are pre-allocated in initialize() — no audio-thread alloc.
         for channel_samples in buffer.iter_samples() {

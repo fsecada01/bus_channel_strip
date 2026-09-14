@@ -26,6 +26,12 @@ pub struct SpectrumData {
     bins: Vec<AtomicU32>,
     /// Audio thread sets this after writing; GUI clears it after reading.
     dirty: AtomicBool,
+    /// TEMPORARY diagnostic (analyzer blank in Reaper, 2026-09-13): blocks
+    /// seen by the DynEQ module, FFT frames published, and the post-DynEQ
+    /// peak since the GUI last read it. Remove once root-caused.
+    diag_blocks: AtomicU32,
+    diag_frames_written: AtomicU32,
+    diag_peak_since_read: AtomicU32,
 }
 
 impl SpectrumData {
@@ -33,6 +39,9 @@ impl SpectrumData {
         Self {
             bins: (0..SPECTRUM_BINS).map(|_| AtomicU32::new(0)).collect(),
             dirty: AtomicBool::new(false),
+            diag_blocks: AtomicU32::new(0),
+            diag_frames_written: AtomicU32::new(0),
+            diag_peak_since_read: AtomicU32::new(0.0_f32.to_bits()),
         }
     }
 
@@ -44,8 +53,33 @@ impl SpectrumData {
             // Safety: mag is a valid f32; storing its bits is always defined.
             self.bins[i].store(mag.to_bits(), Ordering::Relaxed);
         }
+        self.diag_frames_written.fetch_add(1, Ordering::Relaxed);
         // Release fence: all bin stores above are visible before this store.
         self.dirty.store(true, Ordering::Release);
+    }
+
+    /// **Audio thread only.** TEMPORARY diagnostic: count a processed block
+    /// and fold its peak into the running max.
+    pub fn note_block(&self, peak: f32) {
+        self.diag_blocks.fetch_add(1, Ordering::Relaxed);
+        let _ =
+            self.diag_peak_since_read
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
+                    (peak > f32::from_bits(bits)).then(|| peak.to_bits())
+                });
+    }
+
+    /// **GUI thread only.** TEMPORARY diagnostic: `(blocks, frames_written,
+    /// peak_since_last_call)`; resets the peak.
+    pub fn take_diagnostics(&self) -> (u32, u32, f32) {
+        (
+            self.diag_blocks.load(Ordering::Relaxed),
+            self.diag_frames_written.load(Ordering::Relaxed),
+            f32::from_bits(
+                self.diag_peak_since_read
+                    .swap(0.0_f32.to_bits(), Ordering::Relaxed),
+            ),
+        )
     }
 
     /// **GUI thread only.** Copy magnitude values into `out` if new data
