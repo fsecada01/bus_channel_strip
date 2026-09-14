@@ -3093,6 +3093,39 @@ impl View for SpectrumCanvas {
             {
                 use std::io::Write;
                 let _ = f.write_all(line.as_bytes());
+                let (stages, layout, order) = self.spectrum_data.take_stage_diagnostics();
+                let db = |p: f32| {
+                    if p < 0.0 {
+                        "skip".to_string()
+                    } else {
+                        format!("{:.1}", 20.0 * p.max(1e-9).log10())
+                    }
+                };
+                let order_digits = (0..7)
+                    .map(|i| ((order >> (3 * i)) & 7).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let stage_line = format!(
+                    "  host_in={} s1={} s2={} s3={} s4={} s5={} s6={} s7={} plugin_out={} sc_in={} \
+                     main_ch={} aux_buses={} aux_ch={} samples={} global_bypass={} order={}\n",
+                    db(stages[0]),
+                    db(stages[1]),
+                    db(stages[2]),
+                    db(stages[3]),
+                    db(stages[4]),
+                    db(stages[5]),
+                    db(stages[6]),
+                    db(stages[7]),
+                    db(stages[8]),
+                    db(stages[9]),
+                    (layout >> 24) & 0x7F,
+                    (layout >> 20) & 0xF,
+                    (layout >> 16) & 0xF,
+                    layout & 0xFFFF,
+                    layout >> 31,
+                    order_digits,
+                );
+                let _ = f.write_all(stage_line.as_bytes());
             }
         }
 

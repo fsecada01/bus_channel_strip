@@ -869,6 +869,21 @@ impl BusChannelStrip {
     }
 }
 
+/// TEMPORARY diagnostic: absolute peak over all channels; any non-finite
+/// sample reports as infinity instead of being skipped by `max`.
+fn diag_peak(channels: &[&mut [f32]]) -> f32 {
+    channels
+        .iter()
+        .flat_map(|ch| ch.iter())
+        .fold(0.0_f32, |m, &s| {
+            if s.is_finite() {
+                m.max(s.abs())
+            } else {
+                f32::INFINITY
+            }
+        })
+}
+
 impl Plugin for BusChannelStrip {
     const NAME: &'static str = "Bus Channel Strip";
     const VENDOR: &'static str = "Francis Secada";
@@ -1090,6 +1105,27 @@ impl Plugin for BusChannelStrip {
         // in slot N. Read once up front for dispatch.
         let order = self.module_order();
 
+        // TEMPORARY diagnostic — host input level, IO layout and slot order.
+        {
+            let aux_channels = aux.inputs.first().map_or(0, |b| b.channels() as u32);
+            if let Some(sc) = aux.inputs.first() {
+                self.spectrum_data
+                    .note_stage_peak(spectral::DIAG_STAGES - 1, diag_peak(sc.as_slice_immutable()));
+            }
+            self.spectrum_data
+                .note_stage_peak(0, diag_peak(buffer.as_slice_immutable()));
+            let layout = ((self.params.global.global_bypass.value() as u32) << 31)
+                | ((buffer.channels() as u32 & 0x7F) << 24)
+                | ((aux.inputs.len() as u32 & 0xF) << 20)
+                | ((aux_channels & 0xF) << 16)
+                | (buffer.samples() as u32 & 0xFFFF);
+            let order_bits = order
+                .iter()
+                .enumerate()
+                .fold(0_u32, |acc, (i, &mt)| acc | ((module_type_index(mt) as u32) << (3 * i)));
+            self.spectrum_data.note_layout(layout, order_bits);
+        }
+
         // Pultec linear-phase mode owes the host a fixed 512-sample delay.
         // Keep the report in sync with the param every block (a no-op unless
         // it changed), and keep the delay in place through both module and
@@ -1124,7 +1160,7 @@ impl Plugin for BusChannelStrip {
         // Empties are skipped before the dedup check so the slot can be
         // unoccupied in any number of positions without losing pass-through.
         let mut seen = [false; 8];
-        for mt in order {
+        for (slot, mt) in order.into_iter().enumerate() {
             if mt == ModuleType::Empty {
                 continue;
             }
@@ -1134,6 +1170,9 @@ impl Plugin for BusChannelStrip {
             }
             seen[idx] = true;
             self.dispatch_module(mt, buffer, aux);
+            // TEMPORARY diagnostic — level after this slot.
+            self.spectrum_data
+                .note_stage_peak(slot + 1, diag_peak(buffer.as_slice_immutable()));
         }
 
         // Pultec dropped from the chain but still owes its reported latency
@@ -1208,6 +1247,10 @@ impl Plugin for BusChannelStrip {
                 *sample *= gain;
             }
         }
+
+        // TEMPORARY diagnostic — plugin output level.
+        self.spectrum_data
+            .note_stage_peak(8, diag_peak(buffer.as_slice_immutable()));
 
         ProcessStatus::Normal
     }
