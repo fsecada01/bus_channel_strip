@@ -1240,16 +1240,15 @@ pub(crate) fn create(
         // vizia_baseview's first frame resizes the window to the unscaled base
         // size, ignoring the persisted user scale, which leaves the rack's
         // ScrollView clipped until the zoom is changed. Re-apply the scale
-        // once that first frame has run.
+        // once that first frame has run. This is a scheduled event, not a timer:
+        // vizia's `start_timer` never returns if an earlier-created timer (the
+        // DynEQ analysis poll) is already running.
         let initial_scale = editor_state_for_data.user_scale_factor();
         if initial_scale != 1.0 {
-            let delay = Duration::from_millis(50);
-            let timer = cx.add_timer(delay, Some(delay), move |cx, action| {
-                if let TimerAction::Tick(_) = action {
-                    cx.emit(WindowEvent::SetUserScale(initial_scale));
-                }
-            });
-            cx.start_timer(timer);
+            cx.schedule_emit(
+                WindowEvent::SetUserScale(initial_scale),
+                Instant::now() + Duration::from_millis(50),
+            );
         }
 
         // Heal duplicate module_order_* assignments left over from sessions
@@ -4094,7 +4093,8 @@ fn build_dyneq_back_view(
             // ANALYZE SC arms the audio thread to analyse the next FFT frame;
             // APPLY RESULT programs the suggested DynEQ band. A polling timer
             // mirrors the shared status into the status line and APPLY's
-            // `ready` class.
+            // `ready` class. It must stay the editor's only vizia timer:
+            // `start_timer` hangs the host when another timer is running.
             #[cfg(feature = "dynamic_eq")]
             {
                 const POLL_INTERVAL: Duration = Duration::from_millis(100);
