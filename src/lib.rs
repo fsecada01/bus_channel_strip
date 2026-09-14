@@ -684,51 +684,43 @@ impl BusChannelStrip {
                                 )
                                 .is_ok()
                             {
-                                let scale = 2.0 / spectral::FFT_SIZE as f32;
-                                let mut peak_overlap = 0.0_f32;
-                                let mut peak_bin = 1_usize;
-
-                                for i in 1..spectral::SPECTRUM_BINS {
-                                    let main_mag = self.fft_output[i].norm() * scale;
-                                    let sc_mag = self.sc_fft_output[i].norm() * scale;
-                                    let overlap = main_mag * sc_mag;
-                                    self.analysis_result.overlap_bins[i]
-                                        .store(overlap.to_bits(), Ordering::Relaxed);
-                                    if overlap > peak_overlap {
-                                        peak_overlap = overlap;
-                                        peak_bin = i;
+                                let dyneq = &self.params.dynamic_eq;
+                                let band_freqs = [
+                                    dyneq.dyneq_band1_freq.value(),
+                                    dyneq.dyneq_band2_freq.value(),
+                                    dyneq.dyneq_band3_freq.value(),
+                                    dyneq.dyneq_band4_freq.value(),
+                                ];
+                                let result = &self.analysis_result;
+                                let status = match spectral::compute_masking(
+                                    &self.fft_output,
+                                    &self.sc_fft_output,
+                                    self.sample_rate,
+                                    band_freqs,
+                                    &result.overlap_bins,
+                                ) {
+                                    spectral::MaskingOutcome::Suggestion {
+                                        band,
+                                        freq_hz,
+                                        threshold_db,
+                                    } => {
+                                        result.target_band.store(band, Ordering::Relaxed);
+                                        result
+                                            .target_freq
+                                            .store(freq_hz.to_bits(), Ordering::Relaxed);
+                                        result
+                                            .target_threshold_db
+                                            .store(threshold_db.to_bits(), Ordering::Relaxed);
+                                        spectral::AnalysisStatus::Ready
                                     }
-                                }
-                                self.analysis_result.overlap_bins[0]
-                                    .store(0_u32, Ordering::Relaxed);
-
-                                let target_freq =
-                                    peak_bin as f32 * self.sample_rate / spectral::FFT_SIZE as f32;
-
-                                let target_band: u32 = if target_freq < 500.0 {
-                                    0
-                                } else if target_freq < 2000.0 {
-                                    1
-                                } else if target_freq < 6000.0 {
-                                    2
-                                } else {
-                                    3
+                                    spectral::MaskingOutcome::NoSidechain => {
+                                        spectral::AnalysisStatus::NoSidechain
+                                    }
+                                    spectral::MaskingOutcome::NoOverlap => {
+                                        spectral::AnalysisStatus::NoOverlap
+                                    }
                                 };
-
-                                let sc_mag_at_peak = self.sc_fft_output[peak_bin].norm() * scale;
-                                let sc_db = 20.0 * sc_mag_at_peak.max(f32::MIN_POSITIVE).log10();
-                                let suggested_threshold = (sc_db - 6.0).clamp(-60.0, 0.0);
-
-                                self.analysis_result
-                                    .target_band
-                                    .store(target_band, Ordering::Relaxed);
-                                self.analysis_result
-                                    .target_freq
-                                    .store(target_freq.to_bits(), Ordering::Relaxed);
-                                self.analysis_result
-                                    .target_threshold_db
-                                    .store(suggested_threshold.to_bits(), Ordering::Relaxed);
-                                self.analysis_result.ready.store(true, Ordering::Release);
+                                result.set_status(status);
                             }
                         }
                     }

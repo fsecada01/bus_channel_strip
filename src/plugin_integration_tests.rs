@@ -640,4 +640,104 @@ mod plugin_integration_tests {
             "chain output is indistinguishable from its input"
         );
     }
+
+    /// ANALYZE SC end to end through `process()`: a 1 kHz sidechain tone yields a Ready
+    /// suggestion on the band nearest 1 kHz; a silent sidechain yields NoSidechain instead of
+    /// a bogus suggestion.
+    #[test]
+    fn test_sidechain_analysis_reports_status() {
+        use crate::spectral::AnalysisStatus;
+        use nice_plug::prelude::*;
+        use std::sync::atomic::Ordering;
+
+        let sr = 48_000.0_f32;
+        let block = 512_usize;
+        let tone = |i: usize| (core::f32::consts::TAU * 1000.0 * i as f32 / sr).sin();
+
+        let run = |sidechain_amp: f32| {
+            let mut plugin = BusChannelStrip::default();
+            let slot = plugin.params.routing.module_order_4.as_ptr();
+            // SAFETY: the pointer comes from this plugin's params, which outlive the call.
+            unsafe {
+                slot._internal_set_normalized_value(slot.preview_normalized(3.0));
+                slot._internal_update_smoother(sr, true);
+            }
+            let config = BufferConfig {
+                sample_rate: sr,
+                min_buffer_size: None,
+                max_buffer_size: block as u32,
+                process_mode: ProcessMode::Realtime,
+            };
+            let mut ctx = TestContext {
+                transport: Transport::new(sr),
+            };
+            assert!(plugin.initialize(&BusChannelStrip::AUDIO_IO_LAYOUTS[0], &config, &mut ctx));
+            plugin.reset();
+            assert!(plugin
+                .module_order()
+                .contains(&crate::ModuleType::DynamicEQ));
+
+            plugin.analysis_result.set_status(AnalysisStatus::Pending);
+            plugin.analysis_requested.store(true, Ordering::Relaxed);
+            for b in 0..20 {
+                let mut l: Vec<f32> = (0..block).map(|i| 0.5 * tone(b * block + i)).collect();
+                let mut r = l.clone();
+                let mut sc_l: Vec<f32> = (0..block)
+                    .map(|i| sidechain_amp * tone(b * block + i))
+                    .collect();
+                let mut sc_r = sc_l.clone();
+                let mut main = Buffer::default();
+                let mut sc = Buffer::default();
+                // SAFETY: the slices outlive both buffers, which are dropped each iteration.
+                unsafe {
+                    main.set_slices(block, |ss| {
+                        ss.clear();
+                        ss.push(&mut l);
+                        ss.push(&mut r);
+                    });
+                    sc.set_slices(block, |ss| {
+                        ss.clear();
+                        ss.push(&mut sc_l);
+                        ss.push(&mut sc_r);
+                    });
+                }
+                let mut aux = AuxiliaryBuffers {
+                    inputs: std::slice::from_mut(&mut sc),
+                    outputs: &mut [],
+                };
+                plugin.process(&mut main, &mut aux, &mut ctx);
+            }
+
+            let dyneq = &plugin.params.dynamic_eq;
+            let band_freqs = [
+                dyneq.dyneq_band1_freq.value(),
+                dyneq.dyneq_band2_freq.value(),
+                dyneq.dyneq_band3_freq.value(),
+                dyneq.dyneq_band4_freq.value(),
+            ];
+            let result = &plugin.analysis_result;
+            (
+                result.status(),
+                result.target_band.load(Ordering::Relaxed),
+                f32::from_bits(result.target_freq.load(Ordering::Relaxed)),
+                band_freqs,
+            )
+        };
+
+        let (status, band, freq, band_freqs) = run(0.3);
+        assert_eq!(status, AnalysisStatus::Ready);
+        assert!((freq - 1000.0).abs() < sr / 2048.0, "suggested {freq} Hz");
+        let nearest = (0..4)
+            .min_by(|&a, &b| {
+                (freq / band_freqs[a])
+                    .ln()
+                    .abs()
+                    .total_cmp(&(freq / band_freqs[b]).ln().abs())
+            })
+            .unwrap() as u32;
+        assert_eq!(band, nearest, "band freqs {band_freqs:?}");
+
+        let (status, ..) = run(0.0);
+        assert_eq!(status, AnalysisStatus::NoSidechain);
+    }
 }

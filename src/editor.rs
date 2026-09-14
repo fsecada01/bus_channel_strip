@@ -364,6 +364,8 @@ impl Model for Data {
 
             #[cfg(feature = "dynamic_eq")]
             AppEvent::RequestAnalysis => {
+                self.analysis_result
+                    .set_status(spectral::AnalysisStatus::Pending);
                 self.analysis_requested.store(true, Ordering::Relaxed);
             }
 
@@ -373,8 +375,8 @@ impl Model for Data {
                 freq,
                 threshold_db,
             } => {
-                // Clear ready so the button reflects "stale" state until next analysis.
-                self.analysis_result.ready.store(false, Ordering::Relaxed);
+                self.analysis_result
+                    .set_status(spectral::AnalysisStatus::Applied);
 
                 let (freq_ptr, thresh_ptr) = match *band {
                     0 => (
@@ -4059,11 +4061,52 @@ fn build_dyneq_back_view(
             }
 
             // ── Sidechain masking analysis controls ──────────────────────────
-            // ANALYZE: arms the audio thread to run one analysis on the next FFT frame.
-            // APPLY:   reads the last result and programs the appropriate DynEQ band.
-            // Both buttons are always visible; APPLY is a no-op if no analysis exists.
+            // ANALYZE SC arms the audio thread to analyse the next FFT frame;
+            // APPLY RESULT programs the suggested DynEQ band. A polling timer
+            // mirrors the shared status into the status line and APPLY's
+            // `ready` class.
             #[cfg(feature = "dynamic_eq")]
             {
+                const POLL_INTERVAL: Duration = Duration::from_millis(100);
+                const TIMEOUT_TICKS: u32 = 20;
+
+                let status_text = Signal::new(spectral::analysis_status_text(
+                    spectral::AnalysisStatus::Idle,
+                    false,
+                    0,
+                    0.0,
+                    0.0,
+                ));
+                let apply_ready = Signal::new(false);
+                let poll_result = analysis_result.clone();
+                let pending_ticks = std::cell::Cell::new(0_u32);
+                let poll = cx.add_timer(POLL_INTERVAL, None, move |_, action| {
+                    if !matches!(action, TimerAction::Tick(_)) {
+                        return;
+                    }
+                    let status = poll_result.status();
+                    pending_ticks.set(if status == spectral::AnalysisStatus::Pending {
+                        pending_ticks.get().saturating_add(1)
+                    } else {
+                        0
+                    });
+                    let text = spectral::analysis_status_text(
+                        status,
+                        pending_ticks.get() > TIMEOUT_TICKS,
+                        poll_result.target_band.load(Ordering::Relaxed),
+                        f32::from_bits(poll_result.target_freq.load(Ordering::Relaxed)),
+                        f32::from_bits(poll_result.target_threshold_db.load(Ordering::Relaxed)),
+                    );
+                    if status_text.get() != text {
+                        status_text.set(text);
+                    }
+                    let ready = status == spectral::AnalysisStatus::Ready;
+                    if apply_ready.get() != ready {
+                        apply_ready.set(ready);
+                    }
+                });
+                cx.start_timer(poll);
+
                 let ar_clone = analysis_result.clone();
                 VStack::new(cx, |cx| {
                     Label::new(cx, "ANALYZE SC")
@@ -4088,7 +4131,7 @@ fn build_dyneq_back_view(
                 // it captures only ar_clone (Arc<AnalysisResult>), which is
                 // Clone, so the closure derives Clone automatically.
                 let apply_analysis = move |cx: &mut EventContext| {
-                    if ar_clone.ready.load(Ordering::Acquire) {
+                    if ar_clone.status() == spectral::AnalysisStatus::Ready {
                         let band = ar_clone.target_band.load(Ordering::Relaxed);
                         let freq = f32::from_bits(ar_clone.target_freq.load(Ordering::Relaxed));
                         let threshold_db =
@@ -4109,12 +4152,20 @@ fn build_dyneq_back_view(
                         .on_press(apply_analysis_label);
                 })
                 .class("dyneq-apply-btn")
+                .toggle_class("ready", apply_ready.map(|r| *r))
                 .on_press(apply_analysis)
                 .cursor(CursorIcon::Hand)
                 .height(Pixels(32.0))
                 .width(Pixels(120.0))
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0));
+
+                Label::new(cx, status_text.map(|t| t.clone()))
+                    .class("dyneq-analysis-status")
+                    .height(Pixels(32.0))
+                    .width(Stretch(1.0))
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
             }
         })
         .height(Auto)

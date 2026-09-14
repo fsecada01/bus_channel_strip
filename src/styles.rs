@@ -1432,6 +1432,75 @@ scrollbar .thumb:hover {
     letter-spacing: 0.8px;
 }
 
+/* Sidechain analysis buttons */
+.dyneq-auto-btn {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #1e3d1e, #2a5c2a);
+    border: 1px solid #66cc66;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dyneq-auto-btn:hover {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a5c2a, #3a7a3a);
+    border-color: #88ee88;
+}
+
+.dyneq-auto-btn:active {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #152a15, #1e3d1e);
+}
+
+.dyneq-auto-btn-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #88ee88;
+    text-align: center;
+    letter-spacing: 0.8px;
+}
+
+.dyneq-apply-btn {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a2a2a, #303030);
+    border: 1px solid #3d4d3d;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dyneq-apply-btn-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #5f6f5f;
+    text-align: center;
+    letter-spacing: 0.8px;
+}
+
+.dyneq-apply-btn.ready {
+    background-image: linear-gradient(145deg, #1e3d1e, #2a5c2a);
+    border-color: #66cc66;
+}
+
+.dyneq-apply-btn.ready:hover {
+    background-image: linear-gradient(145deg, #2a5c2a, #3a7a3a);
+    border-color: #88ee88;
+}
+
+.dyneq-apply-btn.ready .dyneq-apply-btn-label {
+    color: #88ee88;
+}
+
+.dyneq-analysis-status {
+    font-size: 11px;
+    color: #9fcf9f;
+}
+
 .dyneq-back-title {
     font-size: 20px;
     font-weight: 700;

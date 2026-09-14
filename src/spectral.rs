@@ -8,7 +8,8 @@
 //   - Using Release/Acquire ordering on `dirty` to establish happens-before
 //     between the audio thread write and the GUI thread read.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use realfft::num_complex::Complex32;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 /// Number of frequency bins published to the GUI.
 /// With FFT_SIZE = 2048 this covers 0 … fs/4 Hz (all useful audio range
@@ -82,13 +83,46 @@ impl Default for SpectrumData {
 // Lock-free result of the one-shot sidechain masking analysis.
 // Written exclusively by the audio thread; read exclusively by the GUI thread.
 // Protocol: audio thread writes all fields with Relaxed ordering, then stores
-// `ready = true` with Release ordering. GUI reads `ready` with Acquire ordering
+// `status = Ready` with Release ordering. GUI reads `status` with Acquire ordering
 // before reading the other fields, establishing the happens-before relationship.
+
+/// Progress of a sidechain masking analysis, shared between the GUI and the audio thread.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnalysisStatus {
+    /// No analysis requested yet.
+    Idle = 0,
+    /// The GUI requested an analysis the audio thread has not answered yet.
+    Pending = 1,
+    /// A suggestion is available in the `target_*` fields.
+    Ready = 2,
+    /// The last analysis found no signal on the sidechain input.
+    NoSidechain = 3,
+    /// The sidechain carried signal but the main input was silent at those frequencies.
+    NoOverlap = 4,
+    /// The last suggestion was written to the DynEQ band parameters.
+    Applied = 5,
+}
+
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+impl AnalysisStatus {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Pending,
+            2 => Self::Ready,
+            3 => Self::NoSidechain,
+            4 => Self::NoOverlap,
+            5 => Self::Applied,
+            _ => Self::Idle,
+        }
+    }
+}
 
 /// Lock-free analysis results for the sidechain masking feature.
 pub struct AnalysisResult {
-    /// Audio thread sets this after writing results; GUI reads then clears it.
-    pub ready: AtomicBool,
+    /// [`AnalysisStatus`] as `u8`; see [`AnalysisResult::status`].
+    status: AtomicU8,
     /// Index of the suggested DynEQ band to target (0 = LOW … 3 = HIGH).
     pub target_band: AtomicU32,
     /// Suggested center frequency in Hz, stored as raw f32 bits.
@@ -103,12 +137,225 @@ pub struct AnalysisResult {
 impl AnalysisResult {
     pub fn new() -> Self {
         Self {
-            ready: AtomicBool::new(false),
+            status: AtomicU8::new(AnalysisStatus::Idle as u8),
             target_band: AtomicU32::new(0),
             target_freq: AtomicU32::new((1000.0_f32).to_bits()),
             target_threshold_db: AtomicU32::new((-18.0_f32).to_bits()),
             overlap_bins: (0..SPECTRUM_BINS).map(|_| AtomicU32::new(0)).collect(),
         }
+    }
+
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub fn status(&self) -> AnalysisStatus {
+        AnalysisStatus::from_u8(self.status.load(Ordering::Acquire))
+    }
+
+    pub fn set_status(&self, status: AnalysisStatus) {
+        self.status.store(status as u8, Ordering::Release);
+    }
+}
+
+/// FFT-normalised sidechain magnitude below which the sidechain counts as silent (≈ -80 dBFS).
+pub const SIDECHAIN_SILENCE_MAG: f32 = 1.0e-4;
+
+/// Outcome of one sidechain masking analysis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MaskingOutcome {
+    NoSidechain,
+    NoOverlap,
+    Suggestion {
+        band: u32,
+        freq_hz: f32,
+        threshold_db: f32,
+    },
+}
+
+/// Compare the main and sidechain spectra (complex FFT output of [`FFT_SIZE`]), publish the
+/// per-bin overlap into `overlap_bins`, and suggest the DynEQ band nearest in octaves to the
+/// strongest overlap, with a threshold 6 dB below the sidechain level there.
+/// Allocation-free, so it runs on the audio thread.
+pub fn compute_masking(
+    main: &[Complex32],
+    sidechain: &[Complex32],
+    sample_rate: f32,
+    band_freqs: [f32; 4],
+    overlap_bins: &[AtomicU32],
+) -> MaskingOutcome {
+    let scale = 2.0 / FFT_SIZE as f32;
+    let bins = SPECTRUM_BINS
+        .min(main.len())
+        .min(sidechain.len())
+        .min(overlap_bins.len());
+    if let Some(dc) = overlap_bins.first() {
+        dc.store(0, Ordering::Relaxed);
+    }
+
+    let (mut peak_overlap, mut peak_bin, mut sidechain_peak) = (0.0_f32, 0_usize, 0.0_f32);
+    for i in 1..bins {
+        let sc_mag = sidechain[i].norm() * scale;
+        let overlap = main[i].norm() * scale * sc_mag;
+        overlap_bins[i].store(overlap.to_bits(), Ordering::Relaxed);
+        sidechain_peak = sidechain_peak.max(sc_mag);
+        if overlap > peak_overlap {
+            peak_overlap = overlap;
+            peak_bin = i;
+        }
+    }
+
+    if sidechain_peak < SIDECHAIN_SILENCE_MAG {
+        return MaskingOutcome::NoSidechain;
+    }
+    if peak_bin == 0 {
+        return MaskingOutcome::NoOverlap;
+    }
+
+    let freq_hz = peak_bin as f32 * sample_rate / FFT_SIZE as f32;
+    let band = band_freqs
+        .iter()
+        .enumerate()
+        .filter(|(_, &f)| f > 0.0)
+        .min_by(|(_, &a), (_, &b)| {
+            (freq_hz / a)
+                .ln()
+                .abs()
+                .total_cmp(&(freq_hz / b).ln().abs())
+        })
+        .map_or(0, |(i, _)| i as u32);
+    let sc_db = 20.0
+        * (sidechain[peak_bin].norm() * scale)
+            .max(f32::MIN_POSITIVE)
+            .log10();
+    MaskingOutcome::Suggestion {
+        band,
+        freq_hz,
+        threshold_db: (sc_db - 6.0).clamp(-60.0, 0.0),
+    }
+}
+
+/// Status line shown beside the ANALYZE SC / APPLY RESULT buttons. `timed_out` marks a
+/// request the audio thread never answered (Dynamic EQ not in the rack, or transport stopped).
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn analysis_status_text(
+    status: AnalysisStatus,
+    timed_out: bool,
+    band: u32,
+    freq_hz: f32,
+    threshold_db: f32,
+) -> String {
+    match status {
+        AnalysisStatus::Idle => "Route a sidechain to inputs 3/4, play, then ANALYZE SC".into(),
+        AnalysisStatus::Pending if timed_out => {
+            "No response: Dynamic EQ must be in the rack with audio playing".into()
+        }
+        AnalysisStatus::Pending => "Analyzing…".into(),
+        AnalysisStatus::Ready => format!(
+            "Band {} · {freq_hz:.0} Hz · threshold {threshold_db:.1} dB",
+            band + 1
+        ),
+        AnalysisStatus::NoSidechain => "No sidechain signal: route audio to inputs 3/4".into(),
+        AnalysisStatus::NoOverlap => "Sidechain found, but the main input is silent there".into(),
+        AnalysisStatus::Applied => format!("Applied to band {}", band + 1),
+    }
+}
+
+#[cfg(test)]
+mod masking_tests {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+    const BANDS: [f32; 4] = [60.0, 350.0, 2000.0, 8000.0];
+
+    /// Spectrum with a single bin at `mag` (FFT-normalised magnitude).
+    fn spectrum_with(bin: usize, mag: f32) -> Vec<Complex32> {
+        let mut s = vec![Complex32::new(0.0, 0.0); FFT_SIZE / 2 + 1];
+        if mag > 0.0 {
+            s[bin] = Complex32::new(mag * FFT_SIZE as f32 / 2.0, 0.0);
+        }
+        s
+    }
+
+    fn overlap_store() -> Vec<AtomicU32> {
+        (0..SPECTRUM_BINS).map(|_| AtomicU32::new(0)).collect()
+    }
+
+    #[test]
+    fn silent_sidechain_reports_no_sidechain() {
+        let outcome = compute_masking(
+            &spectrum_with(17, 0.5),
+            &spectrum_with(17, 0.0),
+            SR,
+            BANDS,
+            &overlap_store(),
+        );
+        assert_eq!(outcome, MaskingOutcome::NoSidechain);
+    }
+
+    #[test]
+    fn silent_main_reports_no_overlap() {
+        let outcome = compute_masking(
+            &spectrum_with(17, 0.0),
+            &spectrum_with(17, 0.1),
+            SR,
+            BANDS,
+            &overlap_store(),
+        );
+        assert_eq!(outcome, MaskingOutcome::NoOverlap);
+    }
+
+    /// 398 Hz sits in the old fixed 0–500 Hz "band 1" region but is nearest band 2 (350 Hz).
+    #[test]
+    fn suggestion_targets_the_band_nearest_in_octaves() {
+        let overlap = overlap_store();
+        let outcome = compute_masking(
+            &spectrum_with(17, 0.5),
+            &spectrum_with(17, 0.1),
+            SR,
+            BANDS,
+            &overlap,
+        );
+        let MaskingOutcome::Suggestion {
+            band,
+            freq_hz,
+            threshold_db,
+        } = outcome
+        else {
+            panic!("expected a suggestion, got {outcome:?}");
+        };
+        assert_eq!(band, 1);
+        assert!((freq_hz - 17.0 * SR / FFT_SIZE as f32).abs() < 1e-3);
+        assert!(
+            (threshold_db - -26.0).abs() < 0.01,
+            "threshold {threshold_db}"
+        );
+        assert!(f32::from_bits(overlap[17].load(Ordering::Relaxed)) > 0.0);
+    }
+
+    #[test]
+    fn status_round_trips_through_the_atomic() {
+        let result = AnalysisResult::new();
+        assert_eq!(result.status(), AnalysisStatus::Idle);
+        for status in [
+            AnalysisStatus::Pending,
+            AnalysisStatus::Ready,
+            AnalysisStatus::NoSidechain,
+            AnalysisStatus::NoOverlap,
+            AnalysisStatus::Applied,
+        ] {
+            result.set_status(status);
+            assert_eq!(result.status(), status);
+        }
+    }
+
+    #[test]
+    fn status_text_distinguishes_timeout_from_pending() {
+        let pending = analysis_status_text(AnalysisStatus::Pending, false, 0, 0.0, 0.0);
+        let timed_out = analysis_status_text(AnalysisStatus::Pending, true, 0, 0.0, 0.0);
+        assert_ne!(pending, timed_out);
+        let ready = analysis_status_text(AnalysisStatus::Ready, false, 2, 1000.0, -24.0);
+        assert!(
+            ready.contains("Band 3") && ready.contains("1000 Hz"),
+            "{ready}"
+        );
     }
 }
 
@@ -343,10 +590,7 @@ mod tests {
     #[test]
     fn test_analysis_result_default_not_ready() {
         let ar = AnalysisResult::new();
-        assert!(
-            !ar.ready.load(Ordering::Relaxed),
-            "AnalysisResult should not be ready by default"
-        );
+        assert_eq!(ar.status(), AnalysisStatus::Idle);
     }
 
     #[test]
