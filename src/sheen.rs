@@ -77,6 +77,13 @@ const INFLATOR_X2: f32 = -0.0625;
 const INFLATOR_X3: f32 = -0.375;
 const INFLATOR_X4: f32 = -0.0625;
 
+// The quartic is only a waveshaper on [-1.5, 1]: f'(x) = 0 at both ends and
+// f rises monotonically between them. Past either end it folds back over
+// (f(2) = -1.25), so a hot input would invert the shaped path. Clamping to
+// the stationary points keeps the curve C1 and identical inside the domain.
+const INFLATOR_MIN_IN: f32 = -1.5;
+const INFLATOR_MAX_IN: f32 = 1.0;
+
 /// 4× oversampling for the warmth shaper, routed through the same
 /// Kaiser-windowed halfband FIR cascade (`crate::oversampler::Oversampler`)
 /// used by ButterComp2/Pultec/Transformer — the v2.0 DSP-track floor for
@@ -559,9 +566,11 @@ fn width_shelf_db_for(width_param: f32) -> f32 {
     20.0 * (1.0 + MAX_WIDTH_GAIN * w).log10()
 }
 
-/// Sonnox Inflator transfer function at Curve = 0. Inlined hot path.
+/// Sonnox Inflator transfer function at Curve = 0, flat outside its
+/// monotone domain `[INFLATOR_MIN_IN, INFLATOR_MAX_IN]`. Inlined hot path.
 #[inline]
 fn inflator(x: f32) -> f32 {
+    let x = x.clamp(INFLATOR_MIN_IN, INFLATOR_MAX_IN);
     let x2 = x * x;
     let x3 = x2 * x;
     let x4 = x2 * x2;
@@ -615,6 +624,69 @@ mod tests {
             (slope - 1.5).abs() < 1.0e-3,
             "small-signal slope {slope}, want 1.5"
         );
+    }
+
+    /// Past its domain the quartic folds back over; the clamped shaper must
+    /// stay monotone, flatten at both stationary points, and match the plain
+    /// quartic inside the domain.
+    #[test]
+    fn inflator_clamp_is_monotone_and_flat_outside_domain() {
+        let quartic = |x: f32| {
+            INFLATOR_X1 * x
+                + INFLATOR_X2 * x * x
+                + INFLATOR_X3 * x * x * x
+                + INFLATOR_X4 * x * x * x * x
+        };
+        let mut prev = inflator(-3.0);
+        for i in -300..=300 {
+            let x = i as f32 * 0.01;
+            let y = inflator(x);
+            assert!(y >= prev - 1.0e-6, "not monotone at x={x}: {y} < {prev}");
+            prev = y;
+            if (INFLATOR_MIN_IN..=INFLATOR_MAX_IN).contains(&x) {
+                assert!((y - quartic(x)).abs() < 1.0e-6, "clamp altered x={x}");
+            }
+        }
+        assert_eq!(inflator(2.5), inflator(INFLATOR_MAX_IN));
+        assert_eq!(inflator(-2.5), inflator(INFLATOR_MIN_IN));
+    }
+
+    /// A hot input into WARMTH must never make the output fall as the input
+    /// rises — the unclamped quartic did exactly that above 0 dBFS.
+    #[test]
+    fn warmth_hot_input_does_not_fold_over() {
+        let n = 8192;
+        let omega = 2.0 * core::f32::consts::PI * 200.0 / SR;
+        let mut prev_peak = 0.0_f32;
+        for step in 0..=12 {
+            let amp = 10.0_f32.powf(step as f32 / 20.0);
+            let mut sheen = SheenModule::new(SR);
+            sheen.update_parameters(
+                false, // sheen master ON
+                0.0, true, // body bypassed
+                0.0, true, // presence bypassed
+                0.0, true, // air bypassed
+                1.0, false, false, // warmth full, engaged, tape mode off
+                0.0, true, // width bypassed
+            );
+            let mut data_l: Vec<f32> = (0..n).map(|i| amp * (omega * i as f32).sin()).collect();
+            let mut data_r = data_l.clone();
+            let mut buffer = Buffer::default();
+            unsafe {
+                buffer.set_slices(n, |slices| {
+                    slices.clear();
+                    slices.push(&mut data_l);
+                    slices.push(&mut data_r);
+                });
+            }
+            sheen.process(&mut buffer);
+            let peak = data_l[n / 2..].iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+            assert!(
+                peak >= prev_peak - 1.0e-3,
+                "output peak fell from {prev_peak} to {peak} at +{step} dBFS input"
+            );
+            prev_peak = peak;
+        }
     }
 
     /// width_shelf_db_for(0) must produce 0 dB so the WIDTH stage is

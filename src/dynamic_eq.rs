@@ -17,7 +17,7 @@
 //   - Solo mode routes only the soloed band(s) through a RBJ bandpass filter
 //     so the user can isolate exactly the frequency range being processed.
 
-use crate::svf::{flush_denormal, SvfCoefficients, SvfType, TptSvf};
+use crate::svf::{flush_denormal, BellPrewarp, SvfCoefficients, SvfType, TptSvf};
 use nice_plug::buffer::Buffer;
 use nice_plug::prelude::Enum;
 
@@ -108,15 +108,28 @@ impl BandFilter {
         }
     }
 
+    /// Pins frequency and Q to the module's design range.
     #[inline]
-    fn design(filter_type: SvfType, freq_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
+    fn clamp_design(freq_hz: f32, q: f32, sample_rate: f32) -> (f32, f32) {
         // `.max().min()`, not `.clamp()` — see svf.rs's identical guard.
         let max_hz = (sample_rate * BAND_MAX_FREQ_RATIO).max(BAND_MIN_FREQ_HZ);
-        let freq_hz = freq_hz.max(BAND_MIN_FREQ_HZ).min(max_hz);
-        SvfCoefficients::new(filter_type, sample_rate, freq_hz, q.max(BAND_MIN_Q))
+        (freq_hz.max(BAND_MIN_FREQ_HZ).min(max_hz), q.max(BAND_MIN_Q))
+    }
+
+    #[inline]
+    fn design(filter_type: SvfType, freq_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
+        let (freq_hz, q) = Self::clamp_design(freq_hz, q, sample_rate);
+        SvfCoefficients::new(filter_type, sample_rate, freq_hz, q)
+    }
+
+    /// Block-rate bell design for a band whose gain moves every sample.
+    fn bell_prewarp(freq_hz: f32, q: f32, sample_rate: f32) -> BellPrewarp {
+        let (freq_hz, q) = Self::clamp_design(freq_hz, q, sample_rate);
+        BellPrewarp::new(sample_rate, freq_hz, q)
     }
 
     /// Peaking EQ (RBJ prototype) — updates coefficients, preserves state.
+    #[cfg(test)]
     fn update_peaking(&mut self, freq_hz: f32, q: f32, gain_db: f32, sample_rate: f32) {
         self.svf.update_coefficients(Self::design(
             SvfType::Bell(gain_db),
@@ -145,22 +158,6 @@ impl BandFilter {
     fn update_bandpass(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
         self.svf
             .update_coefficients(Self::design(SvfType::BandPass, freq_hz, q, sample_rate));
-    }
-
-    /// Update a stereo pair of peaking filters from one shared coefficient
-    /// computation — `l`/`r` always get identical parameters, so deriving
-    /// them once avoids a redundant `tan()`/`powf()` on this hot path.
-    fn update_peaking_pair(
-        l: &mut Self,
-        r: &mut Self,
-        freq_hz: f32,
-        q: f32,
-        gain_db: f32,
-        sample_rate: f32,
-    ) {
-        let coeffs = Self::design(SvfType::Bell(gain_db), freq_hz, q, sample_rate);
-        l.svf.update_coefficients(coeffs);
-        r.svf.update_coefficients(coeffs);
     }
 
     /// Update a stereo pair of constant-skirt-gain bandpass filters from one
@@ -219,23 +216,24 @@ impl Default for DynamicMode {
 
 struct DynamicBand {
     // Filters (all BandFilter — state persists across buffer boundaries).
-    // Detection is mono (one BPF fed a linked-from-stereo signal); EQ and solo
-    // filters are duplicated per channel so left and right maintain independent
-    // biquad state while receiving identical coefficients. Without the per-
-    // channel split the same struct would see interleaved L/R samples and its
-    // state would corrupt both channels' outputs.
-    sidechain_filter: BandFilter, // mono detection: unity-peak BPF
+    // Every filter is per channel: interleaving L/R samples through one SVF
+    // corrupts its state. Detection filters each channel *before* rectifying
+    // (squaring) so a tone's fundamental reaches the band-pass intact.
+    detector_filter: [BandFilter; 2], // unity-peak BPF, L and R
     eq_filter_l: BandFilter,
     eq_filter_r: BandFilter,
     solo_filter_l: BandFilter,
     solo_filter_r: BandFilter,
 
-    // Detection (mono, shared across channels for linked GR)
-    rms_state: f32, // one-pole lowpass state on squared bandpass output
-    rms_coeff: f32, // smoothing coefficient for the RMS integrator
-    envelope: f32,  // peak-follower state driven by sqrt(rms_state)
+    // Detection: per-channel RMS, linked by the louder channel into one
+    // envelope so both channels get the same gain change.
+    rms_state: [f32; 2],
+    rms_coeff: f32,
+    envelope: f32,
     pub gain_reduction_db: f32,
-    last_gain_change_db: f32, // hysteresis cache — avoids per-sample trig recompute
+    bell: BellPrewarp,
+    bell_db_bits: u32,
+    bell_dirty: bool,
 
     // Cached parameter values (updated per-buffer, used per-sample)
     sample_rate: f32,
@@ -254,8 +252,10 @@ struct DynamicBand {
 
 impl DynamicBand {
     fn new(sample_rate: f32) -> Self {
-        let mut sidechain_filter = BandFilter::new();
-        sidechain_filter.update_bandpass_unity(1000.0, 1.0, sample_rate);
+        let mut detector_filter = [BandFilter::new(), BandFilter::new()];
+        for filter in &mut detector_filter {
+            filter.update_bandpass_unity(1000.0, 1.0, sample_rate);
+        }
 
         let mut solo_filter_l = BandFilter::new();
         let mut solo_filter_r = BandFilter::new();
@@ -265,16 +265,18 @@ impl DynamicBand {
         let rms_coeff = (-1.0 / (RMS_WINDOW_MS * 0.001 * sample_rate)).exp();
 
         Self {
-            sidechain_filter,
+            detector_filter,
             eq_filter_l: BandFilter::new(),
             eq_filter_r: BandFilter::new(),
             solo_filter_l,
             solo_filter_r,
-            rms_state: 0.0,
+            rms_state: [0.0; 2],
             rms_coeff,
             envelope: 0.0,
             gain_reduction_db: 0.0,
-            last_gain_change_db: 0.0,
+            bell: BandFilter::bell_prewarp(1000.0, 1.0, sample_rate),
+            bell_db_bits: 0,
+            bell_dirty: true,
             sample_rate,
             mode: DynamicMode::default(),
             detector_freq: 1000.0,
@@ -321,11 +323,16 @@ impl DynamicBand {
         self.enabled = enabled;
         self.solo = solo;
 
-        // Update sidechain detection filter — state preserved, no reset.
-        // Unity-peak bandpass: detection level == actual in-band signal level,
-        // without pollution from out-of-band content like a peaking EQ would leak.
-        self.sidechain_filter
-            .update_bandpass_unity(detector_freq, q, sr);
+        // Unity-peak bandpass: detection level == actual in-band signal level.
+        for filter in &mut self.detector_filter {
+            filter.update_bandpass_unity(detector_freq, q, sr);
+        }
+
+        let bell = BandFilter::bell_prewarp(frequency, q, sr);
+        if bell != self.bell {
+            self.bell = bell;
+            self.bell_dirty = true;
+        }
 
         // Update solo bandpass filters (L and R) for this band's center
         // frequency. Both channels receive identical coefficients — only state
@@ -339,23 +346,32 @@ impl DynamicBand {
         );
     }
 
-    /// Update the sidechain envelope from a detection input. This is called
-    /// with the **module input** (not the inter-band cascade signal) so that
-    /// band N's detection is not contaminated by EQ applied in bands 0..N-1.
+    /// Update the envelope from the raw **module input** `l`/`r` (not the
+    /// inter-band cascade signal), so band N's detection is not contaminated
+    /// by EQ applied in bands 0..N-1.
     ///
-    /// Detection chain:
-    ///   BPF → square → RMS lowpass (10 ms) → sqrt → attack/release smoother.
-    /// RMS integration replaces peak-style abs() to avoid the harsh transient
-    /// pumping that peak detectors produce on program material.
-    fn update_envelope(&mut self, detection_input: f32) {
+    /// Per channel: BPF → square → RMS lowpass (10 ms). The louder channel's
+    /// RMS then drives one attack/release smoother. The input must never be
+    /// rectified before the BPF: `|x|` moves a tone's energy to DC and 2f, so
+    /// the band-pass would read it 12–26 dB low.
+    fn update_envelope(&mut self, l: f32, r: f32) {
         if !self.enabled {
             return;
         }
-        let sc = self.sidechain_filter.process(detection_input);
-        let sc_sq = sc * sc;
-        self.rms_state = sc_sq + (self.rms_state - sc_sq) * self.rms_coeff;
-        self.rms_state = flush_denormal(self.rms_state);
-        let det = self.rms_state.max(0.0).sqrt();
+        let rms_coeff = self.rms_coeff;
+        let mut mean_sq = 0.0_f32;
+        for ((filter, state), x) in self
+            .detector_filter
+            .iter_mut()
+            .zip(self.rms_state.iter_mut())
+            .zip([l, r])
+        {
+            let y = filter.process(x);
+            let y_sq = y * y;
+            *state = flush_denormal(y_sq + (*state - y_sq) * rms_coeff);
+            mean_sq = mean_sq.max(*state);
+        }
+        let det = mean_sq.max(0.0).sqrt();
 
         if det > self.envelope {
             self.envelope = det + (self.envelope - det) * self.attack_coeff;
@@ -367,10 +383,9 @@ impl DynamicBand {
 
     /// Compute the dynamic gain from the current envelope and apply the peaking
     /// EQ + makeup gain to both L and R channels. The same gain change is used
-    /// for both channels so stereo image is preserved — hence the shared
-    /// envelope state that lives on `self`. Coefficients are recomputed once
-    /// per hysteresis trip and written to both L and R biquad instances; state
-    /// remains per-channel so the filters don't corrupt each other.
+    /// for both channels so stereo image is preserved. Bell coefficients are
+    /// redesigned on every sample whose gain differs from the last, so the
+    /// filter tracks the gain computer exactly; state stays per channel.
     ///
     /// `l`/`r` are the **cascade signals** from the previous band's apply_eq
     /// (or the dry module input for band 0).
@@ -387,23 +402,13 @@ impl DynamicBand {
         let gain_change_db = compute_gain_change_db(over_db, self.mode, self.ratio);
         self.gain_reduction_db = -gain_change_db;
 
-        // Update EQ coefficients only when gain changes significantly.
-        // update_peaking() runs cos()/sin()/powf() — expensive transcendental math.
-        // With typical attack/release times, the envelope changes <0.025 dB/sample,
-        // so a 0.05 dB hysteresis threshold means we recompute every ~2 samples
-        // during active compression and never during silence — substantial savings
-        // with at most 0.05 dB of GR tracking error (inaudible).
-        const GR_HYSTERESIS_DB: f32 = 0.05;
-        if (gain_change_db - self.last_gain_change_db).abs() > GR_HYSTERESIS_DB {
-            BandFilter::update_peaking_pair(
-                &mut self.eq_filter_l,
-                &mut self.eq_filter_r,
-                self.frequency,
-                self.q,
-                gain_change_db,
-                self.sample_rate,
-            );
-            self.last_gain_change_db = gain_change_db;
+        let bell_db = gain_change_db;
+        if self.bell_dirty || bell_db.to_bits() != self.bell_db_bits {
+            let coeffs = self.bell.coefficients(bell_db);
+            self.eq_filter_l.svf.update_coefficients(coeffs);
+            self.eq_filter_r.svf.update_coefficients(coeffs);
+            self.bell_db_bits = bell_db.to_bits();
+            self.bell_dirty = false;
         }
 
         (
@@ -419,27 +424,28 @@ impl DynamicBand {
     /// directly with a linked detection input.
     #[cfg(test)]
     fn process_sample(&mut self, input: f32) -> f32 {
-        self.update_envelope(input);
+        self.update_envelope(input, input);
         self.apply_eq_stereo(input, input).0
     }
 
     fn reset(&mut self) {
-        self.rms_state = 0.0;
+        self.rms_state = [0.0; 2];
         self.envelope = 0.0;
         self.gain_reduction_db = 0.0;
-        self.last_gain_change_db = 0.0;
+        self.bell_dirty = true;
         self.eq_filter_l.reset();
         self.eq_filter_r.reset();
-        // Intentionally keep sidechain_filter and solo_filter state to avoid clicks.
+        // Intentionally keep detector and solo filter state to avoid clicks.
     }
 
     /// Clears state poisoned by a non-finite sample. NaN or inf in an SVF
     /// integrator or the envelope never decays, so without this one bad host
     /// block silences the band — and everything after it — until reload.
-    /// The EQ filters go back to flat to match `last_gain_change_db = 0`.
+    /// The EQ filters go back to flat and are redesigned on the next sample.
     fn recover_if_non_finite(&mut self) {
         let filters_finite = [
-            &self.sidechain_filter,
+            &self.detector_filter[0],
+            &self.detector_filter[1],
             &self.eq_filter_l,
             &self.eq_filter_r,
             &self.solo_filter_l,
@@ -452,7 +458,7 @@ impl DynamicBand {
         });
         if filters_finite
             && self.envelope.is_finite()
-            && self.rms_state.is_finite()
+            && self.rms_state.iter().all(|s| s.is_finite())
             && self.gain_reduction_db.is_finite()
         {
             return;
@@ -460,7 +466,9 @@ impl DynamicBand {
         self.reset();
         self.eq_filter_l = BandFilter::new();
         self.eq_filter_r = BandFilter::new();
-        self.sidechain_filter.reset();
+        for filter in &mut self.detector_filter {
+            filter.reset();
+        }
         self.solo_filter_l.reset();
         self.solo_filter_r.reset();
     }
@@ -547,15 +555,10 @@ impl DynamicEQ {
                 l_in
             };
 
-            // Stereo-linked detection. Max-of-absolute-values is the standard
-            // linking strategy for program-material compression: either channel
-            // can pull the envelope up, so a transient on only one side still
-            // triggers symmetrical gain reduction on both, preserving stereo
-            // image. Detection always taps the dry module input so the cascade
-            // of bands 0..N-1 can't starve or pump band N's detection.
-            let det_input = l_in.abs().max(r_in.abs());
+            // Detection taps the dry module input so the cascade of bands
+            // 0..N-1 can't starve or pump band N's detection.
             for band in &mut self.bands {
-                band.update_envelope(det_input);
+                band.update_envelope(l_in, r_in);
             }
 
             let (l_out, r_out) = if any_solo {
@@ -1099,7 +1102,8 @@ mod tests {
         // Let the detector settle: >> attack, release, and RMS window combined.
         for n in 0..50_000 {
             let phase = std::f32::consts::TAU * 1000.0 * (n as f32) / sr;
-            band.update_envelope(phase.sin() * amp);
+            let x = phase.sin() * amp;
+            band.update_envelope(x, x);
         }
         let expected_rms = amp / std::f32::consts::SQRT_2;
         let relative_error = (band.envelope - expected_rms).abs() / expected_rms;
@@ -1631,6 +1635,114 @@ mod tests {
                 r_orig[i]
             );
         }
+    }
+
+    fn detect_only(freq: f32, q: f32) -> DynamicBandParams {
+        DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: freq,
+            freq,
+            q,
+            threshold_db: 0.0,
+            ratio: 1.0,
+            attack_ms: 1.0,
+            release_ms: 100.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+        }
+    }
+
+    /// Settled envelope of band 0, in dB, averaged over the last quarter of a
+    /// one-second run of `l`/`r` sines.
+    fn settled_envelope_db(
+        params: DynamicBandParams,
+        sr: f32,
+        freq: f32,
+        amp_l: f32,
+        amp_r: f32,
+    ) -> f32 {
+        let n = 512;
+        let blocks = (sr as usize) / n;
+        let mut deq = DynamicEQ::new(sr);
+        deq.update_parameters(&[params; 4]);
+        let mut sum = 0.0_f32;
+        let mut count = 0;
+        for block in 0..blocks {
+            let mut l = sine_block(freq, sr, block * n, n, amp_l);
+            let mut r = sine_block(freq, sr, block * n, n, amp_r);
+            process_stereo_block(&mut deq, &mut l, &mut r);
+            if block >= blocks * 3 / 4 {
+                sum += 20.0 * deq.bands[0].envelope.max(f32::MIN_POSITIVE).log10();
+                count += 1;
+            }
+        }
+        sum / count as f32
+    }
+
+    /// Regression (2026-09-14): `process` rectified the input before the band-pass,
+    /// which moved a tone's energy to DC and 2f and read it 12–26 dB low.
+    #[test]
+    fn test_detector_reads_tone_rms_through_process() {
+        let sr = 48_000.0_f32;
+        let amp = 10.0_f32.powf(-12.0 / 20.0);
+        let want_db = 20.0 * (amp / std::f32::consts::SQRT_2).log10();
+        for freq in [330.0_f32, 3000.0, 7000.0] {
+            for q in [1.0_f32, 4.3] {
+                let got = settled_envelope_db(detect_only(freq, q), sr, freq, amp, amp);
+                assert!(
+                    (got - want_db).abs() < 1.0,
+                    "{freq} Hz Q{q}: detector read {got:.2} dB, tone RMS is {want_db:.2} dB"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_detector_link_reads_hard_panned_tone_full_level() {
+        let sr = 48_000.0_f32;
+        let params = detect_only(1000.0, 1.0);
+        let centred = settled_envelope_db(params, sr, 1000.0, 0.5, 0.5);
+        let left_only = settled_envelope_db(params, sr, 1000.0, 0.5, 0.0);
+        assert!(
+            (centred - left_only).abs() < 0.5,
+            "hard-panned tone read {left_only:.2} dB, centred {centred:.2} dB"
+        );
+    }
+
+    /// The bell must carry exactly the gain computer's current value on every
+    /// sample — no hysteresis step — including right after a FREQ change.
+    #[test]
+    fn test_bell_tracks_gain_computer_every_sample() {
+        let sr = 48_000.0_f32;
+        let mut band = DynamicBand::new(sr);
+        let mut freq = 1000.0;
+        for i in 0..9600 {
+            if i == 0 || i == 4800 {
+                band.update_parameters(
+                    DynamicMode::CompressDownward,
+                    freq,
+                    freq,
+                    1.0,
+                    -40.0,
+                    4.0,
+                    1.0,
+                    50.0,
+                    0.0,
+                    true,
+                    false,
+                );
+                freq = 2000.0;
+            }
+            let level = if (i / 480) % 2 == 0 { 0.8 } else { 0.05 };
+            band.process_sample((std::f32::consts::TAU * 1000.0 * i as f32 / sr).sin() * level);
+            assert_eq!(
+                band.eq_filter_l.svf.coefficients(),
+                band.bell.coefficients(-band.gain_reduction_db),
+                "bell lagged the gain computer at sample {i}"
+            );
+        }
+        assert!(band.gain_reduction_db.abs() > 0.0 || band.envelope > 0.0);
     }
 
     #[test]

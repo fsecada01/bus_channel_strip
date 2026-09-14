@@ -102,17 +102,7 @@ impl SvfCoefficients {
     /// never fails and never produces NaN — callers pass parameter values
     /// straight through.
     pub fn new(filter_type: SvfType, sample_rate: f32, freq_hz: f32, q: f32) -> Self {
-        // `.max().min()`, not `.clamp()`: a degenerate sample rate must
-        // never invert the clamp bounds and panic on the audio thread.
-        let sample_rate = sample_rate.max(2.0 * MIN_FREQ_HZ);
-        let max_hz = (sample_rate * MAX_FREQ_RATIO).max(MIN_FREQ_HZ);
-        let freq_hz = freq_hz.max(MIN_FREQ_HZ).min(max_hz);
-        let q = q.max(MIN_Q);
-
-        // Prewarped integrator gain — tan() of the normalised corner maps
-        // the analog prototype's corner exactly onto the digital one.
-        let mut g = (core::f32::consts::PI * freq_hz / sample_rate).tan();
-        let mut k = 1.0 / q;
+        let (mut g, mut k) = prewarp(sample_rate, freq_hz, q);
 
         // Output mix over (input, band, low); reproduces the RBJ cookbook
         // prototypes term for term (substitute lp = 1/D, bp = s/D, D = s²+k·s+1).
@@ -206,6 +196,61 @@ impl SvfCoefficients {
     }
 }
 
+/// Prewarped integrator gain `g` and damping `k = 1/Q` after the shared
+/// frequency/Q clamps. `tan()` of the normalised corner maps the analog
+/// prototype's corner exactly onto the digital one.
+fn prewarp(sample_rate: f32, freq_hz: f32, q: f32) -> (f32, f32) {
+    // `.max().min()`, not `.clamp()`: a degenerate sample rate must
+    // never invert the clamp bounds and panic on the audio thread.
+    let sample_rate = sample_rate.max(2.0 * MIN_FREQ_HZ);
+    let max_hz = (sample_rate * MAX_FREQ_RATIO).max(MIN_FREQ_HZ);
+    let freq_hz = freq_hz.max(MIN_FREQ_HZ).min(max_hz);
+    let g = (core::f32::consts::PI * freq_hz / sample_rate).tan();
+    (g, 1.0 / q.max(MIN_Q))
+}
+
+/// `ln(10) / 40`: turns dB into `ln(A)` for the RBJ `A = 10^(dB/40)` convention.
+const DB_TO_LN_A: f32 = core::f32::consts::LN_10 / RBJ_GAIN_DIVISOR;
+
+/// The block-rate half of a Bell design. Holds the prewarped `g` and base
+/// `k`, which only change with frequency and Q. A bell whose gain moves
+/// every sample (the DynamicEQ bands) calls [`BellPrewarp::coefficients`]
+/// per sample: one `exp` plus arithmetic, with no `tan()`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BellPrewarp {
+    g: f32,
+    k0: f32,
+}
+
+impl BellPrewarp {
+    /// Same frequency/Q clamps as [`SvfCoefficients::new`].
+    pub fn new(sample_rate: f32, freq_hz: f32, q: f32) -> Self {
+        let (g, k0) = prewarp(sample_rate, freq_hz, q);
+        Self { g, k0 }
+    }
+
+    /// Bell coefficients at `gain_db`; equal to
+    /// `SvfCoefficients::new(SvfType::Bell(gain_db), ..)` for the same design.
+    #[inline]
+    pub fn coefficients(&self, gain_db: f32) -> SvfCoefficients {
+        let a = (gain_db * DB_TO_LN_A).exp();
+        let g = self.g;
+        let k = self.k0 / a;
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        SvfCoefficients {
+            g,
+            k,
+            a1,
+            a2,
+            a3: g * a2,
+            m0: 1.0,
+            m1: k * (a * a - 1.0),
+            m2: 0.0,
+        }
+    }
+}
+
 /// One channel of TPT state-variable filter. Stereo callers keep one per
 /// channel (`[TptSvf; 2]`) — sharing a single instance across interleaved
 /// L/R samples corrupts the integrator state exactly like it did for DF1.
@@ -282,6 +327,33 @@ mod tests {
     use biquad::{Biquad, DirectForm1, Type};
 
     const SR: f32 = 48_000.0;
+
+    #[test]
+    fn bell_prewarp_matches_svf_new() {
+        for &(freq, q) in &[(40.0, 0.3), (1000.0, 1.0), (7000.0, 4.3), (30_000.0, 8.0)] {
+            let pre = BellPrewarp::new(SR, freq, q);
+            for db in [-30.0_f32, -12.0, -0.05, 0.0, 6.0, 24.0] {
+                let got = pre.coefficients(db);
+                let want = SvfCoefficients::new(SvfType::Bell(db), SR, freq, q);
+                let pairs = [
+                    (got.g, want.g),
+                    (got.k, want.k),
+                    (got.a1, want.a1),
+                    (got.a2, want.a2),
+                    (got.a3, want.a3),
+                    (got.m0, want.m0),
+                    (got.m1, want.m1),
+                    (got.m2, want.m2),
+                ];
+                for (a, b) in pairs {
+                    assert!(
+                        (a - b).abs() <= 1.0e-5 * b.abs().max(1.0),
+                        "freq={freq} q={q} db={db}: {got:?} vs {want:?}"
+                    );
+                }
+            }
+        }
+    }
 
     /// Impulse response of a filter over `n` samples.
     fn impulse_svf(f: &mut TptSvf, n: usize) -> Vec<f32> {
