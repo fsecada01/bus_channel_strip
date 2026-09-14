@@ -1275,19 +1275,7 @@ pub(crate) fn create(
         }
         .build(cx);
 
-        // vizia_baseview's first frame resizes the window to the unscaled base
-        // size, ignoring the persisted user scale, which leaves the rack's
-        // ScrollView clipped until the zoom is changed. Re-apply the scale
-        // once that first frame has run. This is a scheduled event, not a timer:
-        // vizia's `start_timer` never returns if an earlier-created timer (the
-        // DynEQ analysis poll) is already running.
         let initial_scale = editor_state_for_data.user_scale_factor();
-        if initial_scale != 1.0 {
-            cx.schedule_emit(
-                WindowEvent::SetUserScale(initial_scale),
-                Instant::now() + Duration::from_millis(50),
-            );
-        }
 
         // Heal duplicate module_order_* assignments left over from sessions
         // saved under an older schema (fewer slots). When slot N defaults to
@@ -1506,6 +1494,20 @@ pub(crate) fn create(
         // the model.
         .focusable(true)
         .focused(true)
+        // vizia_baseview's first frame resizes the window to the unscaled base
+        // size, ignoring the persisted user scale, so the chassis stays clipped
+        // until the next resize. Its first layout lands after that frame, so
+        // re-apply the scale there once. Not a timer (`start_timer` hangs with
+        // the DynEQ poll running) and not `schedule_emit` (baseview never
+        // drains scheduled events).
+        .on_geo_changed({
+            let scale_restored = AtomicBool::new(initial_scale == 1.0);
+            move |cx, _| {
+                if !scale_restored.swap(true, Ordering::Relaxed) {
+                    cx.emit(WindowEvent::SetUserScale(initial_scale));
+                }
+            }
+        })
         .toggle_class("zoom-75", zoom_level_signal.map(|z| *z == 75))
         .toggle_class("zoom-100", zoom_level_signal.map(|z| *z == 100))
         .toggle_class("zoom-125", zoom_level_signal.map(|z| *z == 125))
@@ -4092,21 +4094,9 @@ macro_rules! dyneq_band_col {
      $range:ident, $link:ident, $det_freq:ident,
      $gr_data:expr, $suggestion:expr, $band_idx:literal) => {
         VStack::new($cx, |cx| {
-            // Band header: title + ON/SOLO buttons + chevron expand toggle
+            // Band header: chevron expand toggle + title, then ON/SOLO on their own row so
+            // the title never shares width with the buttons and wraps.
             HStack::new(cx, |cx| {
-                Label::new(cx, $title)
-                    .class("dyneq-band-title")
-                    .height(Pixels(14.0))
-                    .width(Stretch(1.0))
-                    .top(Pixels(0.0))
-                    .bottom(Pixels(0.0));
-                let params = cx.data::<Data>().params.clone();
-                components::create_on_button(cx, "dyneq_band1_enabled", &params, |p| {
-                    &p.dynamic_eq.$enabled
-                });
-                components::create_solo_button(cx, "dyneq_band1_solo", &params, |p| {
-                    &p.dynamic_eq.$solo
-                });
                 // Chevron toggle button — reactive label via dyneq_expand_gen signal
                 {
                     let expand_arc_chevron = cx.data::<Data>().dyneq_band_expand.clone();
@@ -4121,12 +4111,12 @@ macro_rules! dyneq_band_col {
                                     IconKind::ChevronRight
                                 };
                                 Icon::new(cx, kind, vg::Color::from_argb(255, 136, 153, 170))
-                                    .width(Pixels(12.0))
-                                    .height(Pixels(12.0));
+                                    .width(Pixels(14.0))
+                                    .height(Pixels(14.0));
                             });
                         })
-                        .width(Pixels(12.0))
-                        .height(Pixels(12.0))
+                        .width(Pixels(14.0))
+                        .height(Pixels(14.0))
                     })
                     .on_press(|cx| cx.emit(AppEvent::ToggleDynEQBand($band_idx)))
                     .class("dyneq-chevron")
@@ -4135,11 +4125,33 @@ macro_rules! dyneq_band_col {
                     .top(Pixels(0.0))
                     .bottom(Pixels(0.0));
                 }
+                Label::new(cx, $title)
+                    .class("dyneq-band-title")
+                    .text_wrap(false)
+                    .height(Pixels(16.0))
+                    .width(Stretch(1.0))
+                    .top(Pixels(0.0))
+                    .bottom(Pixels(0.0));
             })
             .top(Pixels(0.0))
             .bottom(Pixels(0.0))
             .width(Stretch(1.0))
-            .height(Auto);
+            .height(Auto)
+            .gap(Pixels(4.0));
+            HStack::new(cx, |cx| {
+                let params = cx.data::<Data>().params.clone();
+                components::create_on_button(cx, "dyneq_band1_enabled", &params, |p| {
+                    &p.dynamic_eq.$enabled
+                });
+                components::create_solo_button(cx, "dyneq_band1_solo", &params, |p| {
+                    &p.dynamic_eq.$solo
+                });
+            })
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0))
+            .width(Stretch(1.0))
+            .height(Auto)
+            .gap(Pixels(6.0));
 
             // Sidechain-analysis suggestion strip, built only while this
             // band has a suggestion waiting to be applied.

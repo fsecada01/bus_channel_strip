@@ -1757,10 +1757,10 @@ scrollbar .thumb:hover {
     font-size: 11px;
     font-weight: 700;
     color: #66cc66;
-    text-align: center;
+    text-align: left;
     text-transform: uppercase;
     letter-spacing: 0.8px;
-    margin-bottom: 4px;
+    text-wrap: false;
 }
 
 /* DynEQ per-band expand/collapse chevron button */
@@ -1772,6 +1772,32 @@ scrollbar .thumb:hover {
 
 .dyneq-chevron:hover {
     color: #ffffff;
+}
+
+/* Compact DynEQ toggle (detector LINK): neutral when off, green when on (:checked). */
+.dyneq-toggle-button {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #2a3038, #1f242c);
+    border: 1px solid #3a4050;
+    border-radius: 3px;
+    color: #a0a8b4;
+    padding-left: 0px;
+    padding-right: 0px;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.dyneq-toggle-button:hover {
+    background-color: transparent;
+    border-color: #4a5160;
+}
+
+.dyneq-toggle-button:checked {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #1c2a1c, #142014);
+    border-color: #4dbd4d;
+    color: #8fe08f;
 }
 
 /* Responsive adjustments */

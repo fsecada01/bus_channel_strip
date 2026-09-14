@@ -325,8 +325,9 @@ pub fn create_bool_button<'c, 'p, F>(
     );
 }
 
-/// [`create_bool_button`] sized to sit beside `dyneq_slider!` rows in a DynEQ
-/// band column: 13 px label, 16 px button.
+/// Toggle sized to sit beside `dyneq_slider!` rows in a DynEQ band column: a
+/// 13 px spacer where the sliders' label row is, then a 16 px button that
+/// carries `label` itself.
 pub fn create_dyneq_bool_button<'c, 'p, F>(
     cx: &'c mut Context,
     label: &'static str,
@@ -339,12 +340,10 @@ pub fn create_dyneq_bool_button<'c, 'p, F>(
 {
     attach_tooltip(
         VStack::new(cx, |cx| {
-            Label::new(cx, label)
-                .class("dyneq-param-label")
-                .height(Pixels(13.0))
-                .width(Stretch(1.0));
+            Element::new(cx).height(Pixels(13.0)).width(Stretch(1.0));
             ParamButton::new(cx, param_map(params))
-                .class("bool-button")
+                .with_label(label)
+                .class("dyneq-toggle-button")
                 .height(Pixels(16.0))
                 .width(Stretch(1.0));
         })
