@@ -325,6 +325,38 @@ pub fn create_bool_button<'c, 'p, F>(
     );
 }
 
+/// [`create_bool_button`] sized to sit beside `dyneq_slider!` rows in a DynEQ
+/// band column: 13 px label, 16 px button.
+pub fn create_dyneq_bool_button<'c, 'p, F>(
+    cx: &'c mut Context,
+    label: &'static str,
+    tooltip_id: &'static str,
+    params: &'p Arc<BusChannelStripParams>,
+    param_map: F,
+) where
+    'p: 'c,
+    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
+{
+    attach_tooltip(
+        VStack::new(cx, |cx| {
+            Label::new(cx, label)
+                .class("dyneq-param-label")
+                .height(Pixels(13.0))
+                .width(Stretch(1.0));
+            ParamButton::new(cx, param_map(params))
+                .class("bool-button")
+                .height(Pixels(16.0))
+                .width(Stretch(1.0));
+        })
+        .class("param-control")
+        .width(Stretch(1.0))
+        .height(Auto)
+        .top(Pixels(0.0))
+        .bottom(Pixels(0.0)),
+        tooltip_id,
+    );
+}
+
 /// Collapsed-tab expand button: a full-size clickable `ParamButton` (empty
 /// label) with a `ChevronRight` [`Icon`] overlaid on top. Replaces the
 /// previous `"\u{25B6}"` glyph label — see `docs/adr` and roadmap v2.0 §4.4.

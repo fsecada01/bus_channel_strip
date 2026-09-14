@@ -3005,6 +3005,8 @@ struct BandMarker {
     freq_hz: f32,
     q: f32,
     detector_hz: f32,
+    detector_linked: bool,
+    threshold_db: f32,
 }
 
 #[cfg(feature = "dynamic_eq")]
@@ -3016,24 +3018,32 @@ fn dyneq_band_markers(params: &BusChannelStripParams) -> [BandMarker; 4] {
             freq_hz: p.dyneq_band1_freq.value(),
             q: p.dyneq_band1_q.value(),
             detector_hz: p.dyneq_band1_detector_freq.value(),
+            detector_linked: p.dyneq_band1_detector_link.value(),
+            threshold_db: p.dyneq_band1_threshold.value(),
         },
         BandMarker {
             enabled: p.dyneq_band2_enabled.value(),
             freq_hz: p.dyneq_band2_freq.value(),
             q: p.dyneq_band2_q.value(),
             detector_hz: p.dyneq_band2_detector_freq.value(),
+            detector_linked: p.dyneq_band2_detector_link.value(),
+            threshold_db: p.dyneq_band2_threshold.value(),
         },
         BandMarker {
             enabled: p.dyneq_band3_enabled.value(),
             freq_hz: p.dyneq_band3_freq.value(),
             q: p.dyneq_band3_q.value(),
             detector_hz: p.dyneq_band3_detector_freq.value(),
+            detector_linked: p.dyneq_band3_detector_link.value(),
+            threshold_db: p.dyneq_band3_threshold.value(),
         },
         BandMarker {
             enabled: p.dyneq_band4_enabled.value(),
             freq_hz: p.dyneq_band4_freq.value(),
             q: p.dyneq_band4_q.value(),
             detector_hz: p.dyneq_band4_detector_freq.value(),
+            detector_linked: p.dyneq_band4_detector_link.value(),
+            threshold_db: p.dyneq_band4_threshold.value(),
         },
     ]
 }
@@ -3350,7 +3360,7 @@ impl View for SpectrumCanvas {
             draw_vline(canvas, centre_x, bounds.y, bottom, &marker);
 
             let detector_x = x_of(band.detector_hz);
-            if (detector_x - centre_x).abs() >= 2.0 {
+            if !band.detector_linked && (detector_x - centre_x).abs() >= 2.0 {
                 marker.set_color(vg::Color::from_argb(150, r, g, bl));
                 let mut dashes = vg::PathBuilder::new();
                 let mut y = bounds.y;
@@ -3603,6 +3613,104 @@ impl View for LevelMeterBar {
                 &bar_paint,
             );
         }
+
+        cx.needs_redraw();
+    }
+}
+
+/// Scale of [`DynEqTriggerBar`], matching the THRESH slider above it.
+#[cfg(feature = "dynamic_eq")]
+const TRIGGER_BAR_FLOOR_DB: f32 = -60.0;
+#[cfg(feature = "dynamic_eq")]
+const TRIGGER_BAR_CEILING_DB: f32 = 0.0;
+/// Fall rate of the held reading: the full −60…0 dB scale in 1.5 s.
+#[cfg(feature = "dynamic_eq")]
+const TRIGGER_BAR_FALL_DB_PER_S: f32 = 40.0;
+
+/// Live detector level under a DynEQ band's THRESH slider. The fill is the
+/// loudest recent detector reading, held and falling at
+/// [`TRIGGER_BAR_FALL_DB_PER_S`]; it turns amber once it crosses the
+/// threshold, which is drawn as a tick.
+#[cfg(feature = "dynamic_eq")]
+struct DynEqTriggerBar {
+    gr_data: Arc<spectral::GainReductionData>,
+    params: Arc<BusChannelStripParams>,
+    band: usize,
+    held_db: std::cell::Cell<f32>,
+    last_frame: std::cell::Cell<Instant>,
+}
+
+#[cfg(feature = "dynamic_eq")]
+impl DynEqTriggerBar {
+    fn new(
+        cx: &mut Context,
+        gr_data: Arc<spectral::GainReductionData>,
+        params: Arc<BusChannelStripParams>,
+        band: usize,
+    ) -> Handle<'_, Self> {
+        Self {
+            gr_data,
+            params,
+            band,
+            held_db: std::cell::Cell::new(spectral::DYNEQ_TRIGGER_FLOOR_DB),
+            last_frame: std::cell::Cell::new(Instant::now()),
+        }
+        .build(cx, |_cx| {})
+    }
+}
+
+#[cfg(feature = "dynamic_eq")]
+impl View for DynEqTriggerBar {
+    fn element(&self) -> Option<&'static str> {
+        Some("dyneq-trigger-bar")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w < 1.0 || bounds.h < 1.0 {
+            return;
+        }
+
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame.get()).as_secs_f32();
+        self.last_frame.set(now);
+        let live_db = f32::from_bits(self.gr_data.trigger_db[self.band].load(Ordering::Relaxed));
+        let held_db = live_db.max(self.held_db.get() - TRIGGER_BAR_FALL_DB_PER_S * dt);
+        self.held_db.set(held_db);
+
+        let frac = |db: f32| {
+            ((db - TRIGGER_BAR_FLOOR_DB) / (TRIGGER_BAR_CEILING_DB - TRIGGER_BAR_FLOOR_DB))
+                .clamp(0.0, 1.0)
+        };
+        let threshold_db = dyneq_band_markers(&self.params)[self.band].threshold_db;
+
+        let mut paint = vg::Paint::default();
+        paint.set_style(vg::PaintStyle::Fill);
+        paint.set_color(vg::Color::from_argb(255, 18, 25, 31));
+        canvas.draw_rect(
+            vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h),
+            &paint,
+        );
+
+        let fill_w = frac(held_db) * bounds.w;
+        if fill_w > 0.5 {
+            paint.set_color(if held_db >= threshold_db {
+                vg::Color::from_argb(220, 220, 150, 50)
+            } else {
+                vg::Color::from_argb(220, 102, 204, 102)
+            });
+            canvas.draw_rect(
+                vg::Rect::from_xywh(bounds.x, bounds.y, fill_w, bounds.h),
+                &paint,
+            );
+        }
+
+        let tick_x = bounds.x + frac(threshold_db) * bounds.w;
+        paint.set_color(vg::Color::from_argb(230, 235, 235, 235));
+        canvas.draw_rect(
+            vg::Rect::from_xywh(tick_x - 0.5, bounds.y, 1.0, bounds.h),
+            &paint,
+        );
 
         cx.needs_redraw();
     }
@@ -3916,7 +4024,8 @@ macro_rules! dyneq_band_col {
      $enabled:ident, $solo:ident,
      $freq:ident, $thresh:ident, $ratio:ident,
      $q:ident, $mode:ident, $atk:ident, $rel:ident, $gain:ident,
-     $band_idx:literal) => {
+     $range:ident, $link:ident, $det_freq:ident,
+     $gr_data:expr, $band_idx:literal) => {
         VStack::new($cx, |cx| {
             // Band header: title + ON/SOLO buttons + chevron expand toggle
             HStack::new(cx, |cx| {
@@ -3970,9 +4079,28 @@ macro_rules! dyneq_band_col {
             // Tier 1 — always visible: MODE, FREQ, THRESH, GAIN
             dyneq_slider!(cx, "MODE", "dyneq_band1_mode", |p| &p.dynamic_eq.$mode);
             dyneq_slider!(cx, "FREQ", "dyneq_band1_freq", |p| &p.dynamic_eq.$freq);
-            dyneq_slider!(cx, "THRESH", "dyneq_band1_threshold", |p| &p
-                .dynamic_eq
-                .$thresh);
+            VStack::new(cx, |cx| {
+                Label::new(cx, "THRESH")
+                    .class("dyneq-param-label")
+                    .height(Pixels(13.0))
+                    .width(Stretch(1.0));
+                let params = cx.data::<Data>().params.clone();
+                components::attach_tooltip(
+                    components::param_slider_with_tooltip(cx, &params, |p| &p.dynamic_eq.$thresh)
+                        .height(Pixels(16.0)),
+                    "dyneq_band1_threshold",
+                );
+                DynEqTriggerBar::new(cx, $gr_data.clone(), params.clone(), $band_idx)
+                    .height(Pixels(3.0))
+                    .width(Stretch(1.0))
+                    .top(Pixels(2.0))
+                    .bottom(Pixels(0.0));
+            })
+            .class("param-control")
+            .width(Stretch(1.0))
+            .height(Auto)
+            .top(Pixels(0.0))
+            .bottom(Pixels(0.0));
             dyneq_slider!(cx, "GAIN", "dyneq_band1_gain", |p| &p.dynamic_eq.$gain);
 
             // Tier 2 — conditionally built when band is expanded.
@@ -3983,6 +4111,12 @@ macro_rules! dyneq_band_col {
             {
                 let expand_arc_tier2 = cx.data::<Data>().dyneq_band_expand.clone();
                 let dyneq_expand_gen_signal = cx.data::<Data>().dyneq_expand_gen;
+                let params_gen_signal = cx.data::<Data>().params_gen;
+                let link_params = cx.data::<Data>().params.clone();
+                let linked = Memo::<bool>::new(move |_| {
+                    params_gen_signal.get();
+                    link_params.dynamic_eq.$link.value()
+                });
                 Binding::new(cx, dyneq_expand_gen_signal, move |cx| {
                     if expand_arc_tier2[$band_idx].load(Ordering::Relaxed) {
                         VStack::new(cx, |cx| {
@@ -3996,6 +4130,34 @@ macro_rules! dyneq_band_col {
                             dyneq_slider!(cx, "REL ms", "dyneq_band1_release", |p| &p
                                 .dynamic_eq
                                 .$rel);
+                            dyneq_slider!(cx, "RANGE dB", "dyneq_band1_range", |p| &p
+                                .dynamic_eq
+                                .$range);
+                            HStack::new(cx, |cx| {
+                                VStack::new(cx, |cx| {
+                                    let params = cx.data::<Data>().params.clone();
+                                    components::create_dyneq_bool_button(
+                                        cx,
+                                        "LINK",
+                                        "dyneq_band1_detector_link",
+                                        &params,
+                                        |p| &p.dynamic_eq.$link,
+                                    );
+                                })
+                                .width(Pixels(44.0))
+                                .height(Auto)
+                                .top(Pixels(0.0))
+                                .bottom(Pixels(0.0));
+                                dyneq_slider!(cx, "DET FREQ", "dyneq_band1_detector_freq", |p| &p
+                                    .dynamic_eq
+                                    .$det_freq)
+                                .toggle_class("dyneq-dimmed", linked.map(|l| *l));
+                            })
+                            .width(Stretch(1.0))
+                            .height(Auto)
+                            .gap(Pixels(6.0))
+                            .top(Pixels(0.0))
+                            .bottom(Pixels(0.0));
                         })
                         .width(Stretch(1.0))
                         .height(Auto)
@@ -4209,6 +4371,8 @@ fn build_dyneq_back_view(
         // are expanded. SpectrumCanvas::draw reads cx.bounds() every frame.
         // min_height guards against the canvas disappearing on very short
         // windows.
+        #[cfg(feature = "dynamic_eq")]
+        let band_gr_data = gr_data.clone();
         let params = cx.data::<Data>().params.clone();
         SpectrumCanvas::new(
             cx,
@@ -4243,6 +4407,10 @@ fn build_dyneq_back_view(
                 dyneq_band1_attack,
                 dyneq_band1_release,
                 dyneq_band1_gain,
+                dyneq_band1_range,
+                dyneq_band1_detector_link,
+                dyneq_band1_detector_freq,
+                band_gr_data,
                 0
             );
 
@@ -4259,6 +4427,10 @@ fn build_dyneq_back_view(
                 dyneq_band2_attack,
                 dyneq_band2_release,
                 dyneq_band2_gain,
+                dyneq_band2_range,
+                dyneq_band2_detector_link,
+                dyneq_band2_detector_freq,
+                band_gr_data,
                 1
             );
 
@@ -4275,6 +4447,10 @@ fn build_dyneq_back_view(
                 dyneq_band3_attack,
                 dyneq_band3_release,
                 dyneq_band3_gain,
+                dyneq_band3_range,
+                dyneq_band3_detector_link,
+                dyneq_band3_detector_freq,
+                band_gr_data,
                 2
             );
 
@@ -4291,6 +4467,10 @@ fn build_dyneq_back_view(
                 dyneq_band4_attack,
                 dyneq_band4_release,
                 dyneq_band4_gain,
+                dyneq_band4_range,
+                dyneq_band4_detector_link,
+                dyneq_band4_detector_freq,
+                band_gr_data,
                 3
             );
         })

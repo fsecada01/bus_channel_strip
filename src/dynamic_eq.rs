@@ -17,6 +17,7 @@
 //   - Solo mode routes only the soloed band(s) through a RBJ bandpass filter
 //     so the user can isolate exactly the frequency range being processed.
 
+use crate::spectral::DYNEQ_TRIGGER_FLOOR_DB as TRIGGER_FLOOR_DB;
 use crate::svf::{flush_denormal, BellPrewarp, SvfCoefficients, SvfType, TptSvf};
 use nice_plug::buffer::Buffer;
 use nice_plug::prelude::Enum;
@@ -38,6 +39,9 @@ const KNEE_WIDTH_DB: f32 = 6.0;
 /// `(ratio - 1) × over_db` — over +1000 dB at ratio 20 with a low threshold —
 /// which overflows the bell filter to inf and latches NaN into its state.
 const MAX_EXPAND_BOOST_DB: f32 = 24.0;
+
+/// Default RANGE: the most gain change, in either direction, a band applies.
+pub const DEFAULT_RANGE_DB: f32 = 18.0;
 
 /// Soft-knee gain computer (Reiss 2012). Given the detector's dB-over-threshold
 /// value, the mode, and the compression ratio, returns the gain change in dB
@@ -230,6 +234,8 @@ struct DynamicBand {
     rms_state: [f32; 2],
     rms_coeff: f32,
     envelope: f32,
+    /// Loudest envelope since the last `DynamicEQ::take_trigger_levels_db`.
+    trigger_peak: f32,
     pub gain_reduction_db: f32,
     bell: BellPrewarp,
     bell_db_bits: u32,
@@ -243,6 +249,7 @@ struct DynamicBand {
     q: f32,
     threshold_db: f32, // stored directly in dB (no round-trip conversion)
     ratio: f32,
+    range_db: f32,
     attack_coeff: f32,
     release_coeff: f32,
     make_up_gain: f32, // linear gain
@@ -273,6 +280,7 @@ impl DynamicBand {
             rms_state: [0.0; 2],
             rms_coeff,
             envelope: 0.0,
+            trigger_peak: 0.0,
             gain_reduction_db: 0.0,
             bell: BandFilter::bell_prewarp(1000.0, 1.0, sample_rate),
             bell_db_bits: 0,
@@ -284,6 +292,7 @@ impl DynamicBand {
             q: 1.0,
             threshold_db: -18.0,
             ratio: 4.0,
+            range_db: DEFAULT_RANGE_DB,
             attack_coeff: 0.0,
             release_coeff: 0.0,
             make_up_gain: 1.0,
@@ -292,36 +301,33 @@ impl DynamicBand {
         }
     }
 
-    fn update_parameters(
-        &mut self,
-        mode: DynamicMode,
-        detector_freq: f32,
-        frequency: f32,
-        q: f32,
-        threshold_db: f32,
-        ratio: f32,
-        attack_ms: f32,
-        release_ms: f32,
-        make_up_gain_db: f32,
-        enabled: bool,
-        solo: bool,
-    ) {
-        self.mode = mode;
+    /// With `detector_link` on, the detector listens at `freq` and
+    /// `detector_freq` is ignored.
+    fn update_parameters(&mut self, p: &DynamicBandParams) {
+        let frequency = p.freq;
+        let q = p.q;
+        let detector_freq = if p.detector_link {
+            frequency
+        } else {
+            p.detector_freq
+        };
+        self.mode = p.mode;
         self.detector_freq = detector_freq;
         self.frequency = frequency;
         self.q = q;
-        self.threshold_db = threshold_db; // direct dB — no mapping needed
-        self.ratio = ratio;
+        self.threshold_db = p.threshold_db;
+        self.ratio = p.ratio;
+        self.range_db = p.range_db.max(0.0);
         let sr = self.sample_rate;
         // Standard exponential-decay IIR attack/release coefficients.
-        self.attack_coeff = (-1.0 / (attack_ms.max(0.01) * 0.001 * sr)).exp();
-        self.release_coeff = (-1.0 / (release_ms.max(0.01) * 0.001 * sr)).exp();
+        self.attack_coeff = (-1.0 / (p.attack_ms.max(0.01) * 0.001 * sr)).exp();
+        self.release_coeff = (-1.0 / (p.release_ms.max(0.01) * 0.001 * sr)).exp();
         // RMS coefficient is derived from a fixed 10 ms window; recomputed here
         // in case sample_rate changes between calls (cheap, runs once per buffer).
         self.rms_coeff = (-1.0 / (RMS_WINDOW_MS * 0.001 * sr)).exp();
-        self.make_up_gain = 10.0f32.powf(make_up_gain_db / 20.0);
-        self.enabled = enabled;
-        self.solo = solo;
+        self.make_up_gain = 10.0f32.powf(p.gain_db / 20.0);
+        self.enabled = p.enabled;
+        self.solo = p.solo;
 
         // Unity-peak bandpass: detection level == actual in-band signal level.
         for filter in &mut self.detector_filter {
@@ -379,6 +385,7 @@ impl DynamicBand {
             self.envelope = det + (self.envelope - det) * self.release_coeff;
         }
         self.envelope = flush_denormal(self.envelope);
+        self.trigger_peak = self.trigger_peak.max(self.envelope);
     }
 
     /// Compute the dynamic gain from the current envelope and apply the peaking
@@ -399,7 +406,8 @@ impl DynamicBand {
         let envelope_db = 20.0 * self.envelope.max(f32::MIN_POSITIVE).log10();
         let over_db = envelope_db - self.threshold_db;
 
-        let gain_change_db = compute_gain_change_db(over_db, self.mode, self.ratio);
+        let gain_change_db = compute_gain_change_db(over_db, self.mode, self.ratio)
+            .clamp(-self.range_db, self.range_db);
         self.gain_reduction_db = -gain_change_db;
 
         let bell_db = gain_change_db;
@@ -431,6 +439,7 @@ impl DynamicBand {
     fn reset(&mut self) {
         self.rms_state = [0.0; 2];
         self.envelope = 0.0;
+        self.trigger_peak = 0.0;
         self.gain_reduction_db = 0.0;
         self.bell_dirty = true;
         self.eq_filter_l.reset();
@@ -490,6 +499,30 @@ pub struct DynamicBandParams {
     pub gain_db: f32, // makeup gain in dB
     pub enabled: bool,
     pub solo: bool,
+    /// Detector listens at `freq` instead of `detector_freq`.
+    pub detector_link: bool,
+    /// Largest gain change, in dB, either direction.
+    pub range_db: f32,
+}
+
+impl Default for DynamicBandParams {
+    fn default() -> Self {
+        Self {
+            mode: DynamicMode::default(),
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -18.0,
+            ratio: 4.0,
+            attack_ms: 10.0,
+            release_ms: 100.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            detector_link: true,
+            range_db: DEFAULT_RANGE_DB,
+        }
+    }
 }
 
 // ── DynamicEQ ─────────────────────────────────────────────────────────────────
@@ -511,20 +544,8 @@ impl DynamicEQ {
     }
 
     pub fn update_parameters(&mut self, band_params: &[DynamicBandParams; 4]) {
-        for (i, p) in band_params.iter().enumerate() {
-            self.bands[i].update_parameters(
-                p.mode,
-                p.detector_freq,
-                p.freq,
-                p.q,
-                p.threshold_db,
-                p.ratio,
-                p.attack_ms,
-                p.release_ms,
-                p.gain_db,
-                p.enabled,
-                p.solo,
-            );
+        for (band, p) in self.bands.iter_mut().zip(band_params) {
+            band.update_parameters(p);
         }
     }
 
@@ -611,6 +632,19 @@ impl DynamicEQ {
             self.bands[2].gain_reduction_db,
             self.bands[3].gain_reduction_db,
         ]
+    }
+
+    /// Loudest detector envelope per band since the previous call, in dB,
+    /// floored at [`TRIGGER_FLOOR_DB`]. Resets the peaks.
+    pub fn take_trigger_levels_db(&mut self) -> [f32; 4] {
+        let mut levels = [TRIGGER_FLOOR_DB; 4];
+        for (level, band) in levels.iter_mut().zip(&mut self.bands) {
+            if band.enabled && band.trigger_peak > 0.0 {
+                *level = (20.0 * band.trigger_peak.log10()).max(TRIGGER_FLOOR_DB);
+            }
+            band.trigger_peak = 0.0;
+        }
+        levels
     }
 
     pub fn reset(&mut self) {
@@ -835,19 +869,20 @@ mod tests {
     fn test_dynamic_band_envelope_flushes_to_zero_on_silence() {
         let sr = 44100.0_f32;
         let mut band = DynamicBand::new(sr);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            1000.0,
-            1000.0,
-            1.0,
-            -18.0,
-            4.0,
-            1.0,
-            10.0, // 10 ms release — decays through subnormals within the sample budget
-            0.0,
-            true,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -18.0,
+            ratio: 4.0,
+            attack_ms: 1.0,
+            release_ms: 10.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         // Drive with a 1 kHz sine (matches detector center) so the bandpass
         // detector actually passes the signal and envelope can build.
         for n in 0..2000 {
@@ -886,19 +921,20 @@ mod tests {
     fn test_dynamic_band_disabled_passes_through() {
         let sr = 44100.0;
         let mut band = DynamicBand::new(sr);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            1000.0,
-            1000.0,
-            1.0,
-            -18.0,
-            4.0,
-            5.0,
-            100.0,
-            0.0,
-            false,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -18.0,
+            ratio: 4.0,
+            attack_ms: 5.0,
+            release_ms: 100.0,
+            gain_db: 0.0,
+            enabled: false,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         // When disabled, process_sample should return input unchanged
         let input = 0.7_f32;
         let out = band.process_sample(input);
@@ -911,19 +947,20 @@ mod tests {
     #[test]
     fn test_dynamic_band_reset_clears_envelope() {
         let mut band = DynamicBand::new(44100.0);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            1000.0,
-            1000.0,
-            1.0,
-            -18.0,
-            4.0,
-            0.1,
-            10.0,
-            0.0,
-            true,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -18.0,
+            ratio: 4.0,
+            attack_ms: 0.1,
+            release_ms: 10.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         for _ in 0..500 {
             band.process_sample(1.0);
         }
@@ -942,19 +979,20 @@ mod tests {
     fn test_dynamic_band_compress_mode_reduces_loud_signal() {
         let sr = 44100.0;
         let mut band = DynamicBand::new(sr);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            1000.0,
-            1000.0,
-            1.0,
-            -30.0, // very sensitive threshold
-            4.0,
-            0.001,
-            50.0,
-            0.0,
-            true,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -30.0,
+            ratio: 4.0,
+            attack_ms: 0.001,
+            release_ms: 50.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         // Warm up the envelope with loud signal
         for _ in 0..2000 {
             band.process_sample(1.0);
@@ -970,19 +1008,20 @@ mod tests {
     fn test_dynamic_band_gate_mode_attenuates_quiet_signal() {
         let sr = 44100.0;
         let mut band = DynamicBand::new(sr);
-        band.update_parameters(
-            DynamicMode::Gate,
-            1000.0,
-            1000.0,
-            1.0,
-            -6.0, // high threshold — quiet signal is below it
-            4.0,
-            0.1,
-            50.0,
-            0.0,
-            true,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::Gate,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -6.0,
+            ratio: 4.0,
+            attack_ms: 0.1,
+            release_ms: 50.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         // Process a quiet signal below threshold
         for _ in 0..200 {
             band.process_sample(0.01);
@@ -1085,19 +1124,20 @@ mod tests {
         // performs RMS integration.
         let sr = 44100.0_f32;
         let mut band = DynamicBand::new(sr);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            1000.0,
-            1000.0,
-            1.0,
-            -60.0, // threshold low enough to see detection without gain collapse
-            1.0,   // ratio 1.0 (no compression applied, just detection)
-            0.1,   // fast attack so envelope tracks
-            50.0,  // moderate release
-            0.0,
-            true,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -60.0,
+            ratio: 1.0,
+            attack_ms: 0.1,
+            release_ms: 50.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         let amp = 0.5_f32;
         // Let the detector settle: >> attack, release, and RMS window combined.
         for n in 0..50_000 {
@@ -1130,19 +1170,20 @@ mod tests {
         let attack_ms = 5.0_f32;
         let expected = (-1.0_f32 / (attack_ms * 0.001 * sr)).exp();
         let mut band = DynamicBand::new(sr);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            1000.0,
-            1000.0,
-            1.0,
-            -18.0,
-            4.0,
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 1000.0,
+            freq: 1000.0,
+            q: 1.0,
+            threshold_db: -18.0,
+            ratio: 4.0,
             attack_ms,
-            100.0,
-            0.0,
-            true,
-            false,
-        );
+            release_ms: 100.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         assert!(
             (band.attack_coeff - expected).abs() < 1e-7,
             "Attack coeff: {} vs expected {}",
@@ -1154,19 +1195,20 @@ mod tests {
     #[test]
     fn test_dynamic_band_process_produces_finite_output() {
         let mut band = DynamicBand::new(44100.0);
-        band.update_parameters(
-            DynamicMode::CompressDownward,
-            500.0,
-            500.0,
-            1.5,
-            -18.0,
-            8.0,
-            1.0,
-            100.0,
-            0.0,
-            true,
-            false,
-        );
+        band.update_parameters(&DynamicBandParams {
+            mode: DynamicMode::CompressDownward,
+            detector_freq: 500.0,
+            freq: 500.0,
+            q: 1.5,
+            threshold_db: -18.0,
+            ratio: 8.0,
+            attack_ms: 1.0,
+            release_ms: 100.0,
+            gain_db: 0.0,
+            enabled: true,
+            solo: false,
+            ..DynamicBandParams::default()
+        });
         for i in 0..500 {
             let input = if i % 3 == 0 { 1.0 } else { 0.1 };
             let out = band.process_sample(input);
@@ -1229,6 +1271,7 @@ mod tests {
                 gain_db: 18.0,
                 enabled: true,
                 solo: false,
+                ..DynamicBandParams::default()
             }; 4],
         );
         for block in 0..20 {
@@ -1260,6 +1303,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: true,
                 solo: false,
+                ..DynamicBandParams::default()
             }; 4],
         );
 
@@ -1304,6 +1348,7 @@ mod tests {
             gain_db: 0.0,
             enabled: true,
             solo: false,
+            ..DynamicBandParams::default()
         }; 4];
         deq.update_parameters(&params);
     }
@@ -1361,6 +1406,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: false, // band 0 off
                 solo: false,
+                ..DynamicBandParams::default()
             },
             DynamicBandParams {
                 mode: DynamicMode::CompressDownward,
@@ -1374,6 +1420,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: true,
                 solo: false,
+                ..DynamicBandParams::default()
             },
             DynamicBandParams {
                 mode: DynamicMode::CompressDownward,
@@ -1387,6 +1434,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: false,
                 solo: false,
+                ..DynamicBandParams::default()
             },
             DynamicBandParams {
                 mode: DynamicMode::CompressDownward,
@@ -1400,6 +1448,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: false,
                 solo: false,
+                ..DynamicBandParams::default()
             },
         ];
         deq_a.update_parameters(&params_a);
@@ -1478,6 +1527,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: true,
                 solo: false,
+                ..DynamicBandParams::default()
             },
             // Remaining bands disabled.
             DynamicBandParams {
@@ -1492,6 +1542,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: false,
                 solo: false,
+                ..DynamicBandParams::default()
             },
             DynamicBandParams {
                 mode: DynamicMode::CompressDownward,
@@ -1505,6 +1556,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: false,
                 solo: false,
+                ..DynamicBandParams::default()
             },
             DynamicBandParams {
                 mode: DynamicMode::CompressDownward,
@@ -1518,6 +1570,7 @@ mod tests {
                 gain_db: 0.0,
                 enabled: false,
                 solo: false,
+                ..DynamicBandParams::default()
             },
         ];
         deq.update_parameters(&params);
@@ -1615,6 +1668,7 @@ mod tests {
             gain_db: 0.0,
             enabled: false,
             solo: false,
+            ..DynamicBandParams::default()
         };
         deq.update_parameters(&[disabled, disabled, disabled, disabled]);
         deq.process(&mut buf);
@@ -1650,6 +1704,7 @@ mod tests {
             gain_db: 0.0,
             enabled: true,
             solo: false,
+            ..DynamicBandParams::default()
         }
     }
 
@@ -1719,19 +1774,20 @@ mod tests {
         let mut freq = 1000.0;
         for i in 0..9600 {
             if i == 0 || i == 4800 {
-                band.update_parameters(
-                    DynamicMode::CompressDownward,
+                band.update_parameters(&DynamicBandParams {
+                    mode: DynamicMode::CompressDownward,
+                    detector_freq: freq,
                     freq,
-                    freq,
-                    1.0,
-                    -40.0,
-                    4.0,
-                    1.0,
-                    50.0,
-                    0.0,
-                    true,
-                    false,
-                );
+                    q: 1.0,
+                    threshold_db: -40.0,
+                    ratio: 4.0,
+                    attack_ms: 1.0,
+                    release_ms: 50.0,
+                    gain_db: 0.0,
+                    enabled: true,
+                    solo: false,
+                    ..DynamicBandParams::default()
+                });
                 freq = 2000.0;
             }
             let level = if (i / 480) % 2 == 0 { 0.8 } else { 0.05 };
@@ -1745,24 +1801,139 @@ mod tests {
         assert!(band.gain_reduction_db.abs() > 0.0 || band.envelope > 0.0);
     }
 
+    /// Band 0's gain reduction after one second of a `freq` sine on both channels.
+    fn settled_gr_db(params: DynamicBandParams, sr: f32, freq: f32, amp: f32) -> f32 {
+        let n = 512;
+        let mut deq = DynamicEQ::new(sr);
+        deq.update_parameters(&[params; 4]);
+        for block in 0..(sr as usize) / n {
+            let mut l = sine_block(freq, sr, block * n, n, amp);
+            let mut r = l.clone();
+            process_stereo_block(&mut deq, &mut l, &mut r);
+        }
+        deq.get_gain_reduction_db()[0]
+    }
+
+    #[test]
+    fn test_detector_link_ignores_detector_freq() {
+        let sr = 48_000.0_f32;
+        let band = |detector_freq, detector_link| DynamicBandParams {
+            detector_freq,
+            freq: 3000.0,
+            threshold_db: -30.0,
+            detector_link,
+            ..DynamicBandParams::default()
+        };
+        let low = settled_gr_db(band(100.0, true), sr, 3000.0, 0.5);
+        let high = settled_gr_db(band(5000.0, true), sr, 3000.0, 0.5);
+        assert!(
+            low > 1.0,
+            "linked band should compress a loud tone, GR {low}"
+        );
+        assert!(
+            (low - high).abs() < 1e-3,
+            "linked GR moved with DET FREQ: {low} vs {high}"
+        );
+        let unlinked = settled_gr_db(band(100.0, false), sr, 3000.0, 0.5);
+        assert!(
+            unlinked < low - 6.0,
+            "unlinked detector at 100 Hz should barely see a 3 kHz tone: {unlinked} vs {low}"
+        );
+    }
+
+    #[test]
+    fn test_range_caps_compress_and_gate() {
+        let sr = 48_000.0_f32;
+        let range_db = 6.0;
+        for (mode, threshold_db, amp) in [
+            (DynamicMode::CompressDownward, -60.0, 0.9),
+            (DynamicMode::Gate, 0.0, 0.001),
+        ] {
+            let params = DynamicBandParams {
+                mode,
+                threshold_db,
+                ratio: 20.0,
+                attack_ms: 1.0,
+                range_db,
+                ..DynamicBandParams::default()
+            };
+            let gr = settled_gr_db(params, sr, 1000.0, amp);
+            assert!(
+                (gr - range_db).abs() < 1e-3,
+                "{mode:?}: GR {gr} dB should sit at RANGE {range_db} dB"
+            );
+        }
+        let boost = -settled_gr_db(
+            DynamicBandParams {
+                mode: DynamicMode::ExpandUpward,
+                threshold_db: -60.0,
+                ratio: 20.0,
+                attack_ms: 1.0,
+                range_db: 30.0,
+                ..DynamicBandParams::default()
+            },
+            sr,
+            1000.0,
+            0.9,
+        );
+        assert!(
+            (boost - MAX_EXPAND_BOOST_DB).abs() < 1e-3,
+            "Expand Up boost {boost} dB must stay at its {MAX_EXPAND_BOOST_DB} dB cap above RANGE"
+        );
+    }
+
+    #[test]
+    fn test_trigger_levels_report_envelope_peak_and_reset() {
+        let sr = 48_000.0_f32;
+        let n = 512;
+        let amp = 0.5_f32;
+        let mut params = [detect_only(1000.0, 1.0); 4];
+        params[3].enabled = false;
+        let mut deq = DynamicEQ::new(sr);
+        deq.update_parameters(&params);
+        let mut levels = [TRIGGER_FLOOR_DB; 4];
+        for block in 0..(sr as usize) / n {
+            let mut l = sine_block(1000.0, sr, block * n, n, amp);
+            let mut r = l.clone();
+            process_stereo_block(&mut deq, &mut l, &mut r);
+            levels = deq.take_trigger_levels_db();
+        }
+        let want_db = 20.0 * (amp / std::f32::consts::SQRT_2).log10();
+        assert!(
+            (levels[0] - want_db).abs() < 1.0,
+            "trigger {} dB, tone RMS {want_db} dB",
+            levels[0]
+        );
+        assert_eq!(
+            levels[3], TRIGGER_FLOOR_DB,
+            "disabled band reports the floor"
+        );
+        assert_eq!(
+            deq.take_trigger_levels_db()[0],
+            TRIGGER_FLOOR_DB,
+            "taking the levels resets the peak"
+        );
+    }
+
     #[test]
     fn test_dynamic_eq_reset_clears_all_bands() {
         let mut deq = DynamicEQ::new(44100.0);
         // Manually drive envelope in all bands
         for band in &mut deq.bands {
-            band.update_parameters(
-                DynamicMode::CompressDownward,
-                1000.0,
-                1000.0,
-                1.0,
-                -18.0,
-                4.0,
-                0.1,
-                10.0,
-                0.0,
-                true,
-                false,
-            );
+            band.update_parameters(&DynamicBandParams {
+                mode: DynamicMode::CompressDownward,
+                detector_freq: 1000.0,
+                freq: 1000.0,
+                q: 1.0,
+                threshold_db: -18.0,
+                ratio: 4.0,
+                attack_ms: 0.1,
+                release_ms: 10.0,
+                gain_db: 0.0,
+                enabled: true,
+                solo: false,
+                ..DynamicBandParams::default()
+            });
             for _ in 0..200 {
                 band.process_sample(1.0);
             }

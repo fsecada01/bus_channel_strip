@@ -92,7 +92,11 @@ pub fn get(param_id: &str) -> Option<&'static str> {
         "dyneq_band1_enabled" | "dyneq_band2_enabled" | "dyneq_band3_enabled" | "dyneq_band4_enabled" =>
             Some("Enables or disables this band without resetting its settings."),
         "dyneq_band1_detector_freq" | "dyneq_band2_detector_freq" | "dyneq_band3_detector_freq" | "dyneq_band4_detector_freq" =>
-            Some("Sidechain detector frequency for this band — lets the trigger listen at a different frequency than the filter itself acts on."),
+            Some("Frequency the level detector listens at when LINK is off — lets the band react to energy somewhere other than where it cuts or boosts."),
+        "dyneq_band1_detector_link" | "dyneq_band2_detector_link" | "dyneq_band3_detector_link" | "dyneq_band4_detector_link" =>
+            Some("On: the detector listens at FREQ, so the band reacts to its own content. Off: the detector listens at DET FREQ instead."),
+        "dyneq_band1_range" | "dyneq_band2_range" | "dyneq_band3_range" | "dyneq_band4_range" =>
+            Some("Most gain change, in dB, this band can apply in either direction, however far past threshold the signal goes."),
         "dyneq_band1_mode" | "dyneq_band2_mode" | "dyneq_band3_mode" | "dyneq_band4_mode" =>
             Some("This band's dynamic behavior: Compress Down (reduce above threshold), Expand Up (boost above threshold), or Gate (cut below threshold)."),
         "dyneq_band1_solo" | "dyneq_band2_solo" | "dyneq_band3_solo" | "dyneq_band4_solo" =>

@@ -575,6 +575,8 @@ impl BusChannelStrip {
                 gain_db: self.params.dynamic_eq.dyneq_band1_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band1_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band1_solo.value(),
+                detector_link: self.params.dynamic_eq.dyneq_band1_detector_link.value(),
+                range_db: self.params.dynamic_eq.dyneq_band1_range.value(),
             },
             DynamicBandParams {
                 mode: self.params.dynamic_eq.dyneq_band2_mode.value(),
@@ -588,6 +590,8 @@ impl BusChannelStrip {
                 gain_db: self.params.dynamic_eq.dyneq_band2_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band2_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band2_solo.value(),
+                detector_link: self.params.dynamic_eq.dyneq_band2_detector_link.value(),
+                range_db: self.params.dynamic_eq.dyneq_band2_range.value(),
             },
             DynamicBandParams {
                 mode: self.params.dynamic_eq.dyneq_band3_mode.value(),
@@ -601,6 +605,8 @@ impl BusChannelStrip {
                 gain_db: self.params.dynamic_eq.dyneq_band3_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band3_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band3_solo.value(),
+                detector_link: self.params.dynamic_eq.dyneq_band3_detector_link.value(),
+                range_db: self.params.dynamic_eq.dyneq_band3_range.value(),
             },
             DynamicBandParams {
                 mode: self.params.dynamic_eq.dyneq_band4_mode.value(),
@@ -614,6 +620,8 @@ impl BusChannelStrip {
                 gain_db: self.params.dynamic_eq.dyneq_band4_gain.value(),
                 enabled: self.params.dynamic_eq.dyneq_band4_enabled.value(),
                 solo: self.params.dynamic_eq.dyneq_band4_solo.value(),
+                detector_link: self.params.dynamic_eq.dyneq_band4_detector_link.value(),
+                range_db: self.params.dynamic_eq.dyneq_band4_range.value(),
             },
         ];
         self.dynamic_eq.update_parameters(&dyneq_params);
@@ -628,6 +636,10 @@ impl BusChannelStrip {
             let gr = self.dynamic_eq.get_gain_reduction_db();
             for (i, &db) in gr.iter().enumerate() {
                 self.gr_data.bands[i].store(db.to_bits(), Ordering::Relaxed);
+            }
+            let trigger = self.dynamic_eq.take_trigger_levels_db();
+            for (slot, db) in self.gr_data.trigger_db.iter().zip(trigger) {
+                slot.store(db.to_bits(), Ordering::Relaxed);
             }
         }
 

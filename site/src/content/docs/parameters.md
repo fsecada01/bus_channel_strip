@@ -76,7 +76,9 @@ Pultec EQP-1A style passive equalizer with simultaneous boost/cut and tube satur
 
 ## Dynamic EQ
 
-4-band frequency-dependent compressor. Each band has independent frequency, threshold, ratio, attack/release, gain, Q, detector frequency, processing mode, enabled, and solo controls. Requires the `dynamic_eq` feature flag.
+4-band frequency-dependent compressor. Each band has independent frequency, threshold, ratio, attack/release, gain, Q, range, detector link, detector frequency, processing mode, enabled, and solo controls. Requires the `dynamic_eq` feature flag.
+
+Each band's detector listens at the band's own frequency while **Det Link** is on (the default); switch it off to listen at **Detector Freq** instead. **Range** caps how far the band's gain can move in either direction. A thin bar under THRESH in the DynEQ view shows the detector's live level against the threshold.
 
 Bands: Band 1 (Low, default 200 Hz), Band 2 (Low-Mid, default 800 Hz), Band 3 (High-Mid, default 3 kHz), Band 4 (High, default 8 kHz).
 
@@ -95,9 +97,11 @@ The table below shows Band 1 parameters. Bands 2–4 follow identical structure 
 | DynEQ 1 Gain | `dyneq_band1_gain` | -18 to +18 | 0 | dB | Band gain |
 | DynEQ 1 Q | `dyneq_band1_q` | 0.3–8 | 1 | — | Band Q. Skewed range |
 | DynEQ 1 On | `dyneq_band1_enabled` | on/off | on | — | Enable/disable this band |
-| DynEQ 1 Detector Freq | `dyneq_band1_detector_freq` | 20–2000 | 200 | Hz | Sidechain detector frequency |
-| DynEQ 1 Mode | `dyneq_band1_mode` | enum | CompressDownward | — | `CompressDownward` or `ExpandUpward` |
+| DynEQ 1 Detector Freq | `dyneq_band1_detector_freq` | 20–2000 | 200 | Hz | Detector frequency, used only while Det Link is off |
+| DynEQ 1 Mode | `dyneq_band1_mode` | enum | CompressDownward | — | `CompressDownward`, `ExpandUpward`, or `Gate` |
 | DynEQ 1 Solo | `dyneq_band1_solo` | on/off | off | — | Solo this band for monitoring |
+| DynEQ 1 Det Link | `dyneq_band1_detector_link` | on/off | on | — | Detector listens at Freq instead of Detector Freq |
+| DynEQ 1 Range | `dyneq_band1_range` | 0–30 | 18 | dB | Largest gain change in either direction |
 
 ### Band 2 (Low-Mid) — default 800 Hz
 
@@ -114,6 +118,8 @@ The table below shows Band 1 parameters. Bands 2–4 follow identical structure 
 | DynEQ 2 Detector Freq | `dyneq_band2_detector_freq` | 200–5000 | 800 | Hz | |
 | DynEQ 2 Mode | `dyneq_band2_mode` | enum | CompressDownward | — | |
 | DynEQ 2 Solo | `dyneq_band2_solo` | on/off | off | — | |
+| DynEQ 2 Det Link | `dyneq_band2_detector_link` | on/off | on | — | |
+| DynEQ 2 Range | `dyneq_band2_range` | 0–30 | 18 | dB | |
 
 ### Band 3 (High-Mid) — default 3 kHz
 
@@ -130,6 +136,8 @@ The table below shows Band 1 parameters. Bands 2–4 follow identical structure 
 | DynEQ 3 Det Freq | `dyneq_band3_detector_freq` | 1000–15000 | 3000 | Hz | |
 | DynEQ 3 Mode | `dyneq_band3_mode` | enum | CompressDownward | — | |
 | DynEQ 3 Solo | `dyneq_band3_solo` | on/off | off | — | |
+| DynEQ 3 Det Link | `dyneq_band3_detector_link` | on/off | on | — | |
+| DynEQ 3 Range | `dyneq_band3_range` | 0–30 | 18 | dB | |
 
 ### Band 4 (High) — default 8 kHz
 
@@ -146,6 +154,8 @@ The table below shows Band 1 parameters. Bands 2–4 follow identical structure 
 | DynEQ 4 Det Freq | `dyneq_band4_detector_freq` | 3000–20000 | 8000 | Hz | |
 | DynEQ 4 Mode | `dyneq_band4_mode` | enum | CompressDownward | — | |
 | DynEQ 4 Solo | `dyneq_band4_solo` | on/off | off | — | |
+| DynEQ 4 Det Link | `dyneq_band4_detector_link` | on/off | on | — | |
+| DynEQ 4 Range | `dyneq_band4_range` | 0–30 | 18 | dB | |
 
 ---
 

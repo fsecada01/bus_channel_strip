@@ -447,22 +447,24 @@ impl Default for AnalysisResult {
 // the GUI thread for the spectrum overlay. Relaxed ordering is sufficient —
 // the GUI only uses these values for display; a stale read is acceptable.
 
+/// Quietest level, in dB, a DynEQ band's trigger meter reports.
+pub const DYNEQ_TRIGGER_FLOOR_DB: f32 = -90.0;
+
 /// Lock-free per-band gain reduction (dB) shared with the GUI thread.
 pub struct GainReductionData {
     /// Gain reduction amount in dB for each of the 4 DynEQ bands, as raw f32
     /// bits. 0.0 = no reduction; positive values = attenuation amount.
     pub bands: [AtomicU32; 4],
+    /// Loudest detector level per band over the last audio block, in dB, as
+    /// raw f32 bits. Floored at [`DYNEQ_TRIGGER_FLOOR_DB`].
+    pub trigger_db: [AtomicU32; 4],
 }
 
 impl GainReductionData {
     pub fn new() -> Self {
         Self {
-            bands: [
-                AtomicU32::new(0),
-                AtomicU32::new(0),
-                AtomicU32::new(0),
-                AtomicU32::new(0),
-            ],
+            bands: std::array::from_fn(|_| AtomicU32::new(0)),
+            trigger_db: std::array::from_fn(|_| AtomicU32::new(DYNEQ_TRIGGER_FLOOR_DB.to_bits())),
         }
     }
 }

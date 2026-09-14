@@ -1501,6 +1501,11 @@ scrollbar .thumb:hover {
     color: #9fcf9f;
 }
 
+/* A control whose value is currently ignored (DET FREQ while LINK is on). */
+.dyneq-dimmed {
+    opacity: 0.4;
+}
+
 .dyneq-back-title {
     font-size: 20px;
     font-weight: 700;

@@ -43,6 +43,12 @@ pub struct DynamicEqParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band1_solo"]
     pub dyneq_band1_solo: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band1_detector_link"]
+    pub dyneq_band1_detector_link: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band1_range"]
+    pub dyneq_band1_range: FloatParam,
 
     // Band 2 (Low-Mid) - 800Hz default
     #[cfg(feature = "dynamic_eq")]
@@ -78,6 +84,12 @@ pub struct DynamicEqParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band2_solo"]
     pub dyneq_band2_solo: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band2_detector_link"]
+    pub dyneq_band2_detector_link: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band2_range"]
+    pub dyneq_band2_range: FloatParam,
 
     // Band 3 (High-Mid) - 3kHz default
     #[cfg(feature = "dynamic_eq")]
@@ -113,6 +125,12 @@ pub struct DynamicEqParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band3_solo"]
     pub dyneq_band3_solo: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band3_detector_link"]
+    pub dyneq_band3_detector_link: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band3_range"]
+    pub dyneq_band3_range: FloatParam,
 
     // Band 4 (High) - 8kHz default
     #[cfg(feature = "dynamic_eq")]
@@ -148,6 +166,12 @@ pub struct DynamicEqParams {
     #[cfg(feature = "dynamic_eq")]
     #[id = "dyneq_band4_solo"]
     pub dyneq_band4_solo: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band4_detector_link"]
+    pub dyneq_band4_detector_link: BoolParam,
+    #[cfg(feature = "dynamic_eq")]
+    #[id = "dyneq_band4_range"]
+    pub dyneq_band4_range: FloatParam,
 }
 
 impl Default for DynamicEqParams {
@@ -262,6 +286,17 @@ impl Default for DynamicEqParams {
             dyneq_band1_mode: EnumParam::new("DynEQ 1 Mode", DynamicMode::CompressDownward),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band1_solo: BoolParam::new("DynEQ 1 Solo", false),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band1_detector_link: BoolParam::new("DynEQ 1 Det Link", true),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band1_range: FloatParam::new(
+                "DynEQ 1 Range",
+                18.0,
+                FloatRange::Linear { min: 0.0, max: 30.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.5)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 2 (Low-Mid) - 800Hz (similar pattern, different defaults)
@@ -307,6 +342,17 @@ impl Default for DynamicEqParams {
             dyneq_band2_mode: EnumParam::new("DynEQ 2 Mode", DynamicMode::CompressDownward),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band2_solo: BoolParam::new("DynEQ 2 Solo", false),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band2_detector_link: BoolParam::new("DynEQ 2 Det Link", true),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band2_range: FloatParam::new(
+                "DynEQ 2 Range",
+                18.0,
+                FloatRange::Linear { min: 0.0, max: 30.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.5)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 3 (High-Mid) - 3kHz
@@ -350,6 +396,17 @@ impl Default for DynamicEqParams {
             dyneq_band3_mode: EnumParam::new("DynEQ 3 Mode", DynamicMode::CompressDownward),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band3_solo: BoolParam::new("DynEQ 3 Solo", false),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band3_detector_link: BoolParam::new("DynEQ 3 Det Link", true),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band3_range: FloatParam::new(
+                "DynEQ 3 Range",
+                18.0,
+                FloatRange::Linear { min: 0.0, max: 30.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.5)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
 
             #[cfg(feature = "dynamic_eq")]
             // Band 4 (High) - 8kHz
@@ -393,6 +450,17 @@ impl Default for DynamicEqParams {
             dyneq_band4_mode: EnumParam::new("DynEQ 4 Mode", DynamicMode::CompressDownward),
             #[cfg(feature = "dynamic_eq")]
             dyneq_band4_solo: BoolParam::new("DynEQ 4 Solo", false),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band4_detector_link: BoolParam::new("DynEQ 4 Det Link", true),
+            #[cfg(feature = "dynamic_eq")]
+            dyneq_band4_range: FloatParam::new(
+                "DynEQ 4 Range",
+                18.0,
+                FloatRange::Linear { min: 0.0, max: 30.0 },
+            )
+            .with_unit(" dB")
+            .with_step_size(0.5)
+            .with_value_to_string(formatters::v2s_f32_rounded(1)),
         }
     }
 }
