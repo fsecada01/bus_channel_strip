@@ -2993,6 +2993,12 @@ struct SpectrumCanvas {
     analysis_result: Arc<spectral::AnalysisResult>,
     display_overlap: RefCell<Vec<f32>>,
     gr_data: Arc<spectral::GainReductionData>,
+    #[cfg(feature = "diagnostics")]
+    diag_draws: std::cell::Cell<u64>,
+    #[cfg(feature = "diagnostics")]
+    diag_new_frames: std::cell::Cell<u64>,
+    #[cfg(feature = "diagnostics")]
+    diag_last_log: std::cell::Cell<Instant>,
 }
 
 impl SpectrumCanvas {
@@ -3010,6 +3016,12 @@ impl SpectrumCanvas {
             analysis_result,
             display_overlap: RefCell::new(vec![0.0_f32; spectral::SPECTRUM_BINS]),
             gr_data,
+            #[cfg(feature = "diagnostics")]
+            diag_draws: std::cell::Cell::new(0),
+            #[cfg(feature = "diagnostics")]
+            diag_new_frames: std::cell::Cell::new(0),
+            #[cfg(feature = "diagnostics")]
+            diag_last_log: std::cell::Cell::new(Instant::now()),
         }
         .build(cx, |_cx| {})
     }
@@ -3051,6 +3063,78 @@ impl View for SpectrumCanvas {
 
         let bins = self.display_bins.borrow();
         let overlap = self.display_overlap.borrow();
+
+        // Every 2 s append the probe counters and per-stage levels to %TEMP%\bcs_diag.log.
+        #[cfg(feature = "diagnostics")]
+        {
+            self.diag_draws.set(self.diag_draws.get() + 1);
+            if has_new_data {
+                self.diag_new_frames.set(self.diag_new_frames.get() + 1);
+            }
+            let now = Instant::now();
+            if now.duration_since(self.diag_last_log.get()).as_secs_f32() >= 2.0 {
+                self.diag_last_log.set(now);
+                let (blocks, frames_written, peak, non_finite_blocks) =
+                    self.spectrum_data.probe.take_counters();
+                let max_bin = bins.iter().copied().fold(0.0_f32, f32::max);
+                let line = format!(
+                    "draws={} new_frames_read={} audio_blocks={} fft_frames_written={} \
+                 non_finite_blocks={} post_dyneq_peak_dbfs={:.1} max_display_bin_db={:.1} \
+                 bounds={:.0}x{:.0} sr={}\n",
+                    self.diag_draws.get(),
+                    self.diag_new_frames.get(),
+                    blocks,
+                    frames_written,
+                    non_finite_blocks,
+                    20.0 * peak.max(1e-9).log10(),
+                    20.0 * max_bin.max(1e-9).log10(),
+                    bounds.w,
+                    bounds.h,
+                    f32::from_bits(self.sample_rate.value.load(Ordering::Relaxed)),
+                );
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(std::env::temp_dir().join("bcs_diag.log"))
+                {
+                    use std::io::Write;
+                    let _ = f.write_all(line.as_bytes());
+                    let (stages, layout, order) = self.spectrum_data.probe.take_stages();
+                    let db = |p: f32| {
+                        if p == crate::diagnostics::STAGE_NOT_RUN {
+                            "skip".to_string()
+                        } else {
+                            format!("{:.1}", 20.0 * p.max(1e-9).log10())
+                        }
+                    };
+                    let order_digits = (0..7)
+                        .map(|i| ((order >> (3 * i)) & 7).to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let stage_line = format!(
+                    "  host_in={} s1={} s2={} s3={} s4={} s5={} s6={} s7={} plugin_out={} sc_in={} \
+                     main_ch={} aux_buses={} aux_ch={} samples={} global_bypass={} order={}\n",
+                    db(stages[0]),
+                    db(stages[1]),
+                    db(stages[2]),
+                    db(stages[3]),
+                    db(stages[4]),
+                    db(stages[5]),
+                    db(stages[6]),
+                    db(stages[7]),
+                    db(stages[8]),
+                    db(stages[9]),
+                    (layout >> 24) & 0x7F,
+                    (layout >> 20) & 0xF,
+                    (layout >> 16) & 0xF,
+                    layout & 0xFFFF,
+                    layout >> 31,
+                    order_digits,
+                );
+                    let _ = f.write_all(stage_line.as_bytes());
+                }
+            }
+        }
 
         // ── Background ──────────────────────────────────────────────────────
         let bg_rect = vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h);

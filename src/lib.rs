@@ -3,6 +3,8 @@ use std::sync::Arc;
 #[cfg(test)]
 mod biquad_sanity_test;
 mod detune;
+#[cfg(feature = "diagnostics")]
+mod diagnostics;
 mod hysteresis;
 mod oversampler;
 mod params;
@@ -616,6 +618,11 @@ impl BusChannelStrip {
             }
         }
 
+        #[cfg(feature = "diagnostics")]
+        self.spectrum_data
+            .probe
+            .note_block(diagnostics::peak(buffer.as_slice_immutable()));
+
         // Accumulate post-DynEQ samples into the FFT ring buffer.
         // All buffers are pre-allocated in initialize() — no audio-thread alloc.
         for channel_samples in buffer.iter_samples() {
@@ -1077,6 +1084,28 @@ impl Plugin for BusChannelStrip {
         // in slot N. Read once up front for dispatch.
         let order = self.module_order();
 
+        #[cfg(feature = "diagnostics")]
+        {
+            let probe = &self.spectrum_data.probe;
+            let aux_channels = aux.inputs.first().map_or(0, |b| b.channels() as u32);
+            if let Some(sc) = aux.inputs.first() {
+                probe.note_stage_peak(
+                    diagnostics::STAGES - 1,
+                    diagnostics::peak(sc.as_slice_immutable()),
+                );
+            }
+            probe.note_stage_peak(0, diagnostics::peak(buffer.as_slice_immutable()));
+            let layout = ((self.params.global.global_bypass.value() as u32) << 31)
+                | ((buffer.channels() as u32 & 0x7F) << 24)
+                | ((aux.inputs.len() as u32 & 0xF) << 20)
+                | ((aux_channels & 0xF) << 16)
+                | (buffer.samples() as u32 & 0xFFFF);
+            let order_bits = order.iter().enumerate().fold(0_u32, |acc, (i, &mt)| {
+                acc | ((module_type_index(mt) as u32) << (3 * i))
+            });
+            probe.note_layout(layout, order_bits);
+        }
+
         // Pultec linear-phase mode owes the host a fixed 512-sample delay.
         // Keep the report in sync with the param every block (a no-op unless
         // it changed), and keep the delay in place through both module and
@@ -1111,7 +1140,8 @@ impl Plugin for BusChannelStrip {
         // Empties are skipped before the dedup check so the slot can be
         // unoccupied in any number of positions without losing pass-through.
         let mut seen = [false; 8];
-        for mt in order {
+        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
+        for (slot, mt) in order.into_iter().enumerate() {
             if mt == ModuleType::Empty {
                 continue;
             }
@@ -1121,6 +1151,10 @@ impl Plugin for BusChannelStrip {
             }
             seen[idx] = true;
             self.dispatch_module(mt, buffer, aux);
+            #[cfg(feature = "diagnostics")]
+            self.spectrum_data
+                .probe
+                .note_stage_peak(slot + 1, diagnostics::peak(buffer.as_slice_immutable()));
         }
 
         // Pultec dropped from the chain but still owes its reported latency
@@ -1195,6 +1229,11 @@ impl Plugin for BusChannelStrip {
                 *sample *= gain;
             }
         }
+
+        #[cfg(feature = "diagnostics")]
+        self.spectrum_data
+            .probe
+            .note_stage_peak(8, diagnostics::peak(buffer.as_slice_immutable()));
 
         ProcessStatus::Normal
     }

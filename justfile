@@ -9,6 +9,7 @@ set dotenv-load := true
 # Feature sets
 FEATURES      := "api5500,buttercomp2,pultec,transformer,punch,haas,dynamic_eq,sheen,gui"
 CORE_FEATURES := "api5500,buttercomp2,pultec,transformer,punch,haas,dynamic_eq,sheen"
+DIAG_FEATURES := FEATURES + ",diagnostics"
 
 # Plugin install paths (Windows) — backslashes required for CMD if/md/copy
 VST3_DIR := "C:\\Program Files\\Common Files\\VST3"
@@ -57,6 +58,13 @@ bundle:
     set "LIBCLANG_PATH=C:/Program Files/LLVM/bin" && \
     cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features {{FEATURES}}
 
+# Bundle with the diagnostics probe: per-slot levels + IO layout logged to %TEMP%\bcs_diag.log
+# every 2 s while the DynEQ spectrum view is open
+bundle-diag:
+    set "LLVM_HOME=C:/Program Files/LLVM" && \
+    set "LIBCLANG_PATH=C:/Program Files/LLVM/bin" && \
+    cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features {{DIAG_FEATURES}}
+
 # Bundle without GUI (faster, no Skia dependency)
 bundle-core:
     cargo +nightly run --package xtask -- bundle bus_channel_strip --release --features {{CORE_FEATURES}}
@@ -87,6 +95,9 @@ install: install-vst3 install-clap
 
 # Bundle and install in one step
 deploy: bundle install
+
+# Bundle with the diagnostics probe and install
+deploy-diag: bundle-diag install
 
 # ── Quality Assurance ─────────────────────────────────────────────────────────
 

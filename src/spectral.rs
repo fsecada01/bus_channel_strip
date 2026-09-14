@@ -26,6 +26,10 @@ pub struct SpectrumData {
     bins: Vec<AtomicU32>,
     /// Audio thread sets this after writing; GUI clears it after reading.
     dirty: AtomicBool,
+    /// Opt-in runtime probe; carried here because this is the one channel already shared
+    /// between the audio thread and the DynEQ view that writes the log.
+    #[cfg(feature = "diagnostics")]
+    pub probe: crate::diagnostics::Probe,
 }
 
 impl SpectrumData {
@@ -33,6 +37,8 @@ impl SpectrumData {
         Self {
             bins: (0..SPECTRUM_BINS).map(|_| AtomicU32::new(0)).collect(),
             dirty: AtomicBool::new(false),
+            #[cfg(feature = "diagnostics")]
+            probe: crate::diagnostics::Probe::new(),
         }
     }
 
@@ -44,6 +50,8 @@ impl SpectrumData {
             // Safety: mag is a valid f32; storing its bits is always defined.
             self.bins[i].store(mag.to_bits(), Ordering::Relaxed);
         }
+        #[cfg(feature = "diagnostics")]
+        self.probe.note_frame_written();
         // Release fence: all bin stores above are visible before this store.
         self.dirty.store(true, Ordering::Release);
     }

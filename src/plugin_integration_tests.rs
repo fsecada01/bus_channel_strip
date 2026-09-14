@@ -618,7 +618,11 @@ mod plugin_integration_tests {
             for (o, d) in l.iter().zip(&dry) {
                 dry_energy += f64::from(d * d);
                 diff_energy += f64::from((o - d) * (o - d));
-                out_peak = out_peak.max(if o.is_finite() { o.abs() } else { f32::INFINITY });
+                out_peak = out_peak.max(if o.is_finite() {
+                    o.abs()
+                } else {
+                    f32::INFINITY
+                });
             }
         }
 
@@ -627,7 +631,13 @@ mod plugin_integration_tests {
             "out_peak={:.1} dBFS wet_vs_dry_difference={change_db:.1} dB",
             20.0 * out_peak.max(1e-9).log10()
         );
-        assert!(out_peak.is_finite() && out_peak > 1e-3, "chain output is silent or non-finite");
-        assert!(change_db > -40.0, "chain output is indistinguishable from its input");
+        assert!(
+            out_peak.is_finite() && out_peak > 1e-3,
+            "chain output is silent or non-finite"
+        );
+        assert!(
+            change_db > -40.0,
+            "chain output is indistinguishable from its input"
+        );
     }
 }

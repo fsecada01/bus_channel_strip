@@ -55,6 +55,8 @@ dynamic_eq = []
 
 # UI system
 gui = ["vizia_plug", "atomic_float"]
+# Opt-in runtime probe: per-slot levels + IO layout logged to %TEMP%\bcs_diag.log (see src/diagnostics.rs)
+diagnostics = []
 # Uncomment the below line to disable the on-by-default VST3 feature to remove
 # the GPL compatibility requirement
 
