@@ -94,7 +94,8 @@ function M.get_profiles(callback)
 end
 
 -- POST /suggest
--- req: { brief, profile_id (optional), current_params (optional table), spectral (optional [4]) }
+-- req: { brief, profile_id (optional), current_params (optional table),
+--        param_info (optional { [ident] = { name, display } }), spectral (optional [4]) }
 -- callback(response_table, error_string)
 function M.suggest(req, callback)
   local body_file = tmpfile('_body.json')

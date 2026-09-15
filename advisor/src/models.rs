@@ -49,8 +49,20 @@ pub struct SuggestRequest {
     /// Keys are NIH-plug stable parameter IDs
     pub current_params: Option<HashMap<String, f32>>,
 
+    /// Display name and formatted value per parameter ID, keyed like `current_params`
+    pub param_info: Option<HashMap<String, ParamInfo>>,
+
     /// Optional real-time spectral band energy [sub_low, low_mid, hi_mid, high]
     pub spectral: Option<[f32; 4]>,
+}
+
+/// Host-reported labels for one parameter, so suggestions can reason in real units
+#[derive(Debug, Deserialize)]
+pub struct ParamInfo {
+    /// Parameter display name, e.g. "DynEQ 1 Freq"
+    pub name: String,
+    /// Current value as the plugin formats it, e.g. "120 Hz"
+    pub display: String,
 }
 
 /// POST /suggest response

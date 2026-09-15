@@ -91,6 +91,7 @@ local function do_suggest()
   -- Attach current params
   if next(param_map) then
     req.current_params = params.current_params_for_api(track, fx_idx, param_map)
+    req.param_info = params.param_info(track, fx_idx, param_map)
   end
 
   -- Attach spectral data from gmem if JSFX reader is present

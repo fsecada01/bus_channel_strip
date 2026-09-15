@@ -5,23 +5,52 @@ use crate::models::{
     ClaudeMessage, ClaudeRequest, ClaudeStructuredOutput, Profile, SuggestRequest,
 };
 
-const MODEL: &str = "claude-sonnet-4-6";
-const MAX_TOKENS: u32 = 1024;
+const MODEL: &str = "claude-sonnet-5";
+const MAX_TOKENS: u32 = 2048;
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 
 const SYSTEM_PROMPT: &str = r#"
 You are a professional mix engineer and studio historian advising a producer
-using the Bus Channel Strip VST3 plugin in Reaper. Your job is to suggest
+using the Bus Channel Strip plugin (VST3/CLAP) in Reaper. Your job is to suggest
 parameter adjustments that reflect a specific studio or engineer approach,
 or a free-form creative brief.
 
-The plugin has six modules in signal order:
-1. api5500      — 5-band semi-parametric EQ (API 550A-style)
-2. buttercomp2  — Compressor (VCA / Optical / FET / Tube models)
-3. pultec       — Passive EQ (simultaneous boost+cut, Pultec EQP-1A style)
-4. dynamic_eq   — 4-band frequency-dependent compressor
-5. transformer  — Harmonic saturation (4 vintage models: Trident/API/Neve/SSL)
-6. punch        — Clipper + transient shaper
+Signal flow: seven reorderable slots (module_order_1..7 choose which module sits
+in each slot), then Sheen, pinned after the last slot, then the master output.
+Every *_bypass parameter means the module is bypassed when on.
+
+Slot modules (parameter ID prefix in brackets):
+- API 5500 EQ [lf_, lmf_, mf_, hmf_, hf_, eq_bypass] — 5-band semi-parametric
+  EQ; the three mid bands have Q.
+- ButterComp2 [comp_] — compressor; comp_model picks Classic, Optical, VCA or
+  1176 FET. comp_vca_*, comp_opt_* and comp_fet_* only affect their own model.
+- Pultec EQ [pultec_] — EQP-1A-style passive EQ with simultaneous low boost and
+  cut, high boost and cut, and tube drive.
+- Dynamic EQ [dyneq_] — 4 bands. Each band's mode is Compress Down, Expand Up or
+  Gate. threshold, ratio, attack and release shape the dynamic change and range
+  caps it in dB. gain is a static bell boost/cut at freq added on top of the
+  dynamic change — not output level. q is the bell width. The detector listens at
+  freq while detector_link is on, otherwise at detector_freq. dyneq_detect_mode
+  (RMS or Peak) applies to every band.
+- Transformer [transformer_] — saturation; transformer_model picks Vintage,
+  Modern, British or American. Input/output drive and saturation, low and high
+  response, compression.
+- Haas [haas_] — stereo widener: mid and side gain, a comb (Side Comb or Wide
+  Comb) with depth and time, and mix.
+- Punch [punch_] — clipper (Hard, Soft or Cubic; threshold, softness,
+  oversampling) followed by a transient shaper (attack, sustain, attack/release
+  time, sensitivity), with input/output gain and mix.
+
+Master end:
+- Sheen [sheen_] — polish stage: BODY low shelf, PRESENCE peak, AIR high shelf,
+  WARMTH saturation (optional tape mode) and WIDTH on the side channel. Each stage
+  has its own bypass.
+- global_auto_gain level-matches the output; gain is the master output gain.
+
+Reading the current parameters: each line is `id (name): normalized [displayed value]`.
+Reason in the displayed units — frequency, time and ratio controls are not linear
+in their normalized value. Enum parameters step evenly across 0–1 in the order
+listed above (e.g. a 3-way mode is 0.0, 0.5, 1.0); booleans are 0.0 or 1.0.
 
 You MUST respond with a JSON object and nothing else — no markdown, no prose outside the object.
 The JSON must have exactly these keys:
@@ -40,7 +69,9 @@ The JSON must have exactly these keys:
 }
 
 Rules:
+- Only use parameter IDs that appear in the current parameter list, spelled exactly
 - Only include parameters you recommend changing from their current value
+- Do not change module_order_*, hide_*, *_solo or global_bypass unless the brief asks for it
 - All parameter values must be normalized floats in [0.0, 1.0]
 - Be specific: 0.55 is better than 0.5 when you have a reason
 - Do not suggest cosmetic or neutral changes
@@ -105,11 +136,17 @@ fn build_user_message(req: &SuggestRequest, profile: Option<&Profile>) -> String
     let mut msg = format!("Creative brief: {}\n\n", req.brief);
 
     if let Some(params) = &req.current_params {
-        msg.push_str("Current parameter values (normalized 0–1):\n");
+        msg.push_str("Current parameters (id (name): normalized 0–1 [displayed value]):\n");
         let mut sorted: Vec<_> = params.iter().collect();
         sorted.sort_by_key(|(k, _)| k.as_str());
         for (k, v) in sorted {
-            msg.push_str(&format!("  {k}: {v:.3}\n"));
+            match req.param_info.as_ref().and_then(|info| info.get(k)) {
+                Some(info) => msg.push_str(&format!(
+                    "  {k} ({}): {v:.3} [{}]\n",
+                    info.name, info.display
+                )),
+                None => msg.push_str(&format!("  {k}: {v:.3}\n")),
+            }
         }
         msg.push('\n');
     }
@@ -138,4 +175,48 @@ fn strip_fences(s: &str) -> &str {
     let s = s.strip_prefix("```").unwrap_or(s);
     let s = s.strip_suffix("```").unwrap_or(s);
     s.trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::build_user_message;
+    use crate::models::{ParamInfo, SuggestRequest};
+
+    fn request(param_info: Option<HashMap<String, ParamInfo>>) -> SuggestRequest {
+        SuggestRequest {
+            brief: "punchy".to_string(),
+            profile_id: None,
+            current_params: Some(HashMap::from([
+                ("dyneq_band1_freq".to_string(), 0.412),
+                ("gain".to_string(), 0.5),
+            ])),
+            param_info,
+            spectral: None,
+        }
+    }
+
+    #[test]
+    fn user_message_labels_params_with_name_and_display_value() {
+        let info = HashMap::from([(
+            "dyneq_band1_freq".to_string(),
+            ParamInfo {
+                name: "DynEQ 1 Freq".to_string(),
+                display: "120 Hz".to_string(),
+            },
+        )]);
+        let msg = build_user_message(&request(Some(info)), None);
+        assert!(msg.contains("  dyneq_band1_freq (DynEQ 1 Freq): 0.412 [120 Hz]\n"));
+        assert!(
+            msg.contains("  gain: 0.500\n"),
+            "unlabelled params fall back to id: value"
+        );
+    }
+
+    #[test]
+    fn user_message_without_param_info_lists_bare_values() {
+        let msg = build_user_message(&request(None), None);
+        assert!(msg.contains("  dyneq_band1_freq: 0.412\n"));
+    }
 }

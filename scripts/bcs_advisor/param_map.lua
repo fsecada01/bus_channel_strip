@@ -81,4 +81,17 @@ function M.current_params_for_api(track, fx, param_map)
   return M.snapshot(track, fx, param_map)
 end
 
+-- Human-readable context for each param, so the advisor reasons about real units
+-- rather than bare normalized numbers.
+-- Returns { [ident] = { name = "DynEQ 1 Freq", display = "120 Hz" } }
+function M.param_info(track, fx, param_map)
+  local info = {}
+  for ident, idx in pairs(param_map) do
+    local _, name = reaper.TrackFX_GetParamName(track, fx, idx, '')
+    local _, display = reaper.TrackFX_GetFormattedParamValue(track, fx, idx, '')
+    info[ident] = { name = name or ident, display = display or '' }
+  end
+  return info
+end
+
 return M
