@@ -197,30 +197,6 @@ pub fn create_param_slider<'c, 'p, P, F>(
     );
 }
 
-// Removed problematic raw param slider function for now
-
-// Reusable bypass button component
-pub fn create_bypass_button<'c, 'p, F>(
-    cx: &'c mut Context,
-    _label: &str,
-    tooltip_id: &'static str,
-    params: &'p Arc<BusChannelStripParams>,
-    param_map: F,
-) where
-    'p: 'c,
-    F: 'static + Clone + Copy + Fn(&Arc<BusChannelStripParams>) -> &BoolParam,
-{
-    attach_tooltip(
-        ParamButton::new(cx, param_map(params))
-            .class("bypass-button")
-            .height(Pixels(28.0))
-            .width(Stretch(1.0))
-            .top(Pixels(0.0))
-            .bottom(Pixels(0.0)),
-        tooltip_id,
-    );
-}
-
 /// Hardware-LED-style bypass button. Visual convention is inverted from the
 /// underlying BoolParam: when the module is ACTIVE (bypass=false) the button
 /// is lit green; when BYPASSED (bypass=true, i.e. ParamButton :checked) it
@@ -343,7 +319,7 @@ pub fn create_dyneq_bool_button<'c, 'p, F>(
             Element::new(cx).height(Pixels(13.0)).width(Stretch(1.0));
             ParamButton::new(cx, param_map(params))
                 .with_label(label)
-                .class("dyneq-toggle-button")
+                .class("compact-toggle-button")
                 .height(Pixels(16.0))
                 .width(Stretch(1.0));
         })

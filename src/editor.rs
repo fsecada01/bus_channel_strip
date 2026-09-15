@@ -1372,14 +1372,11 @@ pub(crate) fn create(
                 // not just routing order.
                 build_preset_header_pill(cx);
 
-                // Chain preset selector — centered, takes remaining space.
+                // Chain preset selector — takes the header's remaining space, its buttons
+                // shrinking toward CHAIN_PRESET_BTN_MIN_PX so the header fits the window.
                 // One button per stock chain; clicking writes all 7
-                // module_order_* params atomically. Replaces the old
-                // signal-flow hint text (the rack itself now teaches the
-                // routing model better than a hint sentence could).
-                build_chain_preset_selector(cx)
-                    .left(Stretch(1.0))
-                    .right(Stretch(1.0));
+                // module_order_* params atomically.
+                build_chain_preset_selector(cx);
 
                 // Theme switcher — Studio (dark) / Daylight (bright neutral).
                 create_theme_toggle(cx);
@@ -1787,6 +1784,7 @@ fn build_chain_preset_selector(cx: &mut Context) -> Handle<'_, VStack> {
         Label::new(cx, "CHAIN PRESETS").class("signal-flow-label");
         HStack::new(cx, |cx| {
             for (i, preset) in CHAIN_PRESETS.iter().enumerate() {
+                let preset_name = preset.name;
                 VStack::new(cx, |cx| {
                     // on_press attached to both labels too — vizia's
                     // on_press only fires on the deepest hovered view, and
@@ -1801,22 +1799,43 @@ fn build_chain_preset_selector(cx: &mut Context) -> Handle<'_, VStack> {
                 .class("chain-preset-btn")
                 .on_press(move |cx| cx.emit(AppEvent::LoadChain(i)))
                 .cursor(CursorIcon::Hand)
-                .width(Pixels(64.0))
+                .tooltip(move |cx| {
+                    Tooltip::new(cx, move |cx| {
+                        Label::new(cx, preset_name);
+                    })
+                })
+                .width(Stretch(1.0))
+                .min_width(Pixels(CHAIN_PRESET_BTN_MIN_PX))
+                .max_width(Pixels(CHAIN_PRESET_BTN_MAX_PX))
                 .height(Pixels(40.0))
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0));
             }
         })
-        .gap(Pixels(4.0))
+        .gap(Pixels(CHAIN_PRESET_GAP_PX))
         .height(Pixels(40.0))
-        .width(Auto)
+        .width(Stretch(1.0))
+        .alignment(Alignment::Center)
         .top(Pixels(0.0))
         .bottom(Pixels(0.0));
     })
     .class("signal-flow-section")
     .height(Auto)
-    .width(Auto)
+    .width(Stretch(1.0))
+    .min_width(Pixels(chain_preset_selector_min_width()))
     .gap(Pixels(4.0))
+}
+
+const CHAIN_PRESET_BTN_MIN_PX: f32 = 36.0;
+const CHAIN_PRESET_BTN_MAX_PX: f32 = 64.0;
+const CHAIN_PRESET_GAP_PX: f32 = 4.0;
+
+/// Narrowest the chain preset band can get before its buttons would overflow it:
+/// every button at its minimum, the gaps, and `.signal-flow-section`'s 8 px side
+/// padding plus its 1 px border.
+fn chain_preset_selector_min_width() -> f32 {
+    let count = CHAIN_PRESETS.len() as f32;
+    count * CHAIN_PRESET_BTN_MIN_PX + (count - 1.0) * CHAIN_PRESET_GAP_PX + 2.0 * (8.0 + 1.0)
 }
 
 // Single toggle chip for the "Studio" / "Daylight" GUI theme (issue #24).
@@ -1887,7 +1906,7 @@ fn create_zoom_controls(cx: &mut Context) {
                 )
                 .on_press(move |cx| cx.emit(AppEvent::SetZoom(level)))
                 .cursor(CursorIcon::Hand)
-                .width(Pixels(36.0))
+                .width(Pixels(32.0))
                 .height(Pixels(24.0))
                 .top(Pixels(0.0))
                 .bottom(Pixels(0.0));
@@ -1909,70 +1928,37 @@ fn create_zoom_controls(cx: &mut Context) {
 
 fn create_master_section(cx: &mut Context) {
     HStack::new(cx, |cx| {
-        // Global bypass — prominently placed so it's always reachable.
+        let params = cx.data::<Data>().params.clone();
+        // Global BYPASS and AUTO GAIN stacked as compact toggles, so the pill stays
+        // narrow enough for the header to fit the window.
         VStack::new(cx, |cx| {
-            Label::new(cx, "BYPASS")
-                .class("param-label")
-                .height(Pixels(16.0))
+            ParamButton::new(cx, &params.global.global_bypass)
+                .with_label("BYPASS")
+                .class("compact-toggle-button")
+                .class("danger")
+                .height(Pixels(22.0))
                 .width(Stretch(1.0));
-            let params = cx.data::<Data>().params.clone();
-            components::create_bypass_button(
-                cx,
-                "BYPASS",
-                crate::tooltips::NO_TOOLTIP,
-                &params,
-                |p| &p.global.global_bypass,
-            );
+            ParamButton::new(cx, &params.global.global_auto_gain)
+                .with_label("AUTO GAIN")
+                .class("compact-toggle-button")
+                .height(Pixels(22.0))
+                .width(Stretch(1.0));
         })
         .height(Auto)
-        .width(Pixels(80.0))
+        .width(Pixels(88.0))
         .gap(Pixels(4.0))
         .top(Pixels(0.0))
         .bottom(Pixels(0.0));
 
-        // Auto-gain compensation toggle. create_bool_button's own wrapper
-        // uses width(Stretch(1.0)) — it requires a non-Auto parent to
-        // stretch against (see the HStack's own width below).
-        components::create_bool_button(
-            cx,
-            "AUTO GAIN",
-            crate::tooltips::NO_TOOLTIP,
-            &cx.data::<Data>().params.clone(),
-            |p| &p.global.global_auto_gain,
-        );
-
-        // Same pattern as the BYPASS label above: Stretch(1.0) on the leaf
-        // Label, inside a wrapping VStack with an explicit non-Auto
-        // width(Pixels(80.0)).
-        VStack::new(cx, |cx| {
-            Label::new(cx, "MASTER")
-                .class("master-label")
-                .height(Pixels(16.0))
-                .width(Stretch(1.0));
-        })
-        .height(Auto)
-        .width(Pixels(80.0))
-        .top(Pixels(0.0))
-        .bottom(Pixels(0.0));
-        // create_gain_slider's own wrapper is also width(Stretch(1.0)) —
-        // same non-Auto-parent requirement as AUTO GAIN above.
-        components::create_gain_slider(
-            cx,
-            "Gain",
-            crate::tooltips::NO_TOOLTIP,
-            &cx.data::<Data>().params.clone(),
-            |p| &p.global.gain,
-        );
+        // create_gain_slider's wrapper is width(Stretch(1.0)), so this row needs
+        // a fixed width to stretch against (an Auto row collapses it to zero).
+        components::create_gain_slider(cx, "MASTER", crate::tooltips::NO_TOOLTIP, &params, |p| {
+            &p.global.gain
+        });
     })
     .class("master-controls")
-    // Real cause of the MASTER-label collision: this row was width(Auto),
-    // so AUTO GAIN's and the Gain slider's width(Stretch(1.0)) wrappers
-    // (from the shared create_bool_button/create_gain_slider helpers) had
-    // nothing to stretch against and collapsed to zero, letting AUTO
-    // GAIN's label bleed into MASTER's space. Needs a fixed (not Stretch)
-    // width since this is a compact pill, not a fill element.
-    .width(Pixels(470.0))
-    .gap(Pixels(12.0));
+    .width(Pixels(260.0))
+    .gap(Pixels(8.0));
 }
 
 // ============================================================================

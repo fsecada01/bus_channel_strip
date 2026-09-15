@@ -45,9 +45,9 @@ pub const COMPONENT_STYLES: &str = r#"
     background-image: linear-gradient(180deg, #2d323c 0%, #24282f 35%, #1b1f27 75%, #151922 100%);
     border-bottom: 2px solid #373c46;
     border-top: 1px solid #4a5162;
-    padding: 12px 16px;
+    padding: 12px 12px;
     border-radius: 8px 8px 0 0;
-    gap: 16px;
+    gap: 8px;
     alignment: center;
 }
 
@@ -62,7 +62,7 @@ pub const COMPONENT_STYLES: &str = r#"
     background-color: #c8a04a;
     border: 2px solid #806020;
     border-radius: 4px;
-    padding: 8px 16px;
+    padding: 8px 12px;
 }
 
 .brand-plate-brass:hover {
@@ -86,10 +86,9 @@ pub const COMPONENT_STYLES: &str = r#"
 }
 
 .chassis-title {
-    font-size: 20px;
+    font-size: 16px;
     font-weight: 700;
     color: #f0ead6;
-    margin-left: 24px;
 }
 
 .master-controls {
@@ -289,7 +288,7 @@ pub const COMPONENT_STYLES: &str = r#"
 /* Signal flow indicator — subtle pill that blends into the chassis header
    gradient instead of reading as a separate framed block. */
 .signal-flow-section {
-    padding: 8px 16px;
+    padding: 8px 8px;
     background-color: transparent;
     background-image: linear-gradient(180deg, rgba(14, 18, 23, 0.5), rgba(10, 13, 18, 0.55));
     border-radius: 6px;
@@ -319,6 +318,7 @@ pub const COMPONENT_STYLES: &str = r#"
     alignment: center;
     padding: 4px;
     gap: 1px;
+    overflow: hidden;
 }
 
 .chain-preset-btn:hover {
@@ -344,6 +344,8 @@ pub const COMPONENT_STYLES: &str = r#"
     letter-spacing: 0.5px;
     text-transform: uppercase;
     text-align: center;
+    text-wrap: false;
+    text-overflow: ellipsis;
     width: 1s;
     height: 12px;
 }
@@ -489,6 +491,8 @@ pub const COMPONENT_STYLES: &str = r#"
     font-weight: 700;
     color: #c0c8d4;
     letter-spacing: 0.5px;
+    text-wrap: false;
+    text-overflow: ellipsis;
     height: 14px;
     width: Auto;
 }
@@ -1774,8 +1778,9 @@ scrollbar .thumb:hover {
     color: #ffffff;
 }
 
-/* Compact DynEQ toggle (detector LINK): neutral when off, green when on (:checked). */
-.dyneq-toggle-button {
+/* Compact toggle (DynEQ detector LINK, master AUTO GAIN/BYPASS): neutral when off,
+   green when on (:checked), red when a `.danger` toggle is on. */
+.compact-toggle-button {
     background-color: transparent;
     background-image: linear-gradient(145deg, #2a3038, #1f242c);
     border: 1px solid #3a4050;
@@ -1788,16 +1793,23 @@ scrollbar .thumb:hover {
     text-align: center;
 }
 
-.dyneq-toggle-button:hover {
+.compact-toggle-button:hover {
     background-color: transparent;
     border-color: #4a5160;
 }
 
-.dyneq-toggle-button:checked {
+.compact-toggle-button:checked {
     background-color: transparent;
     background-image: linear-gradient(145deg, #1c2a1c, #142014);
     border-color: #4dbd4d;
     color: #8fe08f;
+}
+
+.compact-toggle-button.danger:checked {
+    background-color: transparent;
+    background-image: linear-gradient(145deg, #8a2a2a, #6e1f1f);
+    border-color: #d05050;
+    color: #ffffff;
 }
 
 /* Responsive adjustments */
@@ -2090,8 +2102,6 @@ scrollbar .thumb:hover {
 .zoom-75 .param-label        { font-size: 9px;  }
 .zoom-75 .dyneq-param-label  { font-size: 9px;  }
 .zoom-75 .dyneq-band-title   { font-size: 10px; }
-.zoom-75 .chassis-brand      { font-size: 13px; }
-.zoom-75 .chassis-title      { font-size: 10px; }
 
 .zoom-125 .module-name       { font-size: 18px; }
 .zoom-125 .module-type       { font-size: 15px; }
@@ -2099,8 +2109,6 @@ scrollbar .thumb:hover {
 .zoom-125 .param-label       { font-size: 14px; }
 .zoom-125 .dyneq-param-label { font-size: 14px; }
 .zoom-125 .dyneq-band-title  { font-size: 15px; }
-.zoom-125 .chassis-brand     { font-size: 22px; }
-.zoom-125 .chassis-title     { font-size: 16px; }
 
 .zoom-150 .module-name       { font-size: 22px; }
 .zoom-150 .module-type       { font-size: 18px; }
@@ -2108,8 +2116,6 @@ scrollbar .thumb:hover {
 .zoom-150 .param-label       { font-size: 16px; }
 .zoom-150 .dyneq-param-label { font-size: 16px; }
 .zoom-150 .dyneq-band-title  { font-size: 18px; }
-.zoom-150 .chassis-brand     { font-size: 26px; }
-.zoom-150 .chassis-title     { font-size: 19px; }
 
 .zoom-200 .module-name       { font-size: 28px; }
 .zoom-200 .module-type       { font-size: 23px; }
@@ -2117,8 +2123,6 @@ scrollbar .thumb:hover {
 .zoom-200 .param-label       { font-size: 20px; }
 .zoom-200 .dyneq-param-label { font-size: 20px; }
 .zoom-200 .dyneq-band-title  { font-size: 23px; }
-.zoom-200 .chassis-brand     { font-size: 34px; }
-.zoom-200 .chassis-title     { font-size: 25px; }
 
 "#;
 
